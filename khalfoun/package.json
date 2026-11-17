@@ -1,0 +1,25 @@
+{
+  "name": "khalfoun",
+  "productName": "خلفون",
+  "version": "0.1.0",
+  "description": "خلفون: مساعد كرتوني عُماني يعيش على سطح المكتب، يسمع الأوامر الصوتية وينفذها ويتفاعل بالمشاعر.",
+  "type": "module",
+  "main": "src/main/main.js",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"tests/**/*.test.js\"",
+    "test:ui": "node tools/ui-check.mjs",
+    "smoke": "node tools/smoke.mjs",
+    "preview": "node tools/serve.mjs",
+    "icon": "node tools/make-icon.mjs",
+    "check": "npm test && npm run smoke"
+  },
+  "devDependencies": {
+    "electron": "33.4.11"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

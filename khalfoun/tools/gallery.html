@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>خلفون — معرض التعابير</title>
+<link rel="stylesheet" href="../assets/fonts/fonts.css">
+<style>
+  body { margin: 0; padding: 16px; font-family: Tajawal, sans-serif; background: #f4efe4; color: #2a1a10; }
+  h1 { margin: 0 0 12px; font-size: 22px; }
+  .grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+  .cell { background: #fffdf7; border: 1px solid #e6dfcf; border-radius: 12px; padding: 6px; text-align: center; }
+  .cell .c { width: 150px; height: 184px; margin: 0 auto; }
+  .cell b { display: block; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1 id="title">خلفون: التعابير والحركات</h1>
+<div id="grid" class="grid"></div>
+<script type="module">
+import { createCharacter, FACES } from '../src/renderer/character.js';
+import { ANIMATIONS } from '../src/renderer/animations.js';
+import { EMOTION_LABELS } from '../src/core/emotions.js';
+const grid = document.getElementById('grid');
+const params = new URLSearchParams(location.search);
+const mode = params.get('mode') || 'faces';
+const items = mode === 'faces'
+  ? Object.keys(FACES).map((e) => ({ label: EMOTION_LABELS[e], emotion: e, intensity: 2, anim: null }))
+  : (params.get('list') || 'walk,run,jump,celebrate,wave,cast,think,listen,laugh,dance,knock,sleep,trip,dangle,coffee,flex,sneeze,clap').split(',').map((a) => ({ label: a, emotion: 'happy', intensity: 1, anim: a }));
+for (const it of items) {
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  const c = document.createElement('div');
+  c.className = 'c';
+  cell.appendChild(c);
+  const b = document.createElement('b');
+  b.textContent = it.label;
+  cell.appendChild(b);
+  grid.appendChild(cell);
+  const ch = createCharacter(c);
+  ch.setEmotion({ emotion: it.emotion, intensity: it.intensity, secondary: null });
+  const anim = it.anim ? ANIMATIONS[it.anim] : null;
+  const t = anim ? anim.dur * (anim.loop ? 0.3 : 0.45) : 0;
+  for (let i = 0; i < 30; i += 1) ch.render(1 / 30, anim ? anim.pose(t, 1) : ANIMATIONS.idle.pose(0, 1));
+}
+document.body.dataset.ready = '1';
+</script>
+</body>
+</html>

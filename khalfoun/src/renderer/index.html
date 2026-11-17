@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; media-src 'self' blob:; connect-src 'self'; worker-src 'self'">
+  <title>خلفون</title>
+  <link rel="stylesheet" href="../../assets/fonts/fonts.css">
+  <link rel="stylesheet" href="overlay.css">
+</head>
+<body>
+  <div id="stage" class="stage" aria-live="off"></div>
+
+  <div id="bubble" class="bubble" role="status" aria-live="polite" hidden>
+    <p id="bubble-text"></p>
+  </div>
+
+  <form id="command" class="command" hidden autocomplete="off">
+    <button type="button" id="mic" class="icon-btn mic" aria-label="تحدث" title="تحدث (Ctrl+Shift+Space)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
+      <span id="mic-level" class="mic-level"></span>
+    </button>
+    <input id="command-input" type="text" maxlength="300" placeholder="اكتب أمرك… مثلاً: افتح الحاسبة" aria-label="أمر لخلفون">
+    <button type="submit" class="icon-btn send" aria-label="أرسل">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12l18-9-6 18-3-7-9-2z"/></svg>
+    </button>
+  </form>
+
+  <section id="onboarding" class="panel" hidden aria-labelledby="ob-title">
+    <h1 id="ob-title">أهلاً! أنا خلفون</h1>
+    <p class="lead">مساعدك العُماني. قبل ما أبدأ، أبغى أعرفك وأعرف شو تسمح لي أسوي على جهازك.</p>
+    <label class="field">
+      <span>شو اسمك؟</span>
+      <input id="ob-name" type="text" maxlength="40" placeholder="مثلاً: عبدالرحيم">
+    </label>
+    <fieldset class="levels">
+      <legend>كم تسمح لي؟</legend>
+      <label class="level"><input type="radio" name="ob-level" value="1"><b>التعارف</b><small>أتجول وأتفاعل وأسمع، دون لمس أي برنامج</small></label>
+      <label class="level"><input type="radio" name="ob-level" value="2" checked><b>المساعد</b><small>أفتح البرامج والمواقع وأضبط الصوت، وأستأذن قبل أي تعديل</small></label>
+      <label class="level"><input type="radio" name="ob-level" value="3"><b>الثقة الكاملة</b><small>أنفذ مباشرة، وأستأذن فقط قبل الحذف والإرسال</small></label>
+    </fieldset>
+    <div class="row">
+      <span class="row-label">المزاح</span>
+      <div class="seg" role="radiogroup" aria-label="مستوى المزاح">
+        <label><input type="radio" name="ob-humor" value="0"><span>هادئ</span></label>
+        <label><input type="radio" name="ob-humor" value="1" checked><span>عادي</span></label>
+        <label><input type="radio" name="ob-humor" value="2"><span>مجنون</span></label>
+      </div>
+    </div>
+    <label class="check"><input id="ob-kids" type="checkbox"> وضع الأطفال: لا تعديل للملفات، ومواقع آمنة فقط</label>
+    <button id="ob-go" type="button" class="primary">تفضل يا خلفون</button>
+    <p class="fine">تقدر تغيّر هذا كله بعدين من الإعدادات. كلامك ومعلوماتك تبقى على جهازك.</p>
+  </section>
+
+  <section id="settings" class="panel" hidden aria-labelledby="st-title">
+    <div class="panel-head">
+      <h2 id="st-title">إعدادات خلفون</h2>
+      <button id="st-close" type="button" class="icon-btn" aria-label="إغلاق">✕</button>
+    </div>
+    <label class="field"><span>اسمك</span><input id="st-name" type="text" maxlength="40"></label>
+    <fieldset class="levels">
+      <legend>مستوى الإذن</legend>
+      <label class="level"><input type="radio" name="st-level" value="1"><b>التعارف</b><small>يتجول ويتفاعل فقط</small></label>
+      <label class="level"><input type="radio" name="st-level" value="2"><b>المساعد</b><small>يفتح ويضبط، ويستأذن قبل التعديل</small></label>
+      <label class="level"><input type="radio" name="st-level" value="3"><b>الثقة الكاملة</b><small>يستأذن فقط قبل الحذف والإرسال</small></label>
+    </fieldset>
+    <div class="row">
+      <span class="row-label">المزاح</span>
+      <div class="seg" role="radiogroup" aria-label="مستوى المزاح">
+        <label><input type="radio" name="st-humor" value="0"><span>هادئ</span></label>
+        <label><input type="radio" name="st-humor" value="1"><span>عادي</span></label>
+        <label><input type="radio" name="st-humor" value="2"><span>مجنون</span></label>
+      </div>
+    </div>
+    <label class="check"><input id="st-kids" type="checkbox"> وضع الأطفال</label>
+    <p id="st-voice" class="fine"></p>
+    <h3>آخر ما سويته</h3>
+    <ol id="st-log" class="log"></ol>
+    <div class="actions">
+      <button id="st-forget" type="button" class="ghost">انسَ كل شي</button>
+      <button id="st-quit" type="button" class="ghost danger">إغلاق خلفون</button>
+    </div>
+  </section>
+
+  <script type="module" src="overlay.js"></script>
+</body>
+</html>
