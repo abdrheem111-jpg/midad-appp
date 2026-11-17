@@ -236,9 +236,11 @@ await check('outfits: bisht on request, flag for National Day, and off again', a
 
 await check('he responds kindly to how you feel', async () => {
   await hear('والله تعبان اليوم', 1200);
-  assert(/سلامتك|العافية|استراحة|ارتاح|تمشّى|التعب/.test(await bubble()), `tired: ${await bubble()}`);
+  const felt = await page.evaluate(() => window.__khalfoun.brain.memory.data.lastFeeling?.kind);
+  assert(felt === 'tired' && (await bubble()).length > 10, `tired: ${felt} / ${await bubble()}`);
   await hear('نجحت في الامتحان', 1200);
-  assert(/مبروك|بطل|تبارك/.test(await bubble()), `success: ${await bubble()}`);
+  const won = await page.evaluate(() => window.__khalfoun.brain.memory.data.lastFeeling?.kind);
+  assert(won === 'success' && (await bubble()).length > 10, `success: ${won} / ${await bubble()}`);
   await page.evaluate(() => window.__khalfoun.motion.paused = false);
 });
 

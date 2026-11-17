@@ -89,7 +89,7 @@ test('every animation produces finite numbers for its whole duration', () => {
       }
     }
   }
-  assert.ok(Object.keys(ANIMATIONS).length >= 40, `${Object.keys(ANIMATIONS).length} animations`);
+  assert.ok(Object.keys(ANIMATIONS).length >= 60, `${Object.keys(ANIMATIONS).length} animations`);
 });
 
 test('every animation hint in the reply bank and every emotion has an animation', () => {

@@ -17,7 +17,7 @@ import { SoundPlayer, ANIMATION_SOUND } from './sounds.js';
 const CHAR_W = 170;
 const CHAR_H = 209;
 const PREVIEW_TASKBAR = 44;
-const IDLE_ANIMS = ['look_around', 'whistle', 'stretch', 'adjust', 'peek', 'sneeze', 'flex', 'yawn', 'scratch', 'spin', 'coffee', 'cheeky', 'think'];
+const IDLE_ANIMS = ['look_around', 'whistle', 'stretch', 'adjust', 'peek', 'sneeze', 'flex', 'yawn', 'scratch', 'spin', 'coffee', 'cheeky', 'think', 'read', 'sway', 'tiptoe', 'bounce', 'fan', 'shrug', 'idea'];
 
 const $ = (id) => document.getElementById(id);
 const bridge = getBridge();
@@ -90,7 +90,7 @@ function handle(reply) {
     case 'away': motion.goAway(); break;
     case 'sleep': motion.sleep(); break;
     case 'wake': motion.wake(); break;
-    case 'dance': animator.play('dance', 4.8); break;
+    case 'dance': if (!reply.animation || reply.animation === 'dance') animator.play(Math.random() < 0.5 ? 'cane_dance' : 'dance', 4.8); else animator.play(reply.animation, 4.8); break;
     case 'jump': animator.play('jump'); break;
     case 'stop': motion.stop(); animator.stop(); break;
     case 'open_settings': openSettings(); break;

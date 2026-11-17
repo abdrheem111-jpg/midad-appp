@@ -114,7 +114,7 @@ test('template bank is well formed', () => {
     assert.ok(!/\{minutes\}/.test(t.t), `${t.id} uses removed variable`);
     if (t.h !== undefined) assert.ok([0, 1, 2].includes(t.h));
   }
-  assert.ok(TEMPLATES.length >= 180, `only ${TEMPLATES.length} templates`);
+  assert.ok(TEMPLATES.length >= 400, `only ${TEMPLATES.length} templates`);
 });
 
 test('every situation the brain can produce has replies', () => {
