@@ -86,7 +86,7 @@ try {
   typeCommand('افتح المفكرة');
   const heard = await until(async () => /heard «افتح المفكرة»/.test(await readLog()), 10000);
   step('typed «افتح المفكرة» reaches him', heard);
-  step('the open action runs', await until(async () => /action open .*→ ok/.test(await readLog()), 10000));
+  step('the open action runs', await until(async () => /action open_app .*→ ok/.test(await readLog()), 10000));
   step('Notepad actually opens', await until(async () => Number(notepadCount()) > before, 10000), `notepad processes: ${notepadCount()}`);
 } finally {
   console.log('\n----- khalfoun-log.txt -----');
