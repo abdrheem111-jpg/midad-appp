@@ -12,11 +12,13 @@ const electron = createRequire(import.meta.url)('electron');
 const userData = await mkdtemp(join(tmpdir(), 'khalfoun-smoke-'));
 const env = { ...process.env, KHALFOUN_SMOKE: '1', KHALFOUN_USER_DATA: userData };
 delete env.NODE_OPTIONS;
-const args = [root];
-let cmd = electron;
+// KHALFOUN_APP_EXE runs an installed or packaged copy instead of the source tree.
+const exe = process.env.KHALFOUN_APP_EXE;
+const args = exe ? [] : [root];
+let cmd = exe || electron;
 if (process.platform === 'linux') {
   args.push('--no-sandbox', '--disable-gpu');
-  if (!process.env.DISPLAY) { args.unshift('-a', '-s', '-screen 0 1280x800x24', electron); cmd = 'xvfb-run'; }
+  if (!process.env.DISPLAY) { args.unshift('-a', '-s', '-screen 0 1280x800x24', cmd); cmd = 'xvfb-run'; }
 }
 const child = spawn(cmd, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
 let out = '';

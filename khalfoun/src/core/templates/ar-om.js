@@ -303,6 +303,11 @@ export const TEMPLATES = [
   { id: 'fo1', s: 'feel_followup', t: 'آخر مرة قلت إنك {feeling}، عساك أحسن اليوم؟', a: 'shy' },
   { id: 'fo2', s: 'feel_followup', t: 'شحالك اليوم؟ كنت {feeling}، إن شاء الله صرت زين.', a: 'nod' },
 
+  // ---------- thinking (waiting for the local model) ----------
+  { id: 'tk_1', s: 'thinking', t: 'همم... خلني أفكر.', a: 'think' },
+  { id: 'tk_2', s: 'thinking', t: 'دقيقة، أفكر فيها...', a: 'think' },
+  { id: 'tk_3', s: 'thinking', t: 'سؤال زين! خلني أشغّل مخي.', h: 1, a: 'think' },
+
   // ---------- outfits ----------
   { id: 'cs_b1', s: 'costume_bisht', t: 'لبست البشت! شرايك، أشبه الشيوخ؟', a: 'proud' },
   { id: 'cs_b2', s: 'costume_bisht', t: 'البشت عليّ يزين، صح؟', h: 1, a: 'flex' },

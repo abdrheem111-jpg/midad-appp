@@ -18,6 +18,7 @@ import { createPlatform } from './actions/platform.js';
 import { createExecutor } from './actions/index.js';
 import { findWhisper, transcribe } from './stt.js';
 import { WindowWatcher } from './windows-watcher.js';
+import { ChatClient, findLocalModel } from './chat.js';
 import { LEVEL_INFO } from '../core/permissions.js';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -44,6 +45,8 @@ let settings = { ...DEFAULT_SETTINGS };
 let whisper = { available: false, bin: null, model: null, wakeModel: null };
 const reminders = new Set();
 let watcher = null;
+let chat = null; // ChatClient when a local model is found
+let chatInfo = null;
 
 const send = (type, data = {}) => {
   if (win && !win.isDestroyed()) win.webContents.send('khalfoun:event', { type, ...data });
@@ -181,6 +184,7 @@ function sanitizeSettingsPatch(patch) {
   if ('level' in patch) out.level = Math.min(3, Math.max(1, Math.round(Number(patch.level)) || 1));
   if ('kidsMode' in patch) out.kidsMode = !!patch.kidsMode;
   if (patch.onboarded === true) out.onboarded = true;
+  if ('chatEnabled' in patch) out.chatEnabled = !!patch.chatEnabled;
   return out;
 }
 
@@ -196,7 +200,7 @@ function setupIpc(stores, executor) {
   ipcMain.handle('state:load', async (event) => {
     if (!fromApp(event)) return null;
     const memory = await stores.memory.read();
-    return { memory: Object.keys(memory).length ? memory : null, settings, voice: { available: whisper.available }, platform: process.platform };
+    return { memory: Object.keys(memory).length ? memory : null, settings, voice: { available: whisper.available }, chat: { available: Boolean(chat), model: chatInfo?.model || null }, platform: process.platform };
   });
 
   ipcMain.handle('memory:save', async (event, data) => {
@@ -253,6 +257,15 @@ function setupIpc(stores, executor) {
   ipcMain.on('ui:interactive', (event, on) => {
     if (!fromApp(event) || !win) return;
     win.setIgnoreMouseEvents(!on, { forward: true });
+  });
+
+  ipcMain.handle('chat:reply', async (event, payload) => {
+    if (!fromApp(event)) return { ok: false, error: 'forbidden' };
+    if (!chat || settings.chatEnabled === false) return { ok: false, error: 'chat_unavailable' };
+    const p = payload && typeof payload === 'object' ? payload : {};
+    const history = Array.isArray(p.history) ? p.history.slice(-4).map((h) => ({ user: String(h?.user || ''), khalfoun: String(h?.khalfoun || '') })) : [];
+    // Kids mode comes from the main process settings, not from the page.
+    return chat.reply({ text: String(p.text || '').slice(0, 500), name: String(p.name || '').slice(0, 40), humor: Number(p.humor) || 1, history, kidsMode: !!settings.kidsMode });
   });
 
   ipcMain.on('ui:watch-windows', (event, on) => {
@@ -371,6 +384,16 @@ async function start() {
   });
   setupIpc(stores, executor);
   createWindow();
+  // Look for a local language model now and every five minutes until one appears.
+  const lookForModel = async () => {
+    if (chat) return;
+    chatInfo = await findLocalModel();
+    if (chatInfo) chat = new ChatClient(chatInfo);
+  };
+  if (!SMOKE) {
+    lookForModel().catch(() => {});
+    setInterval(() => lookForModel().catch(() => {}), 5 * 60 * 1000);
+  }
   if (!SMOKE) {
     buildTray();
     registerShortcuts();

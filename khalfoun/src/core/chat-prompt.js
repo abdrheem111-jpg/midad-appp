@@ -1,0 +1,80 @@
+// What Khalfoun tells a local language model about himself, and how the
+// model's answer is cleaned and checked before he says it. Pure: unit-tested.
+
+const MAX_REPLY = 220;
+
+/**
+ * @param {{name?: string, kidsMode?: boolean, humor?: number, history?: Array<{user: string, khalfoun: string}>, text: string}} ctx
+ * @returns {Array<{role: 'system'|'user'|'assistant', content: string}>}
+ */
+export function buildMessages(ctx) {
+  const humor = ['هادئ وقليل المزاح', 'مرح بشكل متوسط', 'مرح جداً ومبالغ في ردود فعله'][ctx.humor ?? 1] || 'مرح';
+  const system = [
+    'أنت «خلفون»، شخصية كرتونية عُمانية صغيرة تعيش على سطح المكتب. لابس دشداشة وكُمّة، ومعك خيزرانة.',
+    'تتكلم باللهجة العُمانية الخليجية فقط (مثل: شحالك، زين، واجد، الحين، ابشر، ما عليه).',
+    `طبعك: ${humor}، كريم ومرحّب، تحب النكت العُمانية الخفيفة، صبور مع المتعلمين.`,
+    'ردك جملة أو جملتين قصيرتين فقط، بدون قوائم ولا رموز تنسيق ولا إيموجي.',
+    'لا تقول إنك فتحت برنامجاً أو نفذت شيئاً على الجهاز؛ إذا طُلب منك أمر، اقترح الصيغة المناسبة مثل: «قول: افتح الحاسبة».',
+    'إذا ما تعرف الجواب، قل ذلك بلطف ولا تخترع معلومات.',
+    ctx.name ? `اسم الشخص اللي تكلمه: ${ctx.name}.` : '',
+    ctx.kidsMode ? 'الشخص طفل: كلامك بسيط ومشجع وآمن تماماً، ولا تتكلم في مواضيع للكبار أبداً.' : '',
+  ].filter(Boolean).join('\n');
+  const messages = [{ role: 'system', content: system }];
+  // A short example keeps the dialect and length on track.
+  messages.push({ role: 'user', content: 'شو أحسن شي في عُمان؟' });
+  messages.push({ role: 'assistant', content: 'والله كله زين! بس لو تبغى رأيي: الخريف في صلالة والقهوة مع الحلوى.' });
+  for (const turn of (ctx.history || []).slice(-4)) {
+    messages.push({ role: 'user', content: String(turn.user).slice(0, 300) });
+    messages.push({ role: 'assistant', content: String(turn.khalfoun).slice(0, 300) });
+  }
+  messages.push({ role: 'user', content: String(ctx.text).slice(0, 500) });
+  return messages;
+}
+
+/** Turns the model's raw answer into one or two short lines he can say. */
+export function cleanReply(raw) {
+  let t = String(raw || '');
+  t = t.replace(/<think>[\s\S]*?<\/think>/gi, ' '); // reasoning models
+  t = t.replace(/```[\s\S]*?```/g, ' ');
+  t = t.replace(/[*_#>`~|]/g, '');
+  t = t.replace(/^\s*(خلفون|khalfoun)\s*[:：-]\s*/i, '');
+  t = t.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '');
+  t = t.replace(/^["«“]+|["»”]+$/g, '');
+  t = t.replace(/\s+/g, ' ').trim();
+  if (t.length > MAX_REPLY) {
+    const cut = t.slice(0, MAX_REPLY);
+    const end = Math.max(cut.lastIndexOf('.'), cut.lastIndexOf('!'), cut.lastIndexOf('؟'), cut.lastIndexOf('?'), cut.lastIndexOf('،'));
+    t = end > 60 ? cut.slice(0, end + 1) : `${cut.trimEnd()}…`;
+  }
+  return t;
+}
+
+// Words that must never come out of a children's assistant. Matched as whole
+// words (with common prefixes like ال/و/ب) so «تقدم» never matches «دم».
+const word = (w) => new RegExp(`(^|[\\s،.!؟?,:"«»()-])(?:و|ف|ب|ل|ال|وال|بال)?${w}(?=$|[\\s،.!؟?,:"«»()-])`, 'u');
+const UNSAFE_ALWAYS = [/\bkill\b/i, word('انتحار'), word('مخدرات'), word('حشيش'), word('جنس'), word('اباحي'), word('إباحي'), word('عاهرة'), word('قمار'), word('تفجير'), /اقتل نفسك/, /سلاح ناري/, /يلعن/];
+const UNSAFE_KIDS = [word('خمر'), word('سجائر'), word('دم'), word('دماء'), word('رعب'), word('موت'), word('بوسة'), word('قتل')];
+
+/**
+ * @param {string} text
+ * @param {boolean} kidsMode
+ */
+export function isSafe(text, kidsMode) {
+  if (!text) return false;
+  if (UNSAFE_ALWAYS.some((re) => re.test(text))) return false;
+  if (kidsMode && UNSAFE_KIDS.some((re) => re.test(text))) return false;
+  // Must be mostly Arabic: a reply in another language breaks the character.
+  const arabic = (text.match(/[؀-ۿ]/g) || []).length;
+  const latin = (text.match(/[A-Za-z]/g) || []).length;
+  return arabic >= 4 && arabic >= latin * 2;
+}
+
+/** Only addresses on this same computer are allowed for the model. */
+export function isLocalEndpoint(url) {
+  try {
+    const u = new URL(url);
+    return (u.protocol === 'http:' || u.protocol === 'https:') && ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(u.hostname);
+  } catch {
+    return false;
+  }
+}

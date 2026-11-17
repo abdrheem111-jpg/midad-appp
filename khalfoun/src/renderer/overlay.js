@@ -32,6 +32,7 @@ const workArea = () => ({ width: window.innerWidth, height: window.innerHeight -
 
 let brain;
 let voiceAvailable = false;
+let chatInfo = { available: false, model: null };
 const character = createCharacter(els.stage);
 const animator = new Animator();
 const motion = new Motion(workArea(), { width: CHAR_W, height: CHAR_H });
@@ -103,10 +104,33 @@ async function runAction(action) {
   handle(brain.actionResult(action.id, result));
 }
 
+let chatting = false;
+const chatOn = () => chatInfo.available && brain.memory.data.chatEnabled !== false && typeof bridge.chat === 'function';
+
 function hear(text) {
   const t = String(text || '').trim();
   if (!t) return;
-  handle(brain.hear(t));
+  const reply = brain.hear(t);
+  if (reply?.situation === 'not_understood' && reply.unknownText && chatOn() && !chatting) {
+    askModel(t, reply);
+    return;
+  }
+  handle(reply);
+}
+
+/** Lets the local model answer what his built-in rules do not understand. */
+async function askModel(text, fallback) {
+  chatting = true;
+  handle(brain.reply('thinking'));
+  try {
+    const d = brain.memory.data;
+    const res = await bridge.chat({ text, history: brain.chatHistory, name: d.name, humor: d.humor });
+    handle(res?.ok && res.text ? brain.chatReply(text, res.text) : fallback);
+  } catch {
+    handle(fallback);
+  } finally {
+    chatting = false;
+  }
 }
 
 // ---------------------------------------------------------------- command box
@@ -359,6 +383,11 @@ function openSettings() {
   radio('st-humor', d.humor);
   $('st-kids').checked = !!d.kidsMode;
   $('st-listen').checked = !!d.alwaysListen;
+  $('st-chat').checked = d.chatEnabled !== false;
+  $('st-chat').disabled = !chatInfo.available;
+  $('st-chat-info').textContent = chatInfo.available
+    ? `النموذج المستخدم: ${chatInfo.model}. يعمل على جهازك فقط.`
+    : 'لا يوجد نموذج محلي الآن. ثبّت Ollama وشغّل نموذجاً (انظر README) فيكتشفه خلفون تلقائياً.';
   $('st-windows').checked = d.walkOnWindows !== false;
   $('st-listen').disabled = !voiceAvailable;
   $('st-voice').textContent = voiceAvailable
@@ -414,6 +443,11 @@ $('st-kids').addEventListener('change', async () => {
   const res = await bridge.updateSettings({ kidsMode: want });
   if (res?.ok) brain.updateSettings({ kidsMode: res.settings.kidsMode });
   $('st-kids').checked = !!brain.memory.data.kidsMode;
+});
+$('st-chat').addEventListener('change', async () => {
+  const want = $('st-chat').checked;
+  const res = await bridge.updateSettings({ chatEnabled: want });
+  brain.memory.set({ chatEnabled: res?.ok ? res.settings.chatEnabled !== false : !want });
 });
 $('st-windows').addEventListener('change', () => {
   brain.memory.set({ walkOnWindows: $('st-windows').checked });
@@ -514,6 +548,7 @@ window.addEventListener('resize', () => { motion.setArea(workArea()); applyWindo
 async function start() {
   const loaded = await bridge.loadState();
   voiceAvailable = !!loaded?.voice?.available;
+  chatInfo = { available: !!loaded?.chat?.available, model: loaded?.chat?.model || null };
   const memoryData = { ...(loaded?.memory || {}), ...(loaded?.settings || {}) };
   let saveTimer = null;
   brain = new Brain({

@@ -67,6 +67,20 @@ jobs:
       - run: npm ci
       - name: Build installer
         run: npm run dist:win
+      - name: Self-test the packaged app
+        env:
+          KHALFOUN_APP_EXE: ${{ github.workspace }}\khalfoun\dist\win-unpacked\Khalfoun.exe
+        run: npm run smoke
+      - name: Install silently, then self-test the installed app
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\*.exe | Select-Object -First 1
+          Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait
+          $installed = Join-Path $env:LOCALAPPDATA 'Programs\Khalfoun\Khalfoun.exe'
+          if (-not (Test-Path $installed)) { Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Recurse -Filter Khalfoun.exe | Select-Object -First 1 | ForEach-Object { $installed = $_.FullName } }
+          Write-Host "Installed at $installed"
+          $env:KHALFOUN_APP_EXE = $installed
+          npm run smoke
       - uses: actions/upload-artifact@v4
         with:
           name: Khalfoun-Windows-Installer

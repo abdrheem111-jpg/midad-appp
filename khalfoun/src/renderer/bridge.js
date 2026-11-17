@@ -17,6 +17,8 @@ function createPreviewBridge() {
   // ?fakevoice=1 pretends speech recognition is installed and answers from
   // window.__fakeTranscripts, so the whole voice path can be tested in a browser.
   const fakeVoice = typeof location !== 'undefined' && new URLSearchParams(location.search).has('fakevoice');
+  const fakeChat = typeof location !== 'undefined' && new URLSearchParams(location.search).has('fakechat');
+  const chatCalls = [];
   const transcribeCalls = [];
   const listeners = new Set();
   const emit = (ev) => listeners.forEach((cb) => cb(ev));
@@ -28,6 +30,7 @@ function createPreviewBridge() {
         memory: readJSON(MEM_KEY),
         settings: readJSON(SET_KEY) || { onboarded: false, level: 0, kidsMode: false },
         voice: { available: fakeVoice },
+        chat: { available: fakeChat, model: fakeChat ? 'test-model' : null },
         platform: 'preview',
       };
     },
@@ -55,6 +58,13 @@ function createPreviewBridge() {
       const queue = window.__fakeTranscripts || [];
       return { ok: true, text: queue.length ? queue.shift() : '' };
     },
+    async chat(payload) {
+      if (!fakeChat) return { ok: false, error: 'chat_unavailable' };
+      chatCalls.push(payload);
+      await new Promise((r) => setTimeout(r, 400));
+      const queue = window.__fakeChat || [];
+      return queue.length ? { ok: true, text: queue.shift() } : { ok: false, error: 'timeout' };
+    },
     setInteractive() {},
     watchWindows() {},
     onEvent(cb) { listeners.add(cb); return () => listeners.delete(cb); },
@@ -63,6 +73,7 @@ function createPreviewBridge() {
     _emit: emit,
     _actions: actionsRun,
     _transcribeCalls: transcribeCalls,
+    _chatCalls: chatCalls,
   };
 }
 

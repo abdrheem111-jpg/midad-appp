@@ -55,6 +55,7 @@ export class Brain {
     this.successes = [];
     this.focus = false;
     this.quiz = null;
+    this.chatHistory = [];
     this.quizTries = 0;
     this.rng = opts.rng || Math.random;
     this.lastIdleTalk = this.clock();
@@ -372,6 +373,23 @@ export class Brain {
     }
     this.emotions.feel(delta > 0 ? 'joke' : 'focus_mode', now);
     return this.reply(delta > 0 ? 'humor_up' : 'humor_down');
+  }
+
+  // ---------------------------------------------------------------- chat
+
+  /** Builds a reply from a sentence the local model wrote for him. */
+  chatReply(userText, text) {
+    const now = this.clock();
+    this.chatHistory.push({ user: String(userText), khalfoun: String(text) });
+    if (this.chatHistory.length > 6) this.chatHistory.shift();
+    const happy = /(ههه|حلو|زين|ممتاز|مبروك|يا سلام|ابشر)/.test(text);
+    const question = /[؟?]\s*$/.test(text);
+    this.emotions.feel(happy ? 'joke' : question ? 'curious' : 'thanks', now);
+    this.memory.set({ emotion: this.emotions.toJSON() });
+    return {
+      say: text, templateId: null, animation: happy ? 'happy' : question ? 'think' : 'nod', situation: 'chat',
+      emotion: this.emotions.snapshot(now), behavior: null, awaitingConfirm: false, unknownText: null, action: null,
+    };
   }
 
   // ------------------------------------------------------------ feelings

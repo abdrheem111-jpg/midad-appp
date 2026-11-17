@@ -331,6 +331,41 @@ await check('turning the setting off releases the microphone', async () => {
   assert(!(await vpage.locator('#ear').isVisible()), 'badge still shown');
 });
 
+// ------------------------------------------------------------- chat brain
+const cpage = await browser.newPage({ viewport: { width: 1280, height: 760 } });
+cpage.on('pageerror', (e) => problems.push(`chat page error: ${e.message}`));
+await cpage.goto(`${base}?fakechat=1`);
+await cpage.evaluate(() => {
+  localStorage.setItem('khalfoun.settings', JSON.stringify({ onboarded: true, level: 2, kidsMode: false }));
+  localStorage.setItem('khalfoun.memory', JSON.stringify({ name: 'عبدالرحيم', humor: 1 }));
+});
+await cpage.reload();
+await cpage.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 15000 });
+const cbubble = () => cpage.locator('#bubble-text').textContent();
+
+await check('sentences his rules do not cover go to the local model, with «thinking» first', async () => {
+  await cpage.waitForTimeout(1500);
+  await cpage.evaluate(() => { window.__fakeChat = ['البحر في صور يجنن، خاصة وقت الغروب!']; window.__khalfoun.hear('شو رأيك في بحر صور؟'); });
+  await cpage.waitForTimeout(150);
+  const thinking = await cpage.evaluate(() => window.__khalfoun.brain.emotions.current.emotion);
+  await cpage.waitForTimeout(1600);
+  const text = await cbubble();
+  assert(text.includes('الغروب'), `bubble: ${text}`);
+  const calls = await cpage.evaluate(() => window.__khalfoun.bridge._chatCalls);
+  assert(calls.length === 1 && calls[0].text === 'شو رأيك في بحر صور؟' && calls[0].name === 'عبدالرحيم', JSON.stringify(calls));
+  assert(thinking, 'no emotion while thinking');
+  await cpage.screenshot({ path: `${outDir}/10-chat.png` });
+});
+
+await check('known commands never go to the model; a failed model falls back politely', async () => {
+  await cpage.evaluate(() => window.__khalfoun.hear('كم الساعة'));
+  await cpage.waitForTimeout(800);
+  assert((await cpage.evaluate(() => window.__khalfoun.bridge._chatCalls.length)) === 1, 'command was sent to the model');
+  await cpage.evaluate(() => { window.__fakeChat = []; window.__khalfoun.hear('فلسفة الوجود والعدم'); });
+  await cpage.waitForTimeout(1800);
+  assert(/فهمت|وصلتني|تعلمتها|أذني|وضّح|وضح|صعب/.test(await cbubble()), `fallback: ${await cbubble()}`);
+});
+
 await browser.close();
 server.close();
 if (problems.length) {
