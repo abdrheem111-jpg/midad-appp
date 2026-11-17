@@ -9,6 +9,11 @@ import { decide, LEVEL_INFO } from './permissions.js';
 import { Memory } from './memory.js';
 import { normalize, toArabicDigits } from './arabic.js';
 import { TEMPLATES, APP_NAMES } from './templates/ar-om.js';
+import { Quiz, parseArabicNumber } from './quiz.js';
+import { occasionFor } from './occasions.js';
+
+const FEELING_LABEL = { tired: 'تعبان', sad: 'متضايق', sick: 'مريض', stressed: 'مضغوط' };
+const HOUR = 60 * 60 * 1000;
 
 const LAUGH_RE = /(ههه|خخخ|ضحكتني|حلوه|حلوة|يضحك|مضحك|😂|🤣)/u;
 const BOO_RE = /(بايخه|بايخ|سخيفه|سخيف|مب حلوه|ما ضحكت|ماضحكت|ثقيله)/u;
@@ -49,6 +54,9 @@ export class Brain {
     this.lastHumorous = null; // {cat, at} for learning from reactions
     this.successes = [];
     this.focus = false;
+    this.quiz = null;
+    this.quizTries = 0;
+    this.rng = opts.rng || Math.random;
     this.lastIdleTalk = this.clock();
   }
 
@@ -64,12 +72,30 @@ export class Brain {
     const now = this.clock();
     if (!this.memory.data.onboarded) return null;
     const days = this.memory.touch(now);
+    const occasion = this.currentOccasion();
+    const today = new Date(now).toDateString();
+    if (occasion && this.memory.data.occasionSeen !== `${occasion.id}:${today}`) {
+      this.memory.set({ occasionSeen: `${occasion.id}:${today}` });
+      this.emotions.feel(occasion.id === 'friday' ? 'greet' : 'celebrate', now);
+      return this.reply(`occasion_${occasion.id}`, { costume: occasion.costume });
+    }
     if (days >= 2) {
       this.emotions.feel('return_after_days', now);
       return this.reply('return_long', { vars: { days: toArabicDigits(days) } });
     }
+    const last = this.memory.data.lastFeeling;
+    if (last && FEELING_LABEL[last.kind] && now - last.at > 6 * HOUR && now - last.at < 48 * HOUR) {
+      this.memory.set({ lastFeeling: null });
+      this.emotions.feel('care', now);
+      return this.reply('feel_followup', { vars: { feeling: FEELING_LABEL[last.kind] } });
+    }
     this.emotions.feel('greet', now);
     return this.reply(this.greetSituation('any'));
+  }
+
+  /** Today's Omani occasion (national day, Ramadan, Eid, Friday...) or null. */
+  currentOccasion() {
+    return occasionFor(new Date(this.clock()));
   }
 
   /** Finishes onboarding with the choices made on the welcome screen. */
@@ -119,6 +145,11 @@ export class Brain {
         return this.reply('cancelled', { event: null });
       }
       this.pending = null; // anything else cancels and is handled normally
+    }
+
+    if (this.quiz) {
+      const handled = this.quizTurn(r, raw, now);
+      if (handled) return handled;
     }
 
     return this.route(r, raw, now);
@@ -241,6 +272,14 @@ export class Brain {
       case 'dance': this.emotions.feel('dance', now); return this.reply('dance', { behavior: 'dance' });
       case 'jump': this.emotions.feel('joke', now); return this.reply('jump', { behavior: 'jump' });
       case 'open_settings': return this.reply('settings_open', { behavior: 'open_settings' });
+      case 'feeling': return this.feeling(s.kind, now);
+      case 'costume':
+        this.emotions.feel(s.name ? 'joke' : 'focus_mode', now);
+        return this.reply(s.name ? `costume_${s.name}` : 'costume_off', { costume: s.name });
+      case 'quiz': return this.startQuiz(now);
+      case 'dont_know': case 'next_question':
+        this.emotions.feel('curious', now);
+        return this.reply('help');
       case 'humor': return this.changeHumor(s.delta, now);
       case 'set_name':
         this.memory.set({ name: s.name });
@@ -335,6 +374,72 @@ export class Brain {
     return this.reply(delta > 0 ? 'humor_up' : 'humor_down');
   }
 
+  // ------------------------------------------------------------ feelings
+
+  feeling(kind, now) {
+    this.memory.set({ lastFeeling: { kind, at: now } });
+    const caring = ['tired', 'sad', 'sick', 'stressed', 'sleepy'];
+    if (caring.includes(kind)) this.emotions.feel('care', now);
+    else if (kind === 'success' || kind === 'happy') this.emotions.feel('celebrate', now);
+    else this.emotions.feel('joke', now);
+    const behavior = kind === 'success' ? 'dance' : null;
+    return this.reply(`feel_${kind}`, { behavior });
+  }
+
+  // ---------------------------------------------------------------- quiz
+
+  startQuiz(now) {
+    this.quiz = new Quiz({ level: this.memory.data.quizLevel || 1, rng: this.rng });
+    this.quizTries = 0;
+    this.emotions.feel('joke', now);
+    return this.reply('quiz_start', { vars: { q: this.quiz.next().text } });
+  }
+
+  endQuiz(now) {
+    const q = this.quiz;
+    this.quiz = null;
+    this.memory.set({ quizLevel: q.level });
+    if (!q.total) return this.reply('quiz_end_none');
+    this.emotions.feel(q.right >= q.total / 2 ? 'celebrate' : 'care', now);
+    return this.reply('quiz_end', { vars: { score: toArabicDigits(q.right), total: toArabicDigits(q.total) } });
+  }
+
+  /** Handles a turn while a quiz is running; returns null to let normal commands through. */
+  quizTurn(r, raw, now) {
+    if (r.intent === 'stop' || r.intent === 'goodbye') return this.endQuiz(now);
+    if (r.intent === 'quiz') return this.reply('quiz_question', { vars: { q: this.quiz.current.text } });
+    if (r.intent === 'dont_know') {
+      const { answer } = this.quiz.skip();
+      this.quizTries = 0;
+      this.emotions.feel('care', now);
+      return this.reply('quiz_skip', { vars: { answer: toArabicDigits(answer), q: this.quiz.next().text } });
+    }
+    if (r.intent === 'next_question') {
+      this.quizTries = 0;
+      return this.reply('quiz_question', { vars: { q: this.quiz.next().text } });
+    }
+    const value = parseArabicNumber(raw);
+    const answerLike = ['unknown', 'yes', 'no', 'call', 'empty'].includes(r.intent);
+    if (value === null || !answerLike) return null;
+    const correctNow = value === this.quiz.current.answer;
+    if (!correctNow && this.quizTries === 0) {
+      // First miss: a hint and another try, without counting it yet.
+      this.quizTries = 1;
+      this.emotions.feel('quiz_wrong', now);
+      return this.reply('quiz_try_again', { vars: { hint: value < this.quiz.current.answer ? 'أكبر شوي' : 'أصغر شوي' } });
+    }
+    const res = this.quiz.answer(value);
+    this.quizTries = 0;
+    this.memory.set({ quizLevel: this.quiz.level, quizRight: (this.memory.data.quizRight || 0) + (res.correct ? 1 : 0), quizTotal: (this.memory.data.quizTotal || 0) + 1 });
+    const next = this.quiz.next().text;
+    if (res.correct) {
+      this.emotions.feel(res.levelChange > 0 ? 'streak' : 'quiz_right', now);
+      return this.reply(res.levelChange > 0 ? 'quiz_level_up' : 'quiz_right', { vars: { q: next } });
+    }
+    this.emotions.feel('care', now);
+    return this.reply(res.levelChange < 0 ? 'quiz_easier' : 'quiz_wrong', { vars: { answer: toArabicDigits(res.answer), q: next } });
+  }
+
   // ----------------------------------------------------------------- helpers
 
   learnFromReaction(raw, now) {
@@ -407,6 +512,7 @@ export class Brain {
       behavior: opts.behavior || null,
       awaitingConfirm: !!opts.awaitingConfirm,
       unknownText: opts.unknownText || null,
+      costume: 'costume' in opts ? opts.costume : undefined,
       action: null,
     };
   }

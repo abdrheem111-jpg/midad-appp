@@ -25,7 +25,9 @@ const params = new URLSearchParams(location.search);
 const mode = params.get('mode') || 'faces';
 const big = params.get('big');
 if (big) { document.getElementById('grid').style.gridTemplateColumns = 'repeat(3, 1fr)'; }
-const items = mode === 'faces'
+const items = mode === 'costumes'
+  ? [['flag', 'العيد الوطني'], ['bisht', 'العيد'], ['lantern', 'رمضان']].map(([c, l]) => ({ label: l, emotion: 'happy', intensity: 2, anim: c === 'flag' ? 'wave' : null, costume: c }))
+  : mode === 'faces'
   ? Object.keys(FACES).filter((e) => !params.get('only') || params.get('only').split(',').includes(e)).map((e) => ({ label: EMOTION_LABELS[e], emotion: e, intensity: 2, anim: null }))
   : (params.get('list') || 'walk,run,jump,celebrate,wave,cast,think,listen,laugh,dance,knock,sleep,trip,dangle,coffee,flex,sneeze,clap').split(',').map((a) => ({ label: a, emotion: 'happy', intensity: 1, anim: a }));
 for (const it of items) {
@@ -40,6 +42,8 @@ for (const it of items) {
   cell.appendChild(b);
   grid.appendChild(cell);
   const ch = createCharacter(c);
+  if (params.get('costume')) ch.setCostume(params.get('costume'));
+  if (it.costume) ch.setCostume(it.costume);
   ch.setEmotion({ emotion: it.emotion, intensity: it.intensity, secondary: null });
   const anim = it.anim ? ANIMATIONS[it.anim] : null;
   const t = anim ? anim.dur * (anim.loop ? 0.3 : 0.45) : 0;

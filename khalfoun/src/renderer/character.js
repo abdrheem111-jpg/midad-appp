@@ -235,6 +235,12 @@ export function createCharacter(container) {
         <path d="M10 -84 Q14 -52 16 -19"/><path d="M27 -66 Q32 -42 38 -19"/>
       </g>
       <path d="M-48 -30 Q0 -23 48 -30 L47 -21 Q0 -15 -47 -21 Z" fill="#EFEBE3" opacity="0.9"/>
+      <g data-part="bisht" opacity="0">
+        <path d="M-29 -121 C-41 -112 -47 -75 -51 -30 Q-52 -19 -40 -17 L-23 -17 C-21 -60 -19 -95 -12 -120 Z" fill="#4B2E1E" stroke="#2E1B11" stroke-width="1.5"/>
+        <path d="M29 -121 C41 -112 47 -75 51 -30 Q52 -19 40 -17 L23 -17 C21 -60 19 -95 12 -120 Z" fill="#4B2E1E" stroke="#2E1B11" stroke-width="1.5"/>
+        <path d="M-12 -120 C-19 -95 -21 -60 -23 -17 M12 -120 C19 -95 21 -60 23 -17" fill="none" stroke="#D9A82B" stroke-width="3"/>
+        <path d="M-15 -118 Q-22 -116 -26 -108 M15 -118 Q22 -116 26 -108" fill="none" stroke="#D9A82B" stroke-width="2" stroke-dasharray="2 1.6"/>
+      </g>
       <path d="M-47 -24 Q0 -18 47 -24" fill="none" stroke="${C.gold}" stroke-width="1" stroke-dasharray="2 2.5" opacity="0.7"/>
       <ellipse cx="0" cy="-117" rx="19" ry="6" fill="#A08060" opacity="0.18"/>
       <path d="M-12 -122 Q0 -110 12 -122" fill="none" stroke="#CDBF9A" stroke-width="1.8"/>
@@ -316,10 +322,22 @@ export function createCharacter(container) {
     </g>
     <g data-part="arms">
       <g data-part="armL">
-        <path d="M-24 -119 C-40 -114 -48 -98 -50 -76 L-52 -68 Q-44 -63.5 -35 -66.5 L-34 -76 C-33 -96 -27 -106 -20 -110 Z" fill="url(#${uid}-sleeve)" stroke="${C.clothLine}" stroke-width="2"/>
+        <path data-part="sleeveL" d="M-24 -119 C-40 -114 -48 -98 -50 -76 L-52 -68 Q-44 -63.5 -35 -66.5 L-34 -76 C-33 -96 -27 -106 -20 -110 Z" fill="url(#${uid}-sleeve)" stroke="${C.clothLine}" stroke-width="2"/>
         <path d="M-51.5 -71 Q-44 -66.5 -35.5 -69.5" fill="none" stroke="${C.clothLine}" stroke-width="1.3"/>
         <path d="M-50.5 -66 C-54 -59 -51 -51 -43.5 -50.5 C-36 -50.5 -33 -57 -35.5 -65 Z" fill="url(#${uid}-hand)" stroke="${C.skinLine}" stroke-width="1.5"/>
         <path d="M-36.5 -63 Q-31 -62 -32 -56.5 Q-34 -55 -36 -57" fill="url(#${uid}-hand)" stroke="${C.skinLine}" stroke-width="1.3"/>
+        <g data-part="flag" opacity="0">
+          <path d="M-44 -54 L-44 -132" stroke="${C.wood}" stroke-width="2.6" stroke-linecap="round"/>
+          <circle cx="-44" cy="-133" r="2.4" fill="${C.gold}"/>
+          <g data-part="flagCloth">
+            <rect x="-55" y="-130" width="11" height="27" fill="#C8102E"/>
+            <rect x="-86" y="-130" width="31" height="9" fill="#FFFFFF"/>
+            <rect x="-86" y="-121" width="31" height="9" fill="#C8102E"/>
+            <rect x="-86" y="-112" width="31" height="9" fill="#008000"/>
+            <path d="M-52.5 -126 l3 3 M-46.5 -126 l-3 3 M-49.5 -127.5 v5" stroke="#FFFFFF" stroke-width="1.1" stroke-linecap="round"/>
+            <rect x="-86" y="-130" width="42" height="27" fill="none" stroke="#7A1020" stroke-width="0.8" opacity="0.5"/>
+          </g>
+        </g>
         <g data-part="cup" opacity="0">
           <path d="M-53 -72 L-34 -72 L-36.5 -61 Q-43.5 -56.5 -50.5 -61 Z" fill="#FFFFFF" stroke="${C.gold}" stroke-width="1.5"/>
           <path d="M-52.4 -69.5 L-34.6 -69.5" stroke="${C.green}" stroke-width="1.6"/>
@@ -335,8 +353,16 @@ export function createCharacter(container) {
           <path d="M43.4 -56 L54.6 -1" stroke="${C.woodHi}" stroke-width="1.2" stroke-linecap="round" opacity="0.8"/>
           <path d="M44 -58 Q40.5 -81 28.5 -77 Q24 -75 26 -70.5" stroke="${C.wood}" stroke-width="4.6" stroke-linecap="round" fill="none"/>
           <path d="M47.5 -40 l3.2 -0.6 M50.6 -24 l3.2 -0.6 M53.2 -11 l3.2 -0.6" stroke="#5E3A1A" stroke-width="1.6"/>
+          <g data-part="lantern" opacity="0">
+            <path d="M27 -71 L27 -63" stroke="#7A5A20" stroke-width="1.2"/>
+            <circle cx="27" cy="-50" r="11" fill="#FFD866" opacity="0.35"/>
+            <path d="M21 -62 L33 -62 L35 -55 L33 -42 L21 -42 L19 -55 Z" fill="#FFE9A8" stroke="${C.gold}" stroke-width="1.6"/>
+            <path d="M27 -62 L27 -42 M19 -55 L35 -55" stroke="${C.gold}" stroke-width="1"/>
+            <path d="M23 -64 L31 -64 L29 -62 L25 -62 Z M23 -42 L31 -42 L29 -39 L25 -39 Z" fill="${C.gold}"/>
+            <ellipse data-part="flame" cx="27" cy="-51" rx="2.2" ry="3.4" fill="#FF9F1C"/>
+          </g>
         </g>
-        <path d="M24 -119 C40 -114 48 -98 50 -76 L52 -68 Q44 -63.5 35 -66.5 L34 -76 C33 -96 27 -106 20 -110 Z" fill="url(#${uid}-sleeve)" stroke="${C.clothLine}" stroke-width="2"/>
+        <path data-part="sleeveR" d="M24 -119 C40 -114 48 -98 50 -76 L52 -68 Q44 -63.5 35 -66.5 L34 -76 C33 -96 27 -106 20 -110 Z" fill="url(#${uid}-sleeve)" stroke="${C.clothLine}" stroke-width="2"/>
         <path d="M51.5 -71 Q44 -66.5 35.5 -69.5" fill="none" stroke="${C.clothLine}" stroke-width="1.3"/>
         <path d="M50.5 -66 C54 -59 51 -51 43.5 -50.5 C36 -50.5 33 -57 35.5 -65 Z" fill="url(#${uid}-hand)" stroke="${C.skinLine}" stroke-width="1.5"/>
         <path d="M36.5 -63 Q31 -62 32 -56.5 Q34 -55 36 -57" fill="url(#${uid}-hand)" stroke="${C.skinLine}" stroke-width="1.3"/>
@@ -402,6 +428,7 @@ export function createCharacter(container) {
   let facing = 1;
   let clock = 0;
   let velocity = 0;
+  let costume = null;
   const spring = { tassel: 0, tasselV: 0, kumma: 0, kummaV: 0, prevHead: 0 };
 
   function setEmotion(snap) {
@@ -424,6 +451,17 @@ export function createCharacter(container) {
   }
 
   function setFacing(dir) { facing = dir < 0 ? -1 : 1; }
+
+  /** Outfit for occasions: 'flag' (National Day), 'bisht' (Eid), 'lantern' (Ramadan) or null. */
+  function setCostume(name) {
+    costume = ['flag', 'bisht', 'lantern'].includes(name) ? name : null;
+    P.flag.setAttribute('opacity', costume === 'flag' ? 1 : 0);
+    P.bisht.setAttribute('opacity', costume === 'bisht' ? 1 : 0);
+    P.lantern.setAttribute('opacity', costume === 'lantern' ? 1 : 0);
+    const sleeve = costume === 'bisht' ? '#4B2E1E' : `url(#${uid}-sleeve)`;
+    P.sleeveL.setAttribute('fill', sleeve);
+    P.sleeveR.setAttribute('fill', sleeve);
+  }
 
   /** Horizontal speed in px/s, drives the tassel swing. */
   function setVelocity(vx) { velocity = Number.isFinite(vx) ? vx : 0; }
@@ -556,6 +594,10 @@ export function createCharacter(container) {
     P.cup.setAttribute('opacity', pose.cup ? 1 : 0);
     if (pose.cup) P.steam.setAttribute('transform', `translate(0 ${f2(-((clock * 6) % 4))})`);
     P.glasses.setAttribute('opacity', pose.glasses ? 1 : 0);
+    // the flag pole stays upright whatever the arm does
+    if (costume === 'flag') P.flag.setAttribute('transform', `rotate(${f2(-(pose.armL || 0) - (pose.bodyRot || 0) - (pose.rot || 0))} -44 -57)`);
+    if (costume === 'flag') P.flagCloth.setAttribute('transform', `translate(-44 -116) skewY(${f2(Math.sin(clock * 5) * 6)}) scale(${f2(1 - Math.abs(Math.sin(clock * 2.5)) * 0.06)} 1) translate(44 116)`);
+    if (costume === 'lantern') P.flame.setAttribute('ry', f2(3.4 + Math.sin(clock * 13) * 0.6));
 
     // body
     const sx = (pose.sx ?? 1) * facing;
@@ -588,7 +630,7 @@ export function createCharacter(container) {
     P.kumma.setAttribute('transform', `translate(0 ${f2(pose.kummaY || 0)}) rotate(${f2((pose.kummaRot || 0) + spring.kumma)} 0 -205)`);
   }
 
-  return { el: svg, setEmotion, lookAt, setFacing, setVelocity, render, get emotion() { return emotion; } };
+  return { el: svg, setEmotion, lookAt, setFacing, setVelocity, setCostume, render, get emotion() { return emotion; }, get costume() { return costume; } };
 }
 
 export const MOUTH_SHAPES = Object.keys(MOUTHS);

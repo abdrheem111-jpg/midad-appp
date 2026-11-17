@@ -205,6 +205,43 @@ await check('turning off walking on windows hides them from him', async () => {
   await page.evaluate(() => { const k = window.__khalfoun; k.brain.memory.set({ walkOnWindows: true }); k.updateWindowWatch(); k.motion.paused = false; });
 });
 
+await check('maths quiz: question, typed answer, score at the end', async () => {
+  await hear('اختبرني', 1200);
+  const q = await bubble();
+  assert(/[٠-٩]/.test(q) && q.includes('؟'), `question: ${q}`);
+  const answer = await page.evaluate(() => window.__khalfoun.brain.quiz.current.answer);
+  await page.evaluate(() => window.__khalfoun.motion.paused = true);
+  const box = await page.locator('#stage').boundingBox();
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForTimeout(400);
+  await page.fill('#command-input', String(answer));
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(1500);
+  assert(/صح|برافو|تمام|ما شاء الله/.test(await bubble()), `after right answer: ${await bubble()}`);
+  await page.keyboard.press('Escape');
+  await hear('وقف', 1200);
+  assert(/١ من ١/.test(await bubble()), `end: ${await bubble()}`);
+  await page.screenshot({ path: `${outDir}/8-quiz.png` });
+});
+
+await check('outfits: bisht on request, flag for National Day, and off again', async () => {
+  await hear('البس البشت', 1000);
+  assert(await page.evaluate(() => window.__khalfoun.character.costume) === 'bisht', 'no bisht');
+  await page.screenshot({ path: `${outDir}/9-bisht.png` });
+  await hear('ارفع العلم', 800);
+  assert(await page.evaluate(() => window.__khalfoun.character.costume) === 'flag', 'no flag');
+  await hear('شيل العلم', 800);
+  assert(await page.evaluate(() => window.__khalfoun.character.costume) === null, 'outfit not removed');
+});
+
+await check('he responds kindly to how you feel', async () => {
+  await hear('والله تعبان اليوم', 1200);
+  assert(/سلامتك|العافية|استراحة|ارتاح|تمشّى|التعب/.test(await bubble()), `tired: ${await bubble()}`);
+  await hear('نجحت في الامتحان', 1200);
+  assert(/مبروك|بطل|تبارك/.test(await bubble()), `success: ${await bubble()}`);
+  await page.evaluate(() => window.__khalfoun.motion.paused = false);
+});
+
 await check('every expression with every animation draws without invalid values', async () => {
   const bad = await page.evaluate(async () => {
     const { FACES } = await import('/src/renderer/character.js');
@@ -246,8 +283,21 @@ await vpage.evaluate(() => {
   localStorage.setItem('khalfoun.memory', JSON.stringify({ name: 'عبدالرحيم', alwaysListen: true, humor: 1 }));
 });
 await vpage.reload();
-await vpage.waitForFunction(() => document.documentElement.dataset.ready === '1');
+await vpage.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 15000 });
 const vbubble = () => vpage.locator('#bubble-text').textContent();
+/** Polls a condition in the page; returns true, or throws with the last error seen. */
+async function until(fnSource, ms) {
+  const end = Date.now() + ms;
+  let lastErr = null;
+  while (Date.now() < end) {
+    try {
+      if (await vpage.evaluate(fnSource)) return true;
+    } catch (err) { lastErr = err; }
+    await vpage.waitForTimeout(250);
+  }
+  if (lastErr) throw new Error(`while waiting: ${lastErr.message}`);
+  return false;
+}
 
 await check('always-listening shows the mic badge and keeps the mic open', async () => {
   await vpage.waitForTimeout(800);
@@ -257,7 +307,7 @@ await check('always-listening shows the mic badge and keeps the mic open', async
 
 await check('a sentence without his name is ignored; «يا خلفون افتح الحاسبة» runs at once', async () => {
   await vpage.evaluate(() => { window.__fakeTranscripts = ['كلام عادي عن التلفون', 'يا خلفون افتح الحاسبة']; });
-  const ok = await vpage.waitForFunction(() => window.__khalfoun.bridge._actions.some((a) => a.type === 'open_app' && a.params.app === 'calculator'), null, { timeout: 20000 }).then(() => true, () => false);
+  const ok = await until("window.__khalfoun.bridge._actions.some((a) => a.type === 'open_app' && a.params.app === 'calculator')", 20000);
   const calls = await vpage.evaluate(() => window.__khalfoun.bridge._transcribeCalls);
   assert(ok, `no action; transcribe calls: ${JSON.stringify(calls)}`);
   assert(calls.length >= 2 && calls.every((c) => c.purpose === 'wake' && c.bytes > 44), JSON.stringify(calls));
@@ -268,7 +318,7 @@ await check('a sentence without his name is ignored; «يا خلفون افتح 
 await check('just «يا خلفون» makes him answer and listen for the command', async () => {
   await vpage.waitForTimeout(1500);
   await vpage.evaluate(() => { window.__fakeTranscripts = ['يا خلفون', 'كم الساعة']; window.__khalfoun.bridge._transcribeCalls.length = 0; });
-  const ok = await vpage.waitForFunction(() => window.__khalfoun.bridge._transcribeCalls.some((c) => c.purpose === 'command'), null, { timeout: 25000 }).then(() => true, () => false);
+  const ok = await until("window.__khalfoun.bridge._transcribeCalls.some((c) => c.purpose === 'command')", 25000);
   assert(ok, `never listened for a command: ${JSON.stringify(await vpage.evaluate(() => window.__khalfoun.bridge._transcribeCalls))}`);
   await vpage.waitForTimeout(1500);
   assert(/[٠-٩]/.test(await vbubble()), `bubble: ${await vbubble()}`);

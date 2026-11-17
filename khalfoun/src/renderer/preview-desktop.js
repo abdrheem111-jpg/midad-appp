@@ -12,6 +12,7 @@ export function createPreviewDesktop(parent, onChange) {
   let order = wins.map((w) => w.id).reverse(); // top-most first
   let enabled = true;
   const els = new Map();
+  const closed = new Set();
 
   const report = () => {
     if (!enabled) return;
@@ -68,7 +69,7 @@ export function createPreviewDesktop(parent, onChange) {
   return {
     setEnabled(on) {
       enabled = on;
-      for (const el of els.values()) el.hidden = !on;
+      for (const [id, el] of els) el.hidden = !on || closed.has(id);
       if (on) report(); else onChange([]);
     },
     /** Test helper: move a window instantly. */
@@ -82,6 +83,7 @@ export function createPreviewDesktop(parent, onChange) {
     close(id) {
       const el = els.get(id);
       if (el) el.hidden = true;
+      closed.add(id);
       order = order.filter((v) => v !== id);
       report();
     },

@@ -40,6 +40,10 @@ const EVENT_TABLE = {
   dance: ['excited', 3, 4, -4, 0.2],
   curious: ['curious', 2, 1, 0, 0],
   focus_mode: ['calm', 1, 0, 0, 0],
+  care: ['grateful', 1, 2, 0, 0.4],
+  celebrate: ['excited', 3, 6, 0, 0.4],
+  quiz_right: ['happy', 2, 3, 0, 0.2],
+  quiz_wrong: ['curious', 1, -1, 0, 0],
 };
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));

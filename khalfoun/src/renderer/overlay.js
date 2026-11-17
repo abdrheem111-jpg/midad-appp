@@ -75,6 +75,7 @@ function hideBubble() {
 function handle(reply) {
   if (!reply) return;
   if (reply.emotion) character.setEmotion(reply.emotion);
+  if (reply.costume !== undefined) character.setCostume(reply.costume);
   if (reply.say) showBubble(reply.say, reply.emotion?.emotion);
   const anim = reply.animation || EMOTION_ANIMATION[reply.emotion?.emotion];
   if (anim && anim !== 'sleep') animator.play(anim);
@@ -536,6 +537,17 @@ async function start() {
   });
 
   setInterval(() => handle(brain.tick()), 4000);
+  // Dress for today's occasion, and check again every hour.
+  let dressedFor;
+  const dressForToday = () => {
+    const occ = brain.currentOccasion();
+    const id = occ?.id ?? null;
+    if (id === dressedFor) return; // keep an outfit the person picked until the occasion changes
+    dressedFor = id;
+    character.setCostume(occ?.costume ?? null);
+  };
+  dressForToday();
+  setInterval(dressForToday, 60 * 60 * 1000);
   requestAnimationFrame(frame);
 
   if (isPreview) {

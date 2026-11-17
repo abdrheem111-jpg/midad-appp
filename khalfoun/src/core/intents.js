@@ -68,8 +68,28 @@ const L = {
   help: N(['شو تقدر تسوي', 'ايش تقدر تسوي', 'ساعدني', 'مساعده', 'الاوامر', 'شو تعرف', 'وش تعرف', 'شو تسوي']),
   settings: N(['اعداداتك', 'الصلاحيات', 'غير الصلاحيات', 'اعدادات خلفون', 'افتح اعداداتك']),
   goodbye: N(['مع السلامه', 'باي', 'في امان الله', 'الله معك', 'نشوفك']),
+  costumeOff: N(['شيل البشت', 'فسخ البشت', 'نزل العلم', 'شيل العلم', 'شيل الفانوس', 'شيل الزي', 'رجع لبسك العادي', 'البس العادي']),
+  bisht: N(['البس البشت', 'لبس البشت', 'البس بشتك', 'وين البشت', 'البشت']),
+  flag: N(['ارفع العلم', 'شيل علم عمان', 'ارفع علم عمان', 'وين العلم', 'العلم']),
+  lantern: N(['الفانوس', 'شيل فانوس', 'جيب الفانوس', 'ولع الفانوس']),
+  quiz: N(['اختبرني', 'اسالني', 'اسالني سوال', 'اسالني سؤال', 'سؤال رياضيات', 'سوال رياضيات', 'خلنا نلعب', 'نلعب', 'العب معي', 'مسابقه', 'سؤال حساب', 'نتحدى', 'تحداني', 'نراجع رياضيات', 'لعبه رياضيات']),
+  dontKnow: N(['ما اعرف', 'ما ادري', 'مدري', 'ما عرفت', 'صعبه', 'صعب', 'استسلم', 'ما اعرفه', 'قول الجواب', 'شو الجواب']),
+  nextQ: N(['سؤال ثاني', 'سوال ثاني', 'غيره', 'غير السؤال', 'سؤال غيره', 'التالي', 'غيرها']),
   delete: N(['احذف', 'امسح', 'شيل', 'احذفلي', 'امسحلي']),
 };
+
+/** How the person says they feel. Negative lists are checked first («مب مرتاح» before «مرتاح»). */
+export const FEELINGS = [
+  ['sad', N(['زعلان', 'زعلانه', 'حزين', 'حزينه', 'متضايق', 'متضايقه', 'ضايق خلقي', 'ضايقه خلقي', 'مكتئب', 'مقهور', 'مالي خلق', 'ماني مرتاح', 'مب مرتاح', 'مو مرتاح', 'نفسيتي تعبانه', 'خاطري مكسور'])],
+  ['sick', N(['مريض', 'مريضه', 'عندي حراره', 'راسي يعورني', 'بطني يعورني', 'عندي زكام', 'مزكم', 'عيان', 'عيانه', 'عندي صداع'])],
+  ['stressed', N(['مضغوط', 'مضغوطه', 'متوتر', 'متوتره', 'قلقان', 'قلقانه', 'خايف من الامتحان', 'عندي امتحان', 'وراي امتحان', 'عندي اختبار', 'وراي اختبار', 'مستعجل', 'مستعجله'])],
+  ['tired', N(['تعبان', 'تعبانه', 'تعبت', 'مرهق', 'مرهقه', 'هلكان', 'هلكانه', 'هلكت', 'ميت تعب', 'منهد', 'منهك'])],
+  ['sleepy', N(['نعسان', 'نعسانه', 'نعست', 'ابا انام', 'ابي انام', 'ابغى انام'])],
+  ['hungry', N(['جوعان', 'جوعانه', 'جعت', 'جوعت', 'ميت جوع'])],
+  ['bored', N(['طفشان', 'طفشانه', 'زهقان', 'زهقانه', 'مليت', 'طفشت', 'زهقت'])],
+  ['success', N(['نجحت', 'جبت الدرجه', 'درجه كامله', 'الدرجه الكامله', 'فزت', 'فزنا', 'خلصت المشروع', 'خلصت الشغل', 'انقبلت', 'ترقيت', 'جبت الاول', 'اخذت الاول', 'طلعت الاول'])],
+  ['happy', N(['فرحان', 'فرحانه', 'مستانس', 'مستانسه', 'مبسوط', 'مبسوطه', 'وناسه', 'سعيد اليوم', 'مرتاح', 'مرتاحه', 'يومي حلو', 'يومي زين'])],
+];
 
 const MORNING = N(['صباح الخير', 'صباح النور']);
 const EVENING = N(['مساء الخير']);
@@ -201,6 +221,7 @@ export function recognize(raw) {
     const app = findApp(text);
     return out('close', { app: app ? app.id : null }, 0.8);
   }
+  if (findPhrase(padded, L.costumeOff)) return out('costume', { name: null });
   if (startsWithPhrase(text, L.delete)) return out('delete', { target: rawRestAfter(raw, L.delete) || '' }, 0.85);
 
   if (findPhrase(padded, L.time)) return out('time');
@@ -220,6 +241,16 @@ export function recognize(raw) {
   if (nameVerb) {
     const name = (rawRestAfter(raw, L.setName) || '').split(/\s+/).slice(0, 3).join(' ');
     if (name) return out('set_name', { name }, 0.9);
+  }
+
+  if (findPhrase(padded, L.bisht)) return out('costume', { name: 'bisht' });
+  if (findPhrase(padded, L.flag)) return out('costume', { name: 'flag' });
+  if (findPhrase(padded, L.lantern)) return out('costume', { name: 'lantern' });
+  if (findPhrase(padded, L.quiz)) return out('quiz');
+  if (findPhrase(padded, L.dontKnow)) return out('dont_know', {}, 0.85);
+  if (findPhrase(padded, L.nextQ)) return out('next_question', {}, 0.85);
+  for (const [kind, words] of FEELINGS) {
+    if (findPhrase(padded, words)) return out('feeling', { kind });
   }
 
   if (findPhrase(padded, L.who)) return out('who');
