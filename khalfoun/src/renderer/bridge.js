@@ -48,6 +48,7 @@ function createPreviewBridge() {
         // Preview: one "minute" lasts one second so the reminder can be seen.
         setTimeout(() => emit({ type: 'reminder', note: action.params.note }), action.params.minutes * 1000);
       }
+      if (action.type === 'cancel_reminders') return { ok: true, data: { cancelled: 1 } };
       if (action.type === 'organize_downloads') return { ok: true, data: { moved: 7 } };
       if (action.type === 'undo_organize') return { ok: true, data: { restored: 7 } };
       return { ok: true };

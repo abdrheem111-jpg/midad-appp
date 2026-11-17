@@ -26,6 +26,7 @@ export const ACTION_RISK = {
   volume: 'system',
   screenshot: 'system',
   reminder: 'none',
+  cancel_reminders: 'none',
   type_text: 'modify',
   organize_downloads: 'modify',
   undo_organize: 'modify',

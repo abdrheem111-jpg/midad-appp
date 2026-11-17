@@ -35,6 +35,8 @@ const L = {
   stopExact: N(['وقف', 'بس', 'خلاص', 'اسكت', 'وقف وقف', 'خلاص بس', 'كفايه', 'الغي', 'كنسل', 'بس بس', 'استوب']),
   yesExact: N(['نعم', 'اي', 'ايوه', 'ايوا', 'اكيد', 'تمام', 'اوكي', 'اوك', 'يب', 'صح', 'زين', 'ماشي', 'نفذ', 'سوها', 'سويها', 'يلا', 'يالله', 'طيب', 'اي نعم', 'اكيد سوها', 'ok', 'yes']),
   noExact: N(['لا', 'لا لا', 'لاء', 'خلها', 'خليها', 'بلاش', 'ما ابا', 'ما ابي', 'لا تسوي', 'لا تسويها', 'مب لازم', 'لا شكرا', 'no']),
+  cancelReminders: N(['الغ التذكير', 'الغي التذكير', 'الغ التذكيرات', 'الغي التذكيرات', 'وقف التذكير', 'وقف التذكيرات', 'شيل التذكير', 'شيل التذكيرات', 'لا تذكرني', 'بلاش التذكير']),
+  clearRoutines: N(['الغ العادات', 'لا تفتح شي لحالك', 'لا تفتح شي بروحك', 'انس العادات', 'وقف العادات']),
   remind: N(['ذكرني', 'نبهني', 'فكرني', 'ذكرني بعد', 'سولي تذكير', 'سو تذكير', 'حط تذكير', 'حط منبه']),
   type: N(['تكتب لي', 'تكتبلي', 'تكتب', 'اكتب لي', 'اكتبلي', 'اكتب', 'كتب لي', 'دون لي', 'دون']),
   search: N(['تدور لي عن', 'تدور لي على', 'تدورلي عن', 'تدور لي', 'تدورلي', 'تدور عن', 'تدور على', 'تدور', 'تبحث عن', 'تبحث لي عن', 'دور لي عن', 'دور لي على', 'دورلي عن', 'دورلي على', 'دور لي', 'دورلي', 'دور عن', 'دور على', 'دور', 'ابحث لي عن', 'ابحث عن', 'ابحث', 'فتش عن', 'فتش على', 'فتش', 'سيرش', 'سيرش عن']),
@@ -147,11 +149,11 @@ export function rawRestAfter(raw, verbs, skip = []) {
 
 const DURATION_WORDS = new Set(['بعد', 'ربع', 'نص', 'نصف', 'ساعه', 'ساعات', 'ساعتين', 'الا', 'دقيقه', 'دقايق', 'دقائق', 'دقيقتين', 'ثانيه', 'ثواني']);
 
-function reminderNote(raw, verbs) {
+function reminderNote(raw, verbs, repeat = false) {
   const rest = rawRestAfter(raw, verbs) || '';
   const words = rest.split(/\s+/).filter(Boolean).filter((w) => {
     const n = normalize(w);
-    return n && !DURATION_WORDS.has(n) && !/^\d+$/.test(n) && !/^(واحد|اثنين|ثلاث|ثلاثه|اربع|اربعه|خمس|خمسه|ست|سته|سبع|سبعه|ثمان|ثمانيه|تسع|تسعه|عشر|عشره|عشرين|ثلاثين|اربعين|خمسين|ستين)$/.test(n);
+    return n && !DURATION_WORDS.has(n) && !(repeat && n === 'كل') && !/^\d+$/.test(n) && !/^(واحد|اثنين|ثلاث|ثلاثه|اربع|اربعه|خمس|خمسه|ست|سته|سبع|سبعه|ثمان|ثمانيه|تسع|تسعه|عشر|عشره|عشرين|ثلاثين|اربعين|خمسين|ستين)$/.test(n);
   });
   while (words.length && /^(ب|عن|ان|انه|انو|على)$/.test(normalize(words[0]))) words.shift();
   if (words.length && /^بال/.test(words[0])) words[0] = words[0].slice(1);
@@ -176,9 +178,12 @@ export function recognize(raw) {
   if (L.yesExact.includes(text)) return out('yes', {}, 0.95);
   if (L.noExact.includes(text)) return out('no', {}, 0.95);
 
+  if (findPhrase(padded, L.cancelReminders)) return out('cancel_reminders');
+  if (findPhrase(padded, L.clearRoutines)) return out('clear_routines');
   if (findPhrase(padded, L.remind)) {
     const minutes = parseMinutes(text);
-    return out('reminder', { minutes, note: reminderNote(raw, L.remind) }, minutes ? 0.92 : 0.6);
+    const repeat = / كل (\S+ )?(دقيقه|دقايق|دقائق|دقيقتين|ساعه|ساعات|ساعتين|ربع|نص|نصف)( |$)/.test(` ${text} `);
+    return out('reminder', { minutes, note: reminderNote(raw, L.remind, repeat), repeat }, minutes ? 0.92 : 0.6);
   }
 
   const typeVerb = startsWithPhrase(text, L.type);

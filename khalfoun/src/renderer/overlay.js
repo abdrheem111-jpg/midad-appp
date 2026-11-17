@@ -572,6 +572,10 @@ async function start() {
   });
 
   setInterval(() => handle(brain.tick()), 4000);
+  // Habits the person agreed to («كل يوم افتح لي...»), checked now and every ten minutes.
+  const runRoutines = () => { if (brain.memory.data.onboarded) for (const action of brain.dueRoutines()) runAction(action); };
+  setTimeout(runRoutines, 8000);
+  setInterval(runRoutines, 10 * 60 * 1000);
   // Dress for today's occasion, and check again every hour.
   let dressedFor;
   const dressForToday = () => {

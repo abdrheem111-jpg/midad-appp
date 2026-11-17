@@ -19,6 +19,7 @@ import { createExecutor } from './actions/index.js';
 import { findWhisper, transcribe } from './stt.js';
 import { WindowWatcher } from './windows-watcher.js';
 import { ChatClient, findLocalModel } from './chat.js';
+import { ReminderScheduler } from './reminders.js';
 import { LEVEL_INFO } from '../core/permissions.js';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -43,7 +44,6 @@ let win = null;
 let tray = null;
 let settings = { ...DEFAULT_SETTINGS };
 let whisper = { available: false, bin: null, model: null, wakeModel: null };
-const reminders = new Set();
 let watcher = null;
 let chat = null; // ChatClient when a local model is found
 let chatInfo = null;
@@ -149,16 +149,18 @@ function registerShortcuts() {
   if (!ok1 || !ok2) console.warn('Some keyboard shortcuts are taken by another program.');
 }
 
-function scheduleReminder(minutes, note) {
-  const timer = setTimeout(() => {
-    reminders.delete(timer);
-    if (win) win.showInactive();
-    send('reminder', { note });
-    if (Notification.isSupported()) {
-      new Notification({ title: 'خلفون', body: note ? `تذكير: ${note}` : 'جا وقت التذكير!', silent: false }).show();
-    }
-  }, minutes * 60 * 1000);
-  reminders.add(timer);
+let reminderScheduler = null;
+
+function showReminder(r) {
+  if (win) win.showInactive();
+  send('reminder', { note: r.note });
+  if (Notification.isSupported()) {
+    new Notification({ title: 'خلفون', body: r.note ? `تذكير: ${r.note}` : 'جا وقت التذكير!', silent: false }).show();
+  }
+}
+
+function scheduleReminder(minutes, note, repeat = false) {
+  reminderScheduler.add({ minutes, note, repeat });
 }
 
 async function captureScreen() {
@@ -375,7 +377,12 @@ async function start() {
     home: app.getPath('home'),
     paths: { downloads: downloadsDir, documents: app.getPath('documents'), pictures: app.getPath('pictures') },
   });
-  const executor = createExecutor({ platform, getSettings: () => settings, downloadsDir, journal: stores.journal, scheduleReminder });
+  reminderScheduler = new ReminderScheduler({ store: new JsonStore(userData, 'reminders.json', { items: [] }), onFire: showReminder });
+  await reminderScheduler.restore();
+  const executor = createExecutor({
+    platform, getSettings: () => settings, downloadsDir, journal: stores.journal, scheduleReminder,
+    cancelReminders: () => reminderScheduler.cancelAll(),
+  });
   watcher = new WindowWatcher({
     onChange: (list) => send('windows', { list }),
     toDip: (r) => (process.platform === 'win32' ? screen.screenToDipRect(null, r) : r),
@@ -416,7 +423,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
     if (watcher) watcher.stop();
-    for (const t of reminders) clearTimeout(t);
+    if (reminderScheduler) reminderScheduler.stop();
   });
   app.on('window-all-closed', () => app.quit());
 }

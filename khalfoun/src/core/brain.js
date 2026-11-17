@@ -137,7 +137,22 @@ export class Brain {
 
     if (this.pending) {
       const pending = this.pending;
-      if (r.intent === 'yes') {
+      if (pending.kind === 'routine') {
+        if (r.intent === 'yes') {
+          this.pending = null;
+          const routines = (this.memory.data.routines || []).filter((x) => x.key !== pending.key);
+          routines.push({ key: pending.key, hour: pending.hour, action: pending.action, summary: pending.summary, lastRun: '' });
+          this.memory.set({ routines });
+          this.emotions.feel('celebrate', now);
+          return this.reply('routine_saved', { vars: { app: pending.appName, time: pending.timeText } });
+        }
+        if (r.intent === 'no' || r.intent === 'stop') {
+          this.pending = null;
+          this.memory.set({ routineAsked: { ...(this.memory.data.routineAsked || {}), [pending.key]: true } });
+          return this.reply('cancelled', { event: null });
+        }
+      }
+      if (r.intent === 'yes' && !pending.kind) {
         this.pending = null;
         return this.launch(pending.action, pending.spec, now, 'confirmed');
       }
@@ -203,12 +218,21 @@ export class Brain {
       return this.reply('failed');
     }
     this.markSuccess(now);
+    if (['open_app', 'open_url', 'open_folder'].includes(spec.action.type) && !spec.routine) {
+      const offer = this.learnHabit(spec, now);
+      if (offer) return offer;
+    }
     if (spec.sayOn === 'result') {
       const vars = { ...(spec.vars || {}) };
       let situation = spec.situation;
       if (spec.action.type === 'organize_downloads') {
         const count = result.data?.moved ?? 0;
         if (!count) situation = 'organize_empty';
+        vars.count = toArabicDigits(count);
+      }
+      if (spec.action.type === 'cancel_reminders') {
+        const count = result.data?.cancelled ?? 0;
+        if (!count) situation = 'reminders_none';
         vars.count = toArabicDigits(count);
       }
       if (spec.action.type === 'undo_organize') {
@@ -311,8 +335,17 @@ export class Brain {
       }
       case 'reminder': {
         if (!s.minutes) { this.emotions.feel('not_understood', now); return this.reply('reminder_no_time'); }
-        return this.plan({ type: 'reminder', params: { minutes: s.minutes, note: s.note || '' } },
-          { situation: 'reminder_set', sayOn: 'start', vars: { duration: durationPhrase(s.minutes), noteSuffix: noteSuffix(s.note) }, summary: `تذكير بعد ${durationPhrase(s.minutes)}` }, now);
+        if (s.repeat && s.minutes < 5) { this.emotions.feel('not_understood', now); return this.reply('reminder_too_often'); }
+        return this.plan({ type: 'reminder', params: { minutes: s.minutes, note: s.note || '', repeat: Boolean(s.repeat) } },
+          { situation: s.repeat ? 'reminder_set_repeat' : 'reminder_set', sayOn: 'start', vars: { duration: durationPhrase(s.minutes), noteSuffix: noteSuffix(s.note) }, summary: `${s.repeat ? 'تذكير كل' : 'تذكير بعد'} ${durationPhrase(s.minutes)}` }, now);
+      }
+      case 'cancel_reminders':
+        return this.plan({ type: 'cancel_reminders', params: {} }, { situation: 'reminders_cancelled', sayOn: 'result', summary: 'إلغاء التذكيرات' }, now);
+      case 'clear_routines': {
+        const had = (this.memory.data.routines || []).length;
+        this.memory.set({ routines: [] });
+        this.emotions.feel('focus_mode', now);
+        return this.reply(had ? 'routines_cleared' : 'routines_none');
       }
       case 'organize_downloads':
         return this.plan({ type: 'organize_downloads', params: {} },
@@ -373,6 +406,53 @@ export class Brain {
     }
     this.emotions.feel(delta > 0 ? 'joke' : 'focus_mode', now);
     return this.reply(delta > 0 ? 'humor_up' : 'humor_down');
+  }
+
+  // -------------------------------------------------------------- habits
+
+  /** Remembers when things are opened; after three different days around the same hour, offers to do it alone. */
+  learnHabit(spec, now) {
+    const a = spec.action;
+    const key = `${a.type}:${a.params.app || a.params.url || a.params.folder}`;
+    const habits = { ...(this.memory.data.habits || {}) };
+    const times = [...(habits[key] || []), now].slice(-20);
+    habits[key] = times;
+    this.memory.set({ habits });
+    if ((this.memory.data.routineAsked || {})[key]) return null;
+    if ((this.memory.data.routines || []).some((x) => x.key === key)) return null;
+    const hour = new Date(now).getHours();
+    const days = new Set(times.filter((t) => Math.abs(new Date(t).getHours() - hour) <= 1).map((t) => new Date(t).toDateString()));
+    if (days.size < 3) return null;
+    const appName = spec.vars?.app || '';
+    const timeText = new Intl.DateTimeFormat(this.locale, { hour: 'numeric' }).format(new Date(now));
+    const { id, ...action } = a;
+    this.pending = { kind: 'routine', key, hour, action, appName, timeText, summary: spec.summary };
+    this.emotions.feel('curious', now);
+    return this.reply('routine_offer', { vars: { app: appName, time: timeText }, awaitingConfirm: true });
+  }
+
+  /**
+   * Routines due now (each at most once a day), as actions for the shell to run.
+   * Still checked against the current permission level.
+   */
+  dueRoutines() {
+    const now = this.clock();
+    const d = new Date(now);
+    const today = d.toDateString();
+    const out = [];
+    const routines = (this.memory.data.routines || []).map((r) => ({ ...r }));
+    for (const r of routines) {
+      if (r.lastRun === today || Math.abs(d.getHours() - r.hour) > 1) continue;
+      if (!decide(r.action, this.memory.data).allowed) continue;
+      r.lastRun = today;
+      const id = this.nextId;
+      this.nextId += 1;
+      const action = { id, ...r.action };
+      this.inflight.set(id, { situation: 'done', sayOn: 'none', summary: r.summary || 'عادة يومية', routine: true, action });
+      out.push(action);
+    }
+    if (out.length) this.memory.set({ routines });
+    return out;
   }
 
   // ---------------------------------------------------------------- chat

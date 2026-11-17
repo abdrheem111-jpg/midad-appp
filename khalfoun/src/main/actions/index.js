@@ -28,7 +28,11 @@ export function validateAction(action) {
     case 'screenshot': return null;
     case 'type_text': return str(p.text, 2000) ? null : 'bad_text';
     case 'reminder':
-      return Number.isFinite(p.minutes) && p.minutes >= 1 && p.minutes <= MAX_REMINDER_MIN && (p.note === undefined || (typeof p.note === 'string' && p.note.length <= 200)) ? null : 'bad_reminder';
+      if (!(Number.isFinite(p.minutes) && p.minutes >= 1 && p.minutes <= MAX_REMINDER_MIN)) return 'bad_reminder';
+      if (p.repeat !== undefined && typeof p.repeat !== 'boolean') return 'bad_reminder';
+      if (p.repeat && p.minutes < 5) return 'bad_reminder';
+      return p.note === undefined || (typeof p.note === 'string' && p.note.length <= 200) ? null : 'bad_reminder';
+    case 'cancel_reminders': return null;
     case 'organize_downloads': case 'undo_organize': return null;
     default: return 'unknown_action';
   }
@@ -36,7 +40,7 @@ export function validateAction(action) {
 
 /**
  * @param {{platform: ReturnType<import('./platform.js').createPlatform>, getSettings: () => {level: number, kidsMode: boolean},
- *   downloadsDir: string, journal: import('../storage.js').JsonStore, scheduleReminder: (minutes: number, note: string) => void}} deps
+ *   downloadsDir: string, journal: import('../storage.js').JsonStore, scheduleReminder: (minutes: number, note: string, repeat?: boolean) => void, cancelReminders?: () => number}} deps
  */
 export function createExecutor(deps) {
   const { platform } = deps;
@@ -57,8 +61,10 @@ export function createExecutor(deps) {
         case 'screenshot': return await platform.screenshot();
         case 'type_text': return await platform.typeText(p.text);
         case 'reminder':
-          deps.scheduleReminder(Math.round(p.minutes), p.note || '');
+          deps.scheduleReminder(Math.round(p.minutes), p.note || '', Boolean(p.repeat));
           return { ok: true };
+        case 'cancel_reminders':
+          return { ok: true, data: { cancelled: deps.cancelReminders ? deps.cancelReminders() : 0 } };
         case 'organize_downloads': {
           const { moves } = await organizeFolder(deps.downloadsDir);
           if (moves.length) await deps.journal.write({ at: Date.now(), moves });
