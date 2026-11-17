@@ -1,0 +1,74 @@
+name: Khalfoun
+
+on:
+  push:
+    paths:
+      - 'khalfoun/**'
+      - '.github/workflows/khalfoun.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: khalfoun
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: khalfoun/package-lock.json
+      - run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Virtual display (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Real app smoke test
+        run: npm run smoke
+      - name: Real Windows checks (windows, apps, volume, typing)
+        if: runner.os == 'Windows'
+        run: npm run check:windows
+      - name: Browser UI scenarios
+        if: runner.os == 'Linux'
+        run: |
+          npm install --no-save playwright@1.49.1
+          npx playwright install --with-deps chromium
+          node tools/ui-check.mjs ui-shots
+      - name: Upload UI screenshots
+        if: runner.os == 'Linux' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: khalfoun-ui-screenshots
+          path: khalfoun/ui-shots
+          if-no-files-found: ignore
+
+  installer:
+    name: Windows installer
+    needs: test
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: khalfoun
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: khalfoun/package-lock.json
+      - run: npm ci
+      - name: Build installer
+        run: npm run dist:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Khalfoun-Windows-Installer
+          path: khalfoun/dist/*.exe
+          if-no-files-found: error

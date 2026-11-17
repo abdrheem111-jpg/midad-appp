@@ -3,3 +3,4 @@ dist/
 out/
 *.log
 .voice/
+ui-shots/
