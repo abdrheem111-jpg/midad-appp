@@ -95,3 +95,9 @@ jobs:
           Write-Host "Installed at $installed"
           $env:KHALFOUN_APP_EXE = $installed
           npm run smoke
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Khalfoun-Windows-Installer
+          path: khalfoun/dist/*.exe
+          if-no-files-found: error
