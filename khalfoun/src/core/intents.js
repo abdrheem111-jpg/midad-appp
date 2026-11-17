@@ -19,13 +19,13 @@ const WANT = N(['ابا', 'ابي', 'ابغى', 'ابغا', 'اريد', 'ودي'
 
 /** Apps and sites the assistant knows by name. `kind` decides how main opens it. */
 export const APPS = [
-  { id: 'browser', kind: 'app', names: ['المتصفح', 'متصفح', 'الانترنت', 'النت', 'كروم', 'جوجل كروم', 'الكروم', 'ايدج', 'الايدج', 'فايرفوكس', 'البراوزر', 'براوزر'] },
+  { id: 'browser', kind: 'app', names: ['المتصفح', 'متصفح', 'الانترنت', 'النت', 'كروم', 'جوجل كروم', 'الكروم', 'ايدج', 'الايدج', 'فايرفوكس', 'البراوزر', 'براوزر', 'chrome', 'edge', 'firefox', 'browser'] },
   { id: 'google', kind: 'url', url: 'https://www.google.com', names: ['جوجل', 'قوقل', 'غوغل', 'google'] },
   { id: 'youtube', kind: 'url', url: 'https://www.youtube.com', names: ['يوتيوب', 'اليوتيوب', 'يوتيب', 'youtube'] },
   { id: 'whatsapp', kind: 'url', url: 'https://web.whatsapp.com', names: ['الواتساب', 'واتساب', 'الواتس', 'واتس اب', 'whatsapp'] },
-  { id: 'calculator', kind: 'app', names: ['الحاسبه', 'حاسبه', 'الاله الحاسبه', 'الكالكوليتر', 'الحاسبة'] },
-  { id: 'notepad', kind: 'app', names: ['المفكره', 'مفكره', 'النوتباد', 'نوت باد', 'النوت باد', 'نوتباد', 'الملاحظات', 'المذكره'] },
-  { id: 'paint', kind: 'app', names: ['الرسام', 'برنامج الرسم', 'بينت', 'البينت'] },
+  { id: 'calculator', kind: 'app', names: ['الحاسبه', 'حاسبه', 'الاله الحاسبه', 'الكالكوليتر', 'الحاسبة', 'calculator', 'calc'] },
+  { id: 'notepad', kind: 'app', names: ['المفكره', 'مفكره', 'النوتباد', 'نوت باد', 'النوت باد', 'نوتباد', 'الملاحظات', 'المذكره', 'notepad'] },
+  { id: 'paint', kind: 'app', names: ['الرسام', 'برنامج الرسم', 'بينت', 'البينت', 'paint'] },
   { id: 'explorer', kind: 'app', names: ['الملفات', 'مستكشف الملفات', 'المستكشف', 'ملفاتي', 'المجلدات'] },
   { id: 'downloads', kind: 'folder', names: ['التنزيلات', 'التحميلات', 'الداونلود', 'مجلد التنزيلات'] },
   { id: 'documents', kind: 'folder', names: ['المستندات', 'مستنداتي', 'الوثايق', 'مجلد المستندات'] },

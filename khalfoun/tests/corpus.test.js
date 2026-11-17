@@ -130,6 +130,31 @@ const CORPUS = [
   ['والله زهقان', 'feeling', { kind: 'bored' }],
   ['نجحت في الامتحان', 'feeling', { kind: 'success' }],
 
+  // ---- newer abilities, said in different ways
+  ['افتح chrome', 'open', { app: 'browser' }],
+  ['افتح الحاسبة يا خلفون', 'open', { app: 'calculator' }],
+  ['خلفون، افتح الحاسبة!', 'open', { app: 'calculator' }],
+  ['الحاسبة', 'open', { app: 'calculator' }],
+  ['عطني الحاسبة', 'open', { app: 'calculator' }],
+  ['افتح سبوتيفاي', 'open_unknown', { name: 'سبوتيفاي' }],
+  ['شغل زوم', 'open_unknown', { name: 'زوم' }],
+  ['افتح', 'open_which', {}],
+  ['سكرها', 'close', { it: true }],
+  ['اقفله', 'close', { it: true }],
+  ['افتحه مرة ثانية', 'open_again', {}],
+  ['عيدها', 'repeat', {}],
+  ['زيد', 'repeat', {}],
+  ['كم ٢٥ ضرب ٤', 'calc', {}],
+  ['احسب لي ١٥٪ من ٢٠٠', 'calc', {}],
+  ['كم سبعة في ثمانية', 'calc', {}],
+  ['ذكرني الساعة خمس العصر بالاجتماع', 'reminder', { note: 'الاجتماع' }],
+  ['ذكرني بكرة الساعة ٧ الصبح', 'reminder', {}],
+  ['لما اقول صباحو يعني افتح المتصفح', 'teach', { phrase: 'صباحو', command: 'افتح المتصفح' }],
+  ['انس كلمة صباحو', 'forget_phrase', { phrase: 'صباحو' }],
+  ['جهز الاستماع', 'setup', { part: 'voice' }],
+  ['نزل عقلك', 'setup', { part: 'brain' }],
+  ['اعداداتك', 'open_settings', {}],
+
   // ---- yes / no
   ['ايوه', 'yes', {}],
   ['اكيد سوها', 'yes', {}],
@@ -148,7 +173,8 @@ test('corpus: every realistic sentence is understood', () => {
 });
 
 test('corpus: fuzzy matching does not invent commands from unrelated words', () => {
-  for (const s of ['كتاب جميل', 'البحر حلو اليوم', 'شو رايك في المدرسة', 'السيارة خربانة', 'امي تسلم عليك', 'قرأت قصة عن الفضاء']) {
+  for (const s of ['كتاب جميل', 'البحر حلو اليوم', 'شو رايك في المدرسة', 'السيارة خربانة', 'امي تسلم عليك', 'قرأت قصة عن الفضاء',
+    'الكلام هذا حلو', 'وين راحت القطوة', 'ليش السما زرقا', 'احب الرياضيات', 'كم عمرك', 'شو تحب تاكل', 'الجو حار اليوم']) {
     assert.ok(['unknown', 'greet', 'feeling'].includes(recognize(s).intent), `${s} → ${recognize(s).intent}`);
   }
 });
