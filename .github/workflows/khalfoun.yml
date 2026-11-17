@@ -76,15 +76,20 @@ jobs:
         run: |
           $setup = Get-ChildItem dist\*.exe | Select-Object -First 1
           Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait
-          # The installer can return before every file is in place: wait for the program to appear.
-          $roots = @((Join-Path $env:LOCALAPPDATA 'Programs'), $env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ -and (Test-Path $_) }
+          # The installer can return before every file is in place: wait for the program to appear
+          # in one of the known install folders (checked directly; no slow recursive search).
+          $candidates = @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\Khalfoun\Khalfoun.exe'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\khalfoun\Khalfoun.exe'),
+            (Join-Path $env:ProgramFiles 'Khalfoun\Khalfoun.exe')
+          )
           $installed = $null
-          for ($i = 0; $i -lt 60 -and -not $installed; $i++) {
-            foreach ($root in $roots) {
-              $hit = Get-ChildItem $root -Recurse -Filter Khalfoun.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'Uninstall' } | Select-Object -First 1
-              if ($hit) { $installed = $hit.FullName; break }
-            }
+          for ($i = 0; $i -lt 90 -and -not $installed; $i++) {
+            $installed = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
             if (-not $installed) { Start-Sleep -Seconds 1 }
+          }
+          if (-not $installed) {
+            Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "found folder: $($_.FullName)" }
           }
           if (-not $installed) { Write-Error 'Khalfoun.exe was not installed'; exit 1 }
           Write-Host "Installed at $installed"
