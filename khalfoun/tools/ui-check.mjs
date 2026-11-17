@@ -174,12 +174,13 @@ await check('dropped above a window he lands and stands on it', async () => {
 
 await check('yanking the window away makes him fall, complaining', async () => {
   await page.evaluate(() => window.__khalfoun.motion.paused = true);
-  await page.evaluate(() => window.__khalfoun.preview.move('notes', 140, 520));
+  await page.evaluate(() => { window.__khalfoun.recentSituations.length = 0; window.__khalfoun.preview.move('notes', 140, 520); });
   await page.waitForTimeout(1600);
   const st = await page.evaluate(() => ({ support: window.__khalfoun.motion.support, mode: window.__khalfoun.motion.mode }));
   assert(!st.support || st.support.y !== 300, JSON.stringify(st));
-  const text = await bubble();
-  assert(/النافذة|فوق|حرّك|وااا|آخ|سلام|شفت/.test(text), `bubble: ${text}`);
+  // He complains as the window goes; a landing remark may follow, so check what he said, not the last bubble.
+  const said = await page.evaluate(() => [...window.__khalfoun.recentSituations]);
+  assert(said.includes('slip'), `said: ${said.join(', ')} / bubble: ${await bubble()}`);
 });
 
 await check('closing the window under him drops him to what is below', async () => {
