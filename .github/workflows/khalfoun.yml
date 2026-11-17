@@ -76,13 +76,17 @@ jobs:
         run: |
           $setup = Get-ChildItem dist\*.exe | Select-Object -First 1
           Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait
-          $installed = Join-Path $env:LOCALAPPDATA 'Programs\Khalfoun\Khalfoun.exe'
-          if (-not (Test-Path $installed)) { Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Recurse -Filter Khalfoun.exe | Select-Object -First 1 | ForEach-Object { $installed = $_.FullName } }
+          # The installer can return before every file is in place: wait for the program to appear.
+          $roots = @((Join-Path $env:LOCALAPPDATA 'Programs'), $env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ -and (Test-Path $_) }
+          $installed = $null
+          for ($i = 0; $i -lt 60 -and -not $installed; $i++) {
+            foreach ($root in $roots) {
+              $hit = Get-ChildItem $root -Recurse -Filter Khalfoun.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch 'Uninstall' } | Select-Object -First 1
+              if ($hit) { $installed = $hit.FullName; break }
+            }
+            if (-not $installed) { Start-Sleep -Seconds 1 }
+          }
+          if (-not $installed) { Write-Error 'Khalfoun.exe was not installed'; exit 1 }
           Write-Host "Installed at $installed"
           $env:KHALFOUN_APP_EXE = $installed
           npm run smoke
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Khalfoun-Windows-Installer
-          path: khalfoun/dist/*.exe
-          if-no-files-found: error

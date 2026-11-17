@@ -22,6 +22,7 @@ if (process.platform === 'linux') {
 }
 const child = spawn(cmd, args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
 let out = '';
+child.on('error', (err) => { console.error(`لم يبدأ التطبيق: ${err.message}`); process.exit(1); });
 child.stdout.on('data', (d) => { out += d; });
 child.stderr.on('data', (d) => { out += d; });
 const timer = setTimeout(() => child.kill('SIGKILL'), 90000);
