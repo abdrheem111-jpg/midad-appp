@@ -378,7 +378,8 @@ await check('known commands never go to the model; a failed model falls back pol
   assert((await cpage.evaluate(() => window.__khalfoun.bridge._chatCalls.length)) === 1, 'command was sent to the model');
   await cpage.evaluate(() => { window.__fakeChat = []; window.__khalfoun.hear('فلسفة الوجود والعدم'); });
   await cpage.waitForTimeout(1800);
-  assert(/فهمت|وصلتني|تعلمتها|أذني|وضّح|وضح|صعب/.test(await cbubble()), `fallback: ${await cbubble()}`);
+  const fb = await cpage.evaluate(() => window.__khalfoun.lastReply?.situation);
+  assert(fb === 'not_understood', `fallback situation: ${fb}, bubble: ${await cbubble()}`);
 });
 
 /** Waits until `fn` is true on `pg`, or fails the check after `ms`. */

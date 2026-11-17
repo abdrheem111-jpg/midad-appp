@@ -77,8 +77,11 @@ function hideBubble() {
 
 // ----------------------------------------------------------------- replies
 
+let lastReply = null; // for automated checks
+
 function handle(reply) {
   if (!reply) return;
+  lastReply = reply;
   if (reply.emotion) character.setEmotion(reply.emotion);
   if (reply.costume !== undefined) character.setCostume(reply.costume);
   if (reply.say) showBubble(reply.say, reply.emotion?.emotion);
@@ -722,7 +725,7 @@ async function start() {
   else handle(brain.start());
 
   // Hooks for automated UI tests and debugging.
-  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, get preview() { return preview; } };
+  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, get preview() { return preview; }, get lastReply() { return lastReply; } };
   document.documentElement.dataset.ready = '1';
 }
 
