@@ -3,7 +3,10 @@
 // Needs Playwright: npm i -D playwright && npx playwright install chromium
 
 import { createRequire } from 'node:module';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { encodeWav } from '../src/renderer/wav.js';
 import { startServer } from './serve.mjs';
 
 const require = createRequire(import.meta.url);
@@ -19,7 +22,22 @@ const outDir = process.argv[2] || 'ui-shots';
 await mkdir(outDir, { recursive: true });
 const server = await startServer(0);
 const base = `http://127.0.0.1:${server.address().port}/`;
-const browser = await chromium.launch();
+// A simulated microphone lets the voice path run for real: Chromium plays a
+// generated file with speech-length sounds (about a second) separated by pauses.
+const RATE = 16000;
+const pattern = [];
+for (let k = 0; k < 6; k += 1) pattern.push([1200, 0], [1000, 0.22]);
+const total = pattern.reduce((n, [ms]) => n + (RATE * ms) / 1000, 0);
+const samples = new Float32Array(total);
+let pos = 0;
+for (const [ms, amp] of pattern) {
+  const n = (RATE * ms) / 1000;
+  for (let i = 0; i < n; i += 1) samples[pos + i] = amp * Math.sin((2 * Math.PI * 200 * i) / RATE) * (0.6 + 0.4 * Math.sin(i / 300));
+  pos += n;
+}
+const micFile = join(tmpdir(), `khalfoun-mic-${process.pid}.wav`);
+await writeFile(micFile, encodeWav(samples, RATE));
+const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${micFile}`] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 760 }, deviceScaleFactor: 1 });
 const problems = [];
 page.on('console', (m) => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
@@ -163,6 +181,51 @@ await check('memory survives a reload (no onboarding the second time)', async ()
   assert(!(await page.locator('#onboarding').isVisible()), 'onboarding shown again');
   const name = await page.evaluate(() => window.__khalfoun.brain.memory.data.name);
   assert(name === 'عبدالرحيم', `name ${name}`);
+});
+
+// ---------------------------------------------------------------- wake word
+const vpage = await browser.newPage({ viewport: { width: 1280, height: 760 } });
+vpage.on('pageerror', (e) => problems.push(`voice page error: ${e.message}`));
+vpage.on('console', (m) => { if (m.type() === 'error') problems.push(`voice console: ${m.text()}`); });
+await vpage.goto(`${base}?fakevoice=1`);
+await vpage.evaluate(() => {
+  localStorage.setItem('khalfoun.settings', JSON.stringify({ onboarded: true, level: 3, kidsMode: false }));
+  localStorage.setItem('khalfoun.memory', JSON.stringify({ name: 'عبدالرحيم', alwaysListen: true, humor: 1 }));
+});
+await vpage.reload();
+await vpage.waitForFunction(() => document.documentElement.dataset.ready === '1');
+const vbubble = () => vpage.locator('#bubble-text').textContent();
+
+await check('always-listening shows the mic badge and keeps the mic open', async () => {
+  await vpage.waitForTimeout(800);
+  assert(await vpage.locator('#ear').isVisible(), 'mic badge hidden');
+  assert(await vpage.evaluate(() => window.__khalfoun.wake.active), 'listener not active');
+});
+
+await check('a sentence without his name is ignored; «يا خلفون افتح الحاسبة» runs at once', async () => {
+  await vpage.evaluate(() => { window.__fakeTranscripts = ['كلام عادي عن التلفون', 'يا خلفون افتح الحاسبة']; });
+  const ok = await vpage.waitForFunction(() => window.__khalfoun.bridge._actions.some((a) => a.type === 'open_app' && a.params.app === 'calculator'), null, { timeout: 20000 }).then(() => true, () => false);
+  const calls = await vpage.evaluate(() => window.__khalfoun.bridge._transcribeCalls);
+  assert(ok, `no action; transcribe calls: ${JSON.stringify(calls)}`);
+  assert(calls.length >= 2 && calls.every((c) => c.purpose === 'wake' && c.bytes > 44), JSON.stringify(calls));
+  const opened = await vpage.evaluate(() => window.__khalfoun.bridge._actions.filter((a) => a.type === 'open_app').length);
+  assert(opened === 1, `opened ${opened} times`);
+});
+
+await check('just «يا خلفون» makes him answer and listen for the command', async () => {
+  await vpage.waitForTimeout(1500);
+  await vpage.evaluate(() => { window.__fakeTranscripts = ['يا خلفون', 'كم الساعة']; window.__khalfoun.bridge._transcribeCalls.length = 0; });
+  const ok = await vpage.waitForFunction(() => window.__khalfoun.bridge._transcribeCalls.some((c) => c.purpose === 'command'), null, { timeout: 25000 }).then(() => true, () => false);
+  assert(ok, `never listened for a command: ${JSON.stringify(await vpage.evaluate(() => window.__khalfoun.bridge._transcribeCalls))}`);
+  await vpage.waitForTimeout(1500);
+  assert(/[٠-٩]/.test(await vbubble()), `bubble: ${await vbubble()}`);
+  await vpage.screenshot({ path: `${outDir}/6-wake.png` });
+});
+
+await check('turning the setting off releases the microphone', async () => {
+  await vpage.evaluate(() => { window.__khalfoun.brain.updateSettings({ alwaysListen: false }); window.__khalfoun.updateWake(); });
+  assert(!(await vpage.evaluate(() => window.__khalfoun.wake.active)), 'still listening');
+  assert(!(await vpage.locator('#ear').isVisible()), 'badge still shown');
 });
 
 await browser.close();

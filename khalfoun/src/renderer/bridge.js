@@ -14,6 +14,10 @@ function writeJSON(key, value) {
 }
 
 function createPreviewBridge() {
+  // ?fakevoice=1 pretends speech recognition is installed and answers from
+  // window.__fakeTranscripts, so the whole voice path can be tested in a browser.
+  const fakeVoice = typeof location !== 'undefined' && new URLSearchParams(location.search).has('fakevoice');
+  const transcribeCalls = [];
   const listeners = new Set();
   const emit = (ev) => listeners.forEach((cb) => cb(ev));
   const actionsRun = [];
@@ -23,7 +27,7 @@ function createPreviewBridge() {
       return {
         memory: readJSON(MEM_KEY),
         settings: readJSON(SET_KEY) || { onboarded: false, level: 0, kidsMode: false },
-        voice: { available: false },
+        voice: { available: fakeVoice },
         platform: 'preview',
       };
     },
@@ -45,13 +49,19 @@ function createPreviewBridge() {
       if (action.type === 'undo_organize') return { ok: true, data: { restored: 7 } };
       return { ok: true };
     },
-    async transcribe() { return { ok: false, error: 'stt_unavailable' }; },
+    async transcribe(wav, purpose) {
+      if (!fakeVoice) return { ok: false, error: 'stt_unavailable' };
+      transcribeCalls.push({ bytes: wav?.length || 0, purpose });
+      const queue = window.__fakeTranscripts || [];
+      return { ok: true, text: queue.length ? queue.shift() : '' };
+    },
     setInteractive() {},
     onEvent(cb) { listeners.add(cb); return () => listeners.delete(cb); },
     quit() {},
     // test helpers
     _emit: emit,
     _actions: actionsRun,
+    _transcribeCalls: transcribeCalls,
   };
 }
 

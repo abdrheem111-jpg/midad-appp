@@ -12,6 +12,14 @@ import { join } from 'node:path';
 
 const BIN_NAMES = ['whisper-cli.exe', 'whisper-cli', 'main.exe', 'main', 'whisper.exe', 'whisper'];
 const MODEL_PREFERENCE = ['ggml-large-v3-turbo.bin', 'ggml-medium.bin', 'ggml-small.bin', 'ggml-base.bin', 'ggml-tiny.bin'];
+const WAKE_PREFERENCE = ['ggml-base.bin', 'ggml-tiny.bin'];
+/**
+ * Words given to whisper as context so it expects common commands. The name is
+ * deliberately left out: whisper can echo its prompt on noise, and an echoed
+ * name would wake him by mistake.
+ */
+export const PROMPT = 'افتح، دور لي عن، اكتب، ذكرني، كم الساعة، شغل يوتيوب.';
+const ECHO = /افتح\s*،?\s*دور لي عن\s*،?\s*اكتب/;
 
 async function exists(p) {
   try { await access(p); return true; } catch { return false; }
@@ -46,7 +54,15 @@ export async function findWhisper({ dirs, env = process.env }) {
     bin = bin || found.bin;
     model = model || found.model;
   }
-  return { available: Boolean(bin && model), bin, model };
+  // A small, fast model is used for spotting the wake word when one is present.
+  let wakeModel = model;
+  for (const dir of dirs) {
+    let files = [];
+    try { files = await readdir(dir); } catch { continue; }
+    const small = WAKE_PREFERENCE.find((n) => files.includes(n));
+    if (small) { wakeModel = join(dir, small); break; }
+  }
+  return { available: Boolean(bin && model), bin, model, wakeModel: model ? wakeModel : null };
 }
 
 /** Removes whisper's bracketed noise tags like [موسيقى] or (applause). */
@@ -58,9 +74,9 @@ export function cleanTranscript(text) {
 }
 
 /**
- * @param {{bin: string, model: string}} whisper
+ * @param {{bin: string, model: string, wakeModel?: string}} whisper
  * @param {Uint8Array} wav 16 kHz mono WAV
- * @param {{run?: typeof execFile, threads?: number}} [opts]
+ * @param {{run?: typeof execFile, threads?: number, purpose?: 'command'|'wake'}} [opts]
  * @returns {Promise<{ok: true, text: string} | {ok: false, error: string}>}
  */
 export async function transcribe(whisper, wav, opts = {}) {
@@ -71,14 +87,16 @@ export async function transcribe(whisper, wav, opts = {}) {
   const file = join(dir, 'speech.wav');
   try {
     await writeFile(file, wav);
-    const args = ['-m', whisper.model, '-l', 'ar', '-f', file, '-nt', '-np', '-t', String(opts.threads || 4)];
+    const model = opts.purpose === 'wake' && whisper.wakeModel ? whisper.wakeModel : whisper.model;
+    const args = ['-m', model, '-l', 'ar', '-f', file, '-nt', '-np', '-t', String(opts.threads || 4), '--prompt', PROMPT];
     const text = await new Promise((resolve, reject) => {
       run(whisper.bin, args, { windowsHide: true, timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
         if (err) reject(err);
         else resolve(String(stdout || ''));
       });
     });
-    return { ok: true, text: cleanTranscript(text) };
+    const clean = cleanTranscript(text);
+    return { ok: true, text: ECHO.test(clean) ? '' : clean };
   } catch (err) {
     return { ok: false, error: `stt_failed: ${err?.message || err}` };
   } finally {

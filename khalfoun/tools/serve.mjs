@@ -16,7 +16,7 @@ export function startServer(port = 0) {
     try {
       const url = new URL(req.url, 'http://localhost');
       const path = decodeURIComponent(url.pathname);
-      if (path === '/') { res.writeHead(302, { location: '/src/renderer/index.html' }).end(); return; }
+      if (path === '/') { res.writeHead(302, { location: `/src/renderer/index.html${url.search}` }).end(); return; }
       const file = normalize(join(ROOT, path));
       if (!file.startsWith(ROOT.endsWith(sep) ? ROOT : ROOT + sep)) { res.writeHead(403).end(); return; }
       const body = await readFile(file);

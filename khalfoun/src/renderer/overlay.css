@@ -44,6 +44,36 @@ html.preview body {
 .stage.dragging { cursor: grabbing; }
 .khalfoun-svg { width: 100%; height: 100%; overflow: visible; display: block; }
 
+.ear {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 5;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 6px rgba(42, 26, 16, 0.3);
+  pointer-events: none;
+}
+.ear svg { width: 15px; height: 15px; fill: currentColor; }
+.ear::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  animation: ear-pulse 2.2s ease-out infinite;
+}
+.ear.heard { background: var(--gold); }
+@keyframes ear-pulse {
+  from { transform: scale(0.8); opacity: 0.8; }
+  to { transform: scale(1.5); opacity: 0; }
+}
+
 .bubble {
   position: absolute;
   z-index: 20;
@@ -243,5 +273,5 @@ html.preview body {
 [hidden] { display: none !important; }
 
 @media (prefers-reduced-motion: reduce) {
-  .bubble { animation: none; }
+  .bubble, .ear::after { animation: none; }
 }

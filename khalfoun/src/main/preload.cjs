@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('khalfoun', {
   saveMemory: (data) => ipcRenderer.invoke('memory:save', data),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
   runAction: (action) => ipcRenderer.invoke('action:run', action),
-  transcribe: (wav) => ipcRenderer.invoke('voice:transcribe', wav),
+  transcribe: (wav, purpose) => ipcRenderer.invoke('voice:transcribe', wav, purpose === 'wake' ? 'wake' : 'command'),
   setInteractive: (on) => ipcRenderer.send('ui:interactive', Boolean(on)),
   onEvent: (callback) => {
     const handler = (_event, payload) => callback(payload);

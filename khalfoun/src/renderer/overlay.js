@@ -7,6 +7,9 @@ import { createCharacter } from './character.js';
 import { Animator, EMOTION_ANIMATION } from './animations.js';
 import { Motion } from './motion.js';
 import { Recorder } from './recorder.js';
+import { WakeListener } from './wake-listener.js';
+import { findWakeWord } from '../core/wake.js';
+import { recognize } from '../core/intents.js';
 import { getBridge } from './bridge.js';
 
 const CHAR_W = 170;
@@ -21,7 +24,7 @@ if (isPreview) document.documentElement.classList.add('preview');
 
 const els = {
   stage: $('stage'), bubble: $('bubble'), bubbleText: $('bubble-text'), command: $('command'), input: $('command-input'),
-  mic: $('mic'), micLevel: $('mic-level'), onboarding: $('onboarding'), settings: $('settings'),
+  mic: $('mic'), micLevel: $('mic-level'), onboarding: $('onboarding'), settings: $('settings'), ear: $('ear'),
 };
 
 const workArea = () => ({ width: window.innerWidth, height: window.innerHeight - (isPreview ? PREVIEW_TASKBAR : 0) });
@@ -155,7 +158,7 @@ async function listen() {
     els.mic.classList.remove('recording');
     if (!spoke) { handle(brain.event('stt_empty')); return; }
     showBubble('…', 'focused');
-    const res = await bridge.transcribe(wav);
+    const res = await bridge.transcribe(wav, 'command');
     if (!res?.ok) { handle(brain.event(res?.error === 'stt_unavailable' ? 'stt_unavailable' : 'stt_empty')); return; }
     if (!res.text) { handle(brain.event('stt_empty')); return; }
     els.input.value = res.text;
@@ -169,6 +172,52 @@ async function listen() {
 }
 
 els.mic.addEventListener('click', listen);
+
+// ------------------------------------------------------- «يا خلفون» wake word
+
+let wakeBusy = false;
+const wake = new WakeListener({
+  onSentence: (wav) => { onWakeSentence(wav); },
+  onError: (err) => {
+    console.warn('wake listener stopped', err);
+    brain.updateSettings({ alwaysListen: false });
+    handle(brain.event('mic_error'));
+    updateWake();
+  },
+});
+
+/** Starts or stops always-on listening to match the setting. */
+function updateWake() {
+  const want = Boolean(brain?.memory.data.alwaysListen && voiceAvailable);
+  if (want && !wake.active) wake.start().then(() => { els.ear.hidden = !wake.active; });
+  if (!want && wake.active) wake.stop();
+  els.ear.hidden = !want;
+}
+
+async function onWakeSentence(wav) {
+  if (wakeBusy || recorder.active || panelsOpen()) return;
+  wakeBusy = true;
+  try {
+    const res = await bridge.transcribe(wav, 'wake');
+    if (!res?.ok || !res.text) return;
+    const hit = findWakeWord(res.text);
+    if (!hit.found) return;
+    els.ear.classList.add('heard');
+    setTimeout(() => els.ear.classList.remove('heard'), 900);
+    if (hit.rest && !['call', 'empty'].includes(recognize(hit.rest).intent)) {
+      // «يا خلفون افتح الحاسبة» in one breath: do it right away.
+      hear(hit.rest);
+      return;
+    }
+    const wasAsleep = brain.emotions.asleep;
+    handle(brain.event('wake_call'));
+    if (wasAsleep) await new Promise((r) => setTimeout(r, 900));
+    wake.pause();
+    try { await listen(); } finally { wake.resume(); }
+  } finally {
+    wakeBusy = false;
+  }
+}
 
 // ---------------------------------------------------------- pointer & mouse
 
@@ -287,6 +336,8 @@ function openSettings() {
   radio('st-level', d.level || 1);
   radio('st-humor', d.humor);
   $('st-kids').checked = !!d.kidsMode;
+  $('st-listen').checked = !!d.alwaysListen;
+  $('st-listen').disabled = !voiceAvailable;
   $('st-voice').textContent = voiceAvailable
     ? 'الاستماع الصوتي جاهز: اضغط زر الميكروفون أو Ctrl+Shift+Space وتكلم.'
     : 'الاستماع الصوتي غير مركّب بعد. شوف ملف README لتركيب نموذج الاستماع، ولين ذاك اكتب أوامرك.';
@@ -341,6 +392,10 @@ $('st-kids').addEventListener('change', async () => {
   if (res?.ok) brain.updateSettings({ kidsMode: res.settings.kidsMode });
   $('st-kids').checked = !!brain.memory.data.kidsMode;
 });
+$('st-listen').addEventListener('change', () => {
+  brain.updateSettings({ alwaysListen: $('st-listen').checked });
+  updateWake();
+});
 $('st-forget').addEventListener('click', () => {
   // eslint-disable-next-line no-alert
   if (window.confirm('أنسى كل اللي تعلمته عنك؟ (الإعدادات تبقى)')) {
@@ -358,6 +413,7 @@ function layout() {
   const y = motion.y;
   els.stage.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
   const cx = x + CHAR_W / 2;
+  if (!els.ear.hidden) els.ear.style.transform = `translate(${(x + 6).toFixed(1)}px, ${(y + 100).toFixed(1)}px)`;
   let top = y + 4;
   if (!els.command.hidden) {
     const w = els.command.offsetWidth;
@@ -452,11 +508,12 @@ async function start() {
   setInterval(() => handle(brain.tick()), 4000);
   requestAnimationFrame(frame);
 
+  updateWake();
   if (!brain.memory.data.onboarded) startOnboarding();
   else handle(brain.start());
 
   // Hooks for automated UI tests and debugging.
-  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble };
+  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, wake, updateWake };
   document.documentElement.dataset.ready = '1';
 }
 

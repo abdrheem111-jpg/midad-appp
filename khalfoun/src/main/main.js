@@ -40,7 +40,7 @@ if (process.env.KHALFOUN_USER_DATA) app.setPath('userData', process.env.KHALFOUN
 let win = null;
 let tray = null;
 let settings = { ...DEFAULT_SETTINGS };
-let whisper = { available: false, bin: null, model: null };
+let whisper = { available: false, bin: null, model: null, wakeModel: null };
 const reminders = new Set();
 
 const send = (type, data = {}) => {
@@ -233,10 +233,19 @@ function setupIpc(stores, executor) {
     return executor.run(action);
   });
 
-  ipcMain.handle('voice:transcribe', async (event, wav) => {
+  let sttBusy = false;
+  ipcMain.handle('voice:transcribe', async (event, wav, purpose) => {
     if (!fromApp(event)) return { ok: false, error: 'forbidden' };
     const bytes = wav instanceof Uint8Array ? wav : new Uint8Array(wav || []);
-    return transcribe(whisper, bytes);
+    const isWake = purpose === 'wake';
+    // Wake-word checks are skipped while another recognition runs, so they never pile up.
+    if (isWake && sttBusy) return { ok: false, error: 'busy' };
+    sttBusy = true;
+    try {
+      return await transcribe(whisper, bytes, { purpose: isWake ? 'wake' : 'command' });
+    } finally {
+      sttBusy = false;
+    }
   });
 
   ipcMain.on('ui:interactive', (event, on) => {
