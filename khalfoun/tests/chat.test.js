@@ -10,7 +10,7 @@ test('the system prompt sets the Omani persona, short replies, honesty and kids 
   const m = buildMessages({ text: 'شو رأيك في البحر؟', name: 'مريم', kidsMode: true, humor: 2, history: [{ user: 'هلا', khalfoun: 'هلا والله' }] });
   const sys = m[0].content;
   assert.equal(m[0].role, 'system');
-  for (const s of ['خلفون', 'العُمانية', 'جملتين', 'لا تقول إنك فتحت', 'مريم', 'طفل', 'مبالغ']) assert.ok(sys.includes(s), s);
+  for (const s of ['خلفون', 'العُمانية', 'جملتين', 'لا تقول أبداً إنك فتحت', 'مريم', 'طفل', 'مبالغ']) assert.ok(sys.includes(s), s);
   assert.equal(m.at(-1).content, 'شو رأيك في البحر؟');
   assert.equal(m.filter((x) => x.role === 'user').length, 3, 'example + history + question');
   const many = buildMessages({ text: 'x', history: Array.from({ length: 10 }, (_, i) => ({ user: `u${i}`, khalfoun: `k${i}` })) });
@@ -115,4 +115,36 @@ test('brain keeps a short chat history and reacts to the model reply', () => {
   assert.equal(q.situation, 'chat');
   assert.equal(q.animation, 'think');
   assert.equal(q.emotion.emotion, 'curious');
+});
+
+import { extractCommand, COMMAND_FORMS } from '../src/core/chat-prompt.js';
+import { Brain as Brain2 } from '../src/core/brain.js';
+import { defaultMemory as dm2 } from '../src/core/memory.js';
+
+test('the model may answer with a command line, which is pulled out cleanly', () => {
+  assert.equal(extractCommand('أمر: افتح الحاسبة'), 'افتح الحاسبة');
+  assert.equal(extractCommand('امر: دور في يوتيوب عن أغاني فيروز'), 'دور في يوتيوب عن أغاني فيروز');
+  assert.equal(extractCommand('«أمر: وطي الصوت»'), 'وطي الصوت');
+  assert.equal(extractCommand('أمر: <افتح الوورد>'), 'افتح الوورد');
+  assert.equal(extractCommand('هلا والله! شحالك؟'), null);
+  assert.equal(extractCommand('قلت لك أمر: افتح'), null);
+  assert.ok(buildMessages({ text: 'x' })[0].content.includes(COMMAND_FORMS[0]));
+});
+
+test('a command understood by the model is checked by the rules and asked about first', () => {
+  const now = Date.UTC(2026, 10, 17, 8);
+  const brain = new Brain2({ memoryData: { ...dm2(now), onboarded: true, level: 3 }, clock: () => now, rng: () => 0.3 });
+  const ask = brain.modelCommand('ودي أسمع أغاني فيروز', 'دور في يوتيوب عن أغاني فيروز');
+  assert.equal(ask.situation, 'model_command');
+  assert.equal(ask.awaitingConfirm, true);
+  const yes = brain.hear('ايوه');
+  assert.deepEqual(yes.action.params, { query: 'أغاني فيروز', engine: 'youtube' });
+  assert.equal(brain.modelCommand('كم الوقت عندك', 'كم الساعة').situation, 'time'); // harmless: answered directly
+  assert.equal(brain.modelCommand('x', 'طير في السما'), null); // not a real command: ignored
+});
+
+test('ChatClient returns {command} when the model answers with one', async () => {
+  const fetchFn = async () => new Response(JSON.stringify({ choices: [{ message: { content: '<think>hmm</think>أمر: افتح الحاسبة' } }] }), { status: 200 });
+  const client = new ChatClient({ endpoint: 'http://127.0.0.1:11434/v1', model: 'm', fetchFn });
+  assert.deepEqual(await client.reply({ text: 'ودي أحسب شي' }), { ok: true, command: 'افتح الحاسبة' });
 });

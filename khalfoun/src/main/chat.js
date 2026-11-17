@@ -2,7 +2,7 @@
 // OpenAI-style API that Ollama, llama.cpp's server and LM Studio all offer.
 // Nothing is sent to the internet: only local addresses are accepted.
 
-import { buildMessages, cleanReply, isSafe, isLocalEndpoint } from '../core/chat-prompt.js';
+import { buildMessages, cleanReply, isSafe, isLocalEndpoint, extractCommand } from '../core/chat-prompt.js';
 
 export const DEFAULT_ENDPOINTS = [
   'http://127.0.0.1:11434/v1', // Ollama
@@ -70,7 +70,11 @@ export class ChatClient {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: this.model, messages: buildMessages(ctx), temperature: 0.8, max_tokens: 160, stream: false }),
       }, this.timeoutMs);
-      const text = cleanReply(data?.choices?.[0]?.message?.content);
+      const rawText = String(data?.choices?.[0]?.message?.content || '').replace(/<think>[\s\S]*?<\/think>/gi, ' ').trim();
+      // The model may answer with a command for the brain instead of a chat line.
+      const command = extractCommand(rawText);
+      if (command) return { ok: true, command };
+      const text = cleanReply(rawText);
       if (!isSafe(text, !!ctx.kidsMode)) return { ok: false, error: 'unsafe_or_empty' };
       return { ok: true, text };
     } catch (err) {

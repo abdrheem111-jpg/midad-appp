@@ -175,6 +175,8 @@ export const TEMPLATES = [
   { id: 'rpn2', s: 'repeat_nothing', t: 'مرة ثانية شو؟ ذكرني بالأمر.', a: 'think' },
   { id: 'suy1', s: 'suggest_youtube', t: 'ما لقيت برنامج اسمه «{target}». أدور عليه في يوتيوب؟', a: 'think' },
   { id: 'suy2', s: 'suggest_youtube', t: '«{target}» مب برنامج عندي... أشغله لك من يوتيوب؟', a: 'idea' },
+  { id: 'mdc1', s: 'model_command', t: 'فهمت إنك تبغى: «{command}». أسويها؟', a: 'idea' },
+  { id: 'mdc2', s: 'model_command', t: 'قصدك «{command}»؟ قول نعم وأسويها.', a: 'think' },
   { id: 'sug1', s: 'suggest_app', t: 'تقصد {app}؟', a: 'think' },
   { id: 'sug2', s: 'suggest_app', t: '«{target}»... قصدك {app}؟ قول نعم وأفتحه.', a: 'think' },
   { id: 'lso1', s: 'learn_offer', t: 'قبل شوي قلت «{phrase}» وما فهمتها. أحفظها إنها تعني «{command}»؟', a: 'idea' },

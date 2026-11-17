@@ -3,6 +3,24 @@
 
 const MAX_REPLY = 220;
 
+/** The command forms the model may answer with; the brain's own rules then understand them. */
+export const COMMAND_FORMS = [
+  'افتح <اسم البرنامج أو الموقع>', 'سكر <اسم البرنامج>', 'دور عن <كلمات البحث>', 'دور في يوتيوب عن <كلمات>',
+  'اكتب <النص>', 'ذكرني بعد <عدد> دقايق <الملاحظة>', 'ارفع الصوت', 'وطي الصوت', 'اكتم الصوت', 'صور الشاشة',
+  'كم الساعة', 'كم التاريخ', 'رتب التنزيلات', 'اختبرني', 'قول نكتة',
+];
+
+/**
+ * When the model decided the person asked for a command, returns that command
+ * sentence («أمر: افتح الحاسبة» → «افتح الحاسبة»); otherwise null.
+ */
+export function extractCommand(raw) {
+  const m = /^\s*[«"]?\s*(?:أمر|امر)\s*[:：]\s*(.+?)\s*[»"]?\s*$/u.exec(String(raw || '').split('\n')[0]);
+  if (!m) return null;
+  const cmd = m[1].replace(/[«»"<>]/g, '').trim();
+  return cmd && cmd.length <= 200 ? cmd : null;
+}
+
 /**
  * @param {{name?: string, kidsMode?: boolean, humor?: number, history?: Array<{user: string, khalfoun: string}>, text: string}} ctx
  * @returns {Array<{role: 'system'|'user'|'assistant', content: string}>}
@@ -14,7 +32,10 @@ export function buildMessages(ctx) {
     'تتكلم باللهجة العُمانية الخليجية فقط (مثل: شحالك، زين، واجد، الحين، ابشر، ما عليه).',
     `طبعك: ${humor}، كريم ومرحّب، تحب النكت العُمانية الخفيفة، صبور مع المتعلمين.`,
     'ردك جملة أو جملتين قصيرتين فقط، بدون قوائم ولا رموز تنسيق ولا إيموجي.',
-    'لا تقول إنك فتحت برنامجاً أو نفذت شيئاً على الجهاز؛ إذا طُلب منك أمر، اقترح الصيغة المناسبة مثل: «قول: افتح الحاسبة».',
+    'لا تقول أبداً إنك فتحت برنامجاً أو نفذت شيئاً على الجهاز.',
+    'إذا كان كلام الشخص طلباً لتنفيذ شيء على الحاسوب، لا تسولف: اكتب سطراً واحداً فقط يبدأ بـ «أمر:» ثم الأمر بإحدى هذه الصيغ بالضبط:',
+    COMMAND_FORMS.join(' | '),
+    'مثال: «ودي أسمع أغاني فيروز» → «أمر: دور في يوتيوب عن أغاني فيروز». «الشاشة مزعجة بالصوت» → «أمر: وطي الصوت».',
     'إذا ما تعرف الجواب، قل ذلك بلطف ولا تخترع معلومات.',
     ctx.name ? `اسم الشخص اللي تكلمه: ${ctx.name}.` : '',
     ctx.kidsMode ? 'الشخص طفل: كلامك بسيط ومشجع وآمن تماماً، ولا تتكلم في مواضيع للكبار أبداً.' : '',

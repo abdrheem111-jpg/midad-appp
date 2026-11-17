@@ -625,6 +625,22 @@ export class Brain {
   // ---------------------------------------------------------------- chat
 
   /** Builds a reply from a sentence the local model wrote for him. */
+  /**
+   * The local model understood a sentence the rules did not, as a command.
+   * He checks it with his own rules and, if it is a real command, asks first:
+   * «فهمت إنك تبغى: افتح الحاسبة. أسويها؟».
+   */
+  modelCommand(userText, command) {
+    const now = this.clock();
+    const r = recognize(command);
+    const COMMANDS = ['open', 'close', 'search', 'type_text', 'volume', 'reminder', 'screenshot', 'time', 'date', 'organize_downloads', 'quiz', 'joke', 'open_unknown'];
+    if (!COMMANDS.includes(r.intent)) return null;
+    if (['time', 'date', 'joke', 'quiz'].includes(r.intent)) return this.route(r, command, now); // harmless: just do it
+    this.pending = { kind: 'suggest', raw: command, intent: r };
+    this.emotions.feel('curious', now);
+    return this.reply('model_command', { vars: { command }, awaitingConfirm: true });
+  }
+
   chatReply(userText, text) {
     const now = this.clock();
     this.chatHistory.push({ user: String(userText), khalfoun: String(text) });

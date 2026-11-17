@@ -405,6 +405,17 @@ async function untilOn(pg, fn, ms = 5000) {
   throw new Error(`timed out waiting for: ${String(fn).slice(0, 120)}`);
 }
 
+await check('a sentence only the model understands becomes a command, after a yes', async () => {
+  await cpage.evaluate(() => { window.__fakeChat = ['أمر: دور في يوتيوب عن أناشيد'];  window.__khalfoun.hear('ودي أسمع أناشيد حلوة'); });
+  await cpage.waitForTimeout(1500);
+  const asked = await cpage.evaluate(() => window.__khalfoun.lastReply?.situation);
+  assert(asked === 'model_command', `situation: ${asked}`);
+  await cpage.evaluate(() => window.__khalfoun.hear('ايوه'));
+  await cpage.waitForTimeout(700);
+  const last = await cpage.evaluate(() => window.__khalfoun.bridge._actions.at(-1));
+  assert(last?.type === 'search' && last.params.engine === 'youtube' && last.params.query === 'أناشيد', JSON.stringify(last));
+});
+
 // ----- one-click setup from the settings panel (simulated downloads)
 const spage = await browser.newPage({ viewport: { width: 1280, height: 760 } });
 spage.on('pageerror', (e) => problems.push(`setup page error: ${e.message}`));

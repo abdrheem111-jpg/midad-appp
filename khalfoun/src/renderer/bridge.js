@@ -113,7 +113,10 @@ function createPreviewBridge() {
       chatCalls.push(payload);
       await new Promise((r) => setTimeout(r, 400));
       const queue = window.__fakeChat || [];
-      return queue.length ? { ok: true, text: queue.shift() } : { ok: false, error: 'timeout' };
+      if (!queue.length) return { ok: false, error: 'timeout' };
+      const next = queue.shift();
+      const m = /^أمر:\s*(.+)$/u.exec(next);
+      return m ? { ok: true, command: m[1].trim() } : { ok: true, text: next };
     },
     setInteractive() {},
     watchWindows() {},

@@ -11,7 +11,7 @@ import {
 } from 'electron';
 import { readFile, mkdtemp, writeFile, mkdir, stat } from 'node:fs/promises';
 import { join, extname, normalize, relative, sep } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, cpus } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { JsonStore } from './storage.js';
 import { createPlatform } from './actions/platform.js';
@@ -309,7 +309,10 @@ function setupIpc(stores, executor) {
     if (isWake && sttBusy) return { ok: false, error: 'busy' };
     sttBusy = true;
     try {
-      const res = await transcribe(whisper, bytes, { purpose: isWake ? 'wake' : 'command' });
+      // Use most cores for a command (faster answer), fewer for wake-word checks running in the background.
+      const cores = Math.max(1, cpus().length);
+      const threads = isWake ? Math.min(4, Math.max(2, cores - 2)) : Math.min(8, Math.max(2, cores - 1));
+      const res = await transcribe(whisper, bytes, { purpose: isWake ? 'wake' : 'command', threads });
       if (!isWake || !res.ok) diag.write(`voice (${isWake ? 'wake' : 'command'}, ${bytes.length} bytes) →`, res.ok ? `«${res.text}»` : `failed: ${res.error}`);
       return res;
     } finally {

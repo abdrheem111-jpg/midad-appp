@@ -154,7 +154,9 @@ async function askModel(text, fallback) {
   try {
     const d = brain.memory.data;
     const res = await bridge.chat({ text, history: brain.chatHistory, name: d.name, humor: d.humor });
-    handle(res?.ok && res.text ? brain.chatReply(text, res.text) : fallback);
+    const asCommand = res?.ok && res.command ? brain.modelCommand(text, res.command) : null;
+    bridge.note?.(`model for «${text}» → ${res?.command ? `command «${res.command}»` : res?.text ? 'chat' : `failed: ${res?.error}`}`);
+    handle(asCommand || (res?.ok && res.text ? brain.chatReply(text, res.text) : fallback));
   } catch {
     handle(fallback);
   } finally {
