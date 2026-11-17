@@ -86,6 +86,77 @@ export function parseMinutes(text) {
 }
 
 /**
+ * Reads a clock time from free text: «الساعه 5», «الساعه خمس ونص العصر»,
+ * «بكره الساعه ٧ الصبح», «الساعه 4:30», «الساعه سبعه الا ربع».
+ * Returns {hour (0-23 or 1-12 when no period), minute, period, dayOffset} or null.
+ * @param {string} text
+ */
+export function parseClock(text) {
+  const t = ` ${normalize(text)} `;
+  const dayOffset = / بعد (بكره|باكر|بكرا) /.test(t) ? 2 : / (بكره|باكر|بكرا|غدا|بكرة) /.test(t) ? 1 : 0;
+  let hour = null;
+  let minute = 0;
+  const colon = /(?:^|\s)(\d{1,2})\s+(\d{2})(?:\s|$)/.exec(String(text).replace(/[٠-٩]/g, (d) => String(ARABIC_INDIC.indexOf(d))).replace(/[:.]/g, ' '));
+  const tokens = t.trim().split(' ');
+  const at = tokens.findIndex((w) => w === 'الساعه' || w === 'ساعه' || w === 'الساعة');
+  if (at >= 0) {
+    hour = parseNumberToken(tokens[at + 1]);
+    if (hour === null && tokens[at + 1] === 'وحده') hour = 1;
+    if (hour === null) {
+      const two = `${tokens[at + 1] || ''} ${tokens[at + 2] || ''}`;
+      const m = /^(\d+) (\d+)$/.exec(two);
+      if (m) { hour = Number(m[1]); minute = Number(m[2]); }
+    } else if (/^\d{2}$/.test(tokens[at + 2] || '') && Number(tokens[at + 2]) < 60) {
+      minute = Number(tokens[at + 2]);
+    }
+  }
+  if (hour === null && colon && / (الساعه|ساعه) /.test(t)) { hour = Number(colon[1]); minute = Number(colon[2]); }
+  if (hour === null || hour > 23 || minute > 59) return null;
+  if (/ (و نص|ونص|والنص|و نصف|ونصف) /.test(t)) minute = 30;
+  else if (/ (و ربع|وربع) /.test(t)) minute = 15;
+  else if (/ (و ثلث|وثلث) /.test(t)) minute = 20;
+  else if (/ الا ربع /.test(t)) { hour = (hour + 23) % 24; minute = 45; }
+  else if (/ الا ثلث /.test(t)) { hour = (hour + 23) % 24; minute = 40; }
+  let period = null;
+  if (/ (الصبح|الصباح|صباحا|صباح|الفجر|فجر|ص) /.test(t)) period = 'am';
+  else if (/ (الظهر|ظهر|الظهريه) /.test(t)) period = 'noon';
+  else if (/ (العصر|عصر|المغرب|مغرب|المسا|المساء|مساء|مسا|م|العشا|العشاء) /.test(t)) period = 'pm';
+  else if (/ (الليل|بالليل|ليل) /.test(t)) period = 'night';
+  return { hour, minute, period, dayOffset };
+}
+
+/**
+ * The exact moment a parsed clock time refers to, after `now`. Without a
+ * period, the next time the clock shows that hour is chosen.
+ * @param {{hour: number, minute: number, period: string|null, dayOffset: number}} c
+ * @param {number} now
+ * @returns {number} epoch milliseconds
+ */
+export function clockToTime(c, now) {
+  const base = new Date(now);
+  const at = (h, extraDays = 0) => {
+    const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + c.dayOffset + extraDays, h, c.minute, 0, 0);
+    return d.getTime();
+  };
+  let h = c.hour;
+  if (h <= 12 && c.period) {
+    if (c.period === 'am') h = h === 12 ? 0 : h;
+    else if (c.period === 'noon') h = h <= 4 ? h + 12 : h === 12 ? 12 : h;
+    else if (c.period === 'pm') h = h === 12 ? 12 : h + 12;
+    else if (c.period === 'night') h = h === 12 ? 0 : h <= 4 ? h : h + 12;
+  }
+  if (h > 12 || c.period || h === 0) {
+    let t = at(h);
+    if (t <= now + 30000) t = at(h, 1);
+    return t;
+  }
+  // No period: «الساعه 5» → the next 5 o'clock, morning or afternoon.
+  if (c.dayOffset > 0) return at(h >= 7 && h <= 11 ? h : h === 12 ? 12 : h + 12);
+  const options = [at(h), at(h === 12 ? 0 : h + 12), at(h, 1)].filter((t) => t > now + 30000);
+  return Math.min(...options);
+}
+
+/**
  * True when the space-padded normalized text contains the normalized phrase as whole words.
  * @param {string} paddedText text already normalized and wrapped in single spaces
  * @param {string} normalizedPhrase

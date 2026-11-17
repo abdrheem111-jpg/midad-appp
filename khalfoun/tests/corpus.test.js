@@ -180,3 +180,38 @@ test('he answers calculations with the expression and result in Arabic digits', 
   assert.ok(r.say.includes('١٠٠') && r.say.includes('٢٥ × ٤'), r.say);
   assert.equal(brain.hear('كم ٧ على ٠').situation, 'calc_div_zero');
 });
+
+import { parseClock, clockToTime } from '../src/core/arabic.js';
+
+test('clock times in reminders: periods, halves, «الا ربع», tomorrow', () => {
+  const c = (t) => parseClock(t);
+  assert.deepEqual(c('الساعة خمس العصر'), { hour: 5, minute: 0, period: 'pm', dayOffset: 0 });
+  assert.deepEqual(c('بكرة الساعة ٧ الصبح'), { hour: 7, minute: 0, period: 'am', dayOffset: 1 });
+  assert.deepEqual(c('الساعه 4:30'), { hour: 4, minute: 30, period: null, dayOffset: 0 });
+  assert.deepEqual(c('الساعة سبعة الا ربع'), { hour: 6, minute: 45, period: null, dayOffset: 0 });
+  assert.deepEqual(c('الساعة ٨ ونص'), { hour: 8, minute: 30, period: null, dayOffset: 0 });
+  assert.equal(c('بعد خمس دقايق'), null);
+  const at = (y, mo, d, h, mi) => new Date(y, mo, d, h, mi).getTime();
+  const now = at(2026, 10, 17, 9, 0); // 9:00 in the morning
+  assert.equal(clockToTime(c('الساعة خمس العصر'), now), at(2026, 10, 17, 17, 0));
+  assert.equal(clockToTime(c('الساعة 10'), now), at(2026, 10, 17, 10, 0)); // next 10 o'clock: this morning
+  assert.equal(clockToTime(c('الساعة 8'), now), at(2026, 10, 17, 20, 0)); // 8am passed → 8pm
+  assert.equal(clockToTime(c('بكرة الساعة ٧ الصبح'), now), at(2026, 10, 18, 7, 0));
+  assert.equal(clockToTime(c('الساعة ٧ الصبح'), now), at(2026, 10, 18, 7, 0)); // passed today → tomorrow
+  assert.equal(clockToTime(c('الساعه ١٢ الليل'), now), at(2026, 10, 18, 0, 0));
+  assert.equal(clockToTime(c('الساعه ٢ الليل'), now), at(2026, 10, 18, 2, 0));
+  assert.equal(clockToTime(c('الساعه ١ الظهر'), now), at(2026, 10, 17, 13, 0));
+});
+
+test('«ذكرني الساعة خمس العصر بالاجتماع» sets a reminder for the right number of minutes', () => {
+  const now = new Date(2026, 10, 17, 9, 0).getTime();
+  const brain = new Brain({ memoryData: { ...defaultMemory(now), onboarded: true, level: 2 }, clock: () => now, rng: () => 0.1 });
+  const r = brain.hear('ذكرني الساعة خمس العصر بالاجتماع');
+  assert.equal(r.situation, 'reminder_set_at');
+  assert.deepEqual(r.action.params, { minutes: 8 * 60, note: 'الاجتماع', repeat: false });
+  assert.ok(r.say.includes('الاجتماع') && r.say.includes('الساعة'), r.say);
+  const t = brain.hear('ذكرني بكرة الساعة ٧ الصبح اصحى');
+  assert.equal(t.action.params.minutes, 22 * 60);
+  assert.ok(t.say.includes('بكرة'), t.say);
+  assert.equal(brain.hear('ذكرني بعد عشر دقايق').action.params.minutes, 10);
+});

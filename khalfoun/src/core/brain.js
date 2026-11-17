@@ -7,7 +7,7 @@ import { EmotionEngine } from './emotions.js';
 import { ResponseEngine } from './responses.js';
 import { decide, LEVEL_INFO } from './permissions.js';
 import { Memory } from './memory.js';
-import { normalize, toArabicDigits } from './arabic.js';
+import { normalize, toArabicDigits, clockToTime } from './arabic.js';
 import { TEMPLATES, APP_NAMES } from './templates/ar-om.js';
 import { Quiz, parseArabicNumber } from './quiz.js';
 import { occasionFor } from './occasions.js';
@@ -496,6 +496,15 @@ export class Brain {
           { situation: 'pdf_ok', sayOn: 'result', confirmWhat: `أكتب «${preview}» في آخر ملف PDF (في نسخة جديدة، والأصل يبقى مثل ما هو)`, summary: `كتابة في PDF: ${preview}` }, now);
       }
       case 'reminder': {
+        if (s.clock && !s.minutes) {
+          // «ذكرني الساعة خمس العصر»: work out how long until then.
+          const at = clockToTime(s.clock, now);
+          const minutes = Math.max(1, Math.round((at - now) / 60000));
+          if (minutes > 7 * 24 * 60) { this.emotions.feel('not_understood', now); return this.reply('reminder_no_time'); }
+          const time = this.formatClock(at, now);
+          return this.plan({ type: 'reminder', params: { minutes, note: s.note || '', repeat: false } },
+            { situation: 'reminder_set_at', sayOn: 'start', vars: { time, noteSuffix: noteSuffix(s.note) }, summary: `تذكير ${time}` }, now);
+        }
         if (!s.minutes) { this.emotions.feel('not_understood', now); return this.reply('reminder_no_time'); }
         if (s.repeat && s.minutes < 5) { this.emotions.feel('not_understood', now); return this.reply('reminder_too_often'); }
         return this.plan({ type: 'reminder', params: { minutes: s.minutes, note: s.note || '', repeat: Boolean(s.repeat) } },
@@ -767,6 +776,17 @@ export class Brain {
 
   formatTime(now) {
     return new Intl.DateTimeFormat(this.locale, { hour: 'numeric', minute: '2-digit' }).format(new Date(now));
+  }
+
+  /** «الساعة ٥:٠٠ م» today, «بكرة الساعة ٧:٠٠ ص», or the weekday further on. */
+  formatClock(at, now) {
+    const t = new Intl.DateTimeFormat(this.locale, { hour: 'numeric', minute: '2-digit' }).format(new Date(at));
+    const day = (x) => { const d = new Date(x); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+    const days = Math.round((day(at) - day(now)) / 86400000);
+    if (days === 0) return `الساعة ${t}`;
+    if (days === 1) return `بكرة الساعة ${t}`;
+    if (days === 2) return `بعد بكرة الساعة ${t}`;
+    return `يوم ${this.formatDay(at)} الساعة ${t}`;
   }
 
   formatDate(now) {

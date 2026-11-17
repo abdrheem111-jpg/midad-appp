@@ -2,7 +2,7 @@
 // Input is whatever the speech recognizer (or keyboard) produced; output is an
 // intent name plus slots. The rules run offline and in well under a millisecond.
 
-import { normalize, hasPhrase, parseMinutes } from './arabic.js';
+import { normalize, hasPhrase, parseMinutes, parseClock } from './arabic.js';
 import { levenshtein } from './wake.js';
 import { calculate } from './calc.js';
 
@@ -320,13 +320,15 @@ export function rawRestAfter(raw, verbs, skip = []) {
   return null;
 }
 
-const DURATION_WORDS = new Set(['بعد', 'ربع', 'نص', 'نصف', 'ساعه', 'ساعات', 'ساعتين', 'الا', 'دقيقه', 'دقايق', 'دقائق', 'دقيقتين', 'ثانيه', 'ثواني']);
+const DURATION_WORDS = new Set(['بعد', 'ربع', 'نص', 'نصف', 'ساعه', 'ساعات', 'ساعتين', 'الا', 'دقيقه', 'دقايق', 'دقائق', 'دقيقتين', 'ثانيه', 'ثواني',
+  'الساعه', 'ونص', 'وربع', 'وثلث', 'ثلث', 'الصبح', 'الصباح', 'صباحا', 'الفجر', 'الظهر', 'العصر', 'المغرب', 'المسا', 'المساء', 'مساء', 'الليل', 'بالليل',
+  'العشا', 'العشاء', 'بكره', 'باكر', 'بكرا', 'غدا', 'اليوم', 'ص', 'م']);
 
 function reminderNote(raw, verbs, repeat = false) {
   const rest = rawRestAfter(raw, verbs) || '';
   const words = rest.split(/\s+/).filter(Boolean).filter((w) => {
     const n = normalize(w);
-    return n && !DURATION_WORDS.has(n) && !(repeat && n === 'كل') && !/^\d+$/.test(n) && !/^(واحد|اثنين|ثلاث|ثلاثه|اربع|اربعه|خمس|خمسه|ست|سته|سبع|سبعه|ثمان|ثمانيه|تسع|تسعه|عشر|عشره|عشرين|ثلاثين|اربعين|خمسين|ستين)$/.test(n);
+    return n && !DURATION_WORDS.has(n) && !(repeat && n === 'كل') && !/^\d+$/.test(n) && !/^[\d٠-٩]{1,2}[:.٫][\d٠-٩]{2}$/.test(w) && !/^\d+ \d+$/.test(n) && !/^(واحد|اثنين|ثلاث|ثلاثه|اربع|اربعه|خمس|خمسه|ست|سته|سبع|سبعه|ثمان|ثمانيه|تسع|تسعه|عشر|عشره|عشرين|ثلاثين|اربعين|خمسين|ستين)$/.test(n);
   });
   while (words.length && /^(ب|عن|ان|انه|انو|على)$/.test(normalize(words[0]))) words.shift();
   if (words.length && /^بال/.test(words[0])) words[0] = words[0].slice(1);
@@ -388,9 +390,11 @@ function recognizeText(raw, fuzzy) {
   if (findPhrase(padded, L.cancelReminders)) return out('cancel_reminders');
   if (findPhrase(padded, L.clearRoutines)) return out('clear_routines');
   if (findPhrase(padded, L.remind)) {
-    const minutes = parseMinutes(text);
     const repeat = / كل (\S+ )?(دقيقه|دقايق|دقائق|دقيقتين|ساعه|ساعات|ساعتين|ربع|نص|نصف)( |$)/.test(` ${text} `);
-    return out('reminder', { minutes, note: reminderNote(raw, L.remind, repeat), repeat }, minutes ? 0.92 : 0.6);
+    // «ذكرني الساعة خمس العصر»: a clock time rather than «بعد خمس دقايق».
+    const clock = !repeat && !/ بعد /.test(` ${text} `) ? parseClock(text) : null;
+    const minutes = clock ? null : parseMinutes(text);
+    return out('reminder', { minutes, clock, note: reminderNote(raw, L.remind, repeat), repeat }, minutes || clock ? 0.92 : 0.6);
   }
 
   if (findPhrase(padded, L.pdfSign)) {
