@@ -47,6 +47,8 @@ let bubbleTimer = null;
 let typeTimer = null;
 let bubbleUntil = 0;
 
+let framesThisSecond = 0; // drawing health, reported in the diagnostics log
+
 function showBubble(text, mood) {
   clearTimeout(bubbleTimer);
   clearInterval(typeTimer);
@@ -54,19 +56,31 @@ function showBubble(text, mood) {
   els.bubble.className = `bubble mood-${mood || 'calm'}`;
   // restart the pop animation
   void els.bubble.offsetWidth;
-  const chars = Array.from(text);
-  let shown = 0;
-  els.bubbleText.textContent = '';
-  els.bubble.setAttribute('aria-label', text);
-  typeTimer = setInterval(() => {
-    shown = Math.min(chars.length, shown + 2);
-    els.bubbleText.textContent = chars.slice(0, shown).join('');
+  const chars = Array.from(String(text || ''));
+  const full = chars.join('');
+  els.bubble.setAttribute('aria-label', full);
+  // Typewriter driven by the clock, not by counting timer ticks, so a slowed-down
+  // timer can never leave the bubble empty; when the page cannot animate, the
+  // whole sentence appears at once.
+  const started = performance.now();
+  const reveal = () => {
+    const shown = document.hidden ? chars.length : Math.min(chars.length, Math.ceil((performance.now() - started) / 15) + 1);
+    els.bubbleText.textContent = shown >= chars.length ? full : chars.slice(0, shown).join('');
     if (shown >= chars.length) clearInterval(typeTimer);
-  }, 30);
-  sounds.babble(text, mood);
+  };
+  reveal();
+  typeTimer = setInterval(reveal, 30);
+  setTimeout(() => { if (els.bubbleText.textContent !== full && !els.bubble.hidden && els.bubble.getAttribute('aria-label') === full) { clearInterval(typeTimer); els.bubbleText.textContent = full; } }, chars.length * 15 + 400);
+  sounds.babble(full, mood);
   const ms = Math.min(10000, 2200 + chars.length * 65);
   bubbleUntil = performance.now() + ms;
   bubbleTimer = setTimeout(hideBubble, ms);
+  // One health check per bubble for the diagnostics log.
+  setTimeout(() => {
+    const r = els.bubble.getBoundingClientRect();
+    const cs = getComputedStyle(els.bubbleText);
+    bridge.note?.(`bubble «${full.slice(0, 60)}» shows ${Array.from(els.bubbleText.textContent).length}/${chars.length} chars, visible=${!els.bubble.hidden}, page=${document.visibilityState}, frames/s=${framesThisSecond}, box=${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)}, color=${cs.color}, font=${cs.fontFamily.split(',')[0]} ${cs.fontSize}`);
+  }, 1500);
 }
 
 function hideBubble() {
@@ -195,17 +209,18 @@ async function listen() {
   try {
     const { wav, spoke } = await recorder.record((level) => els.micLevel.style.setProperty('--level', String(1 + level * 0.6)));
     els.mic.classList.remove('recording');
-    if (!spoke) { handle(brain.event('stt_empty')); return; }
+    if (!spoke) { bridge.note?.(`mic: no speech detected (${wav?.length || 0} bytes recorded)`); handle(brain.event('stt_empty')); return; }
     showBubble('…', 'focused');
     const res = await bridge.transcribe(wav, 'command');
     if (!res?.ok) { handle(brain.event(res?.error === 'stt_unavailable' ? 'stt_unavailable' : 'stt_empty')); return; }
-    if (!res.text) { handle(brain.event('stt_empty')); return; }
+    if (!res.text) { bridge.note?.('mic: speech recorded but whisper heard no words'); handle(brain.event('stt_empty')); return; }
     els.input.value = res.text;
     setTimeout(() => { if (els.input.value === res.text) els.input.value = ''; }, 2500);
     hear(res.text);
   } catch (err) {
     els.mic.classList.remove('recording');
     console.warn('microphone error', err);
+    bridge.note?.(`mic error: ${err?.name || ''} ${err?.message || err}`);
     handle(brain.event('mic_error'));
   }
 }
@@ -657,8 +672,12 @@ function frame(now) {
   if (motion.mode === 'walk' || motion.mode === 'run') character.setFacing(motion.facing);
   character.render(dt, animator.update(dt));
   layout();
+  frameCount += 1;
   requestAnimationFrame(frame);
 }
+
+let frameCount = 0;
+setInterval(() => { framesThisSecond = frameCount; frameCount = 0; }, 1000);
 
 window.addEventListener('resize', () => { motion.setArea(workArea()); applyWindows(); });
 

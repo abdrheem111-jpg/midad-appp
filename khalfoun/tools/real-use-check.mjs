@@ -75,6 +75,12 @@ try {
 
   typeCommand('كم الساعة');
   step('typed «كم الساعة» reaches him', await until(async () => /heard «كم الساعة» → time/.test(await readLog()), 10000));
+  // The speech bubble must show the whole sentence, not stay empty.
+  const bubbleRe = /bubble «[^»]*[٠-٩][^»]*» shows (\d+)\/(\d+) chars.*frames\/s=(\d+)/;
+  await until(async () => bubbleRe.test(await readLog()), 8000);
+  const m = bubbleRe.exec(await readLog());
+  step('the time reply is fully written in the bubble', m && m[1] === m[2] && Number(m[2]) > 3, m ? m[0] : 'no bubble report');
+  step('Khalfoun keeps drawing (frames per second)', m && Number(m[3]) >= 20, m ? `frames/s=${m[3]}` : 'no report');
 
   const before = Number(notepadCount());
   typeCommand('افتح المفكرة');

@@ -42,6 +42,14 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 
+// Khalfoun lives in a transparent, click-through window that Windows can wrongly
+// treat as hidden or covered; Chromium would then pause his drawing and slow his
+// timers (empty speech bubbles, frozen moves). Keep him always running.
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion,IntensiveWakeUpThrottling');
+
 // A plain folder name keeps paths simple: %APPDATA%\Khalfoun on Windows.
 app.setName('Khalfoun');
 if (process.env.KHALFOUN_USER_DATA) app.setPath('userData', process.env.KHALFOUN_USER_DATA);
@@ -114,6 +122,7 @@ function createWindow() {
       sandbox: true,
       spellcheck: false,
       autoplayPolicy: 'no-user-gesture-required',
+      backgroundThrottling: false,
       devTools: !app.isPackaged,
     },
   });
