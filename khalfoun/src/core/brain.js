@@ -297,6 +297,17 @@ export class Brain {
     if (!result || !result.ok) {
       this.emotions.feel('error', now);
       if (result?.error === 'not_running') return this.reply('close_not_running', { vars: spec.vars || {} });
+      if (result?.error === 'not_installed') {
+        const target = spec.vars?.target || '';
+        if (spec.playFallback && target) {
+          // «شغل سورة الرحمن»: not a program, so offer to play it on YouTube.
+          this.pending = { kind: 'suggest', raw: target, intent: { intent: 'search', slots: { query: target, engine: 'youtube' }, confidence: 0.8, text: target } };
+          this.emotions.feel('curious', now);
+          return this.reply('suggest_youtube', { vars: { target }, awaitingConfirm: true });
+        }
+        this.emotions.feel('not_understood', now);
+        return this.reply('open_unknown', { vars: { target: target || 'هذا' } });
+      }
       if (result?.error === 'cannot_close') return this.reply('close_tab', { vars: spec.vars || {} });
       if (result?.error === 'level_too_low') return this.reply('need_level');
       if (result?.error === 'kids_mode') return this.reply('kids_blocked');
@@ -315,6 +326,7 @@ export class Brain {
     }
     if (spec.sayOn === 'result') {
       const vars = { ...(spec.vars || {}) };
+      if (spec.action.type === 'open_installed' && result.data?.name) vars.app = result.data.name;
       let situation = spec.situation;
       if (spec.action.type === 'organize_downloads') {
         const count = result.data?.moved ?? 0;
@@ -440,8 +452,10 @@ export class Brain {
           this.emotions.feel('curious', now);
           return this.reply('suggest_app', { vars: { app: APP_NAMES[near.id] || near.id, target: s.name }, awaitingConfirm: true });
         }
-        this.emotions.feel('not_understood', now);
-        return this.reply('open_unknown', { vars: { target: s.name || 'هذا' } });
+        if (!s.name) { this.emotions.feel('not_understood', now); return this.reply('open_unknown', { vars: { target: 'هذا' } }); }
+        // Maybe it is a program on this computer («افتح سبوتيفاي»): main looks in the Start menu.
+        return this.plan({ type: 'open_installed', params: { name: s.name } },
+          { situation: 'open_ok', sayOn: 'result', vars: { app: s.name, target: s.name }, playFallback: !!s.play, summary: `فتح ${s.name}` }, now);
       }
       case 'open': return this.planOpen(s, now);
       case 'search': {

@@ -456,8 +456,8 @@ function recognizeText(raw, fuzzy) {
   if (openVerb) {
     const app = findApp(text);
     if (app) return out('open', { app: app.id, kind: app.kind, url: app.url || null });
-    const name = rawRestAfter(raw, L.open, N(['لي', 'برنامج'])) || '';
-    return out('open_unknown', { name }, 0.6);
+    const name = rawRestAfter(raw, L.open, N(['لي', 'برنامج', 'تطبيق'])) || '';
+    return out('open_unknown', { name, play: /^(شغل|تشغل|نشغل)/.test(openVerb) }, 0.6);
   }
   if (startsWithPhrase(text, L.close)) {
     const app = findApp(text);

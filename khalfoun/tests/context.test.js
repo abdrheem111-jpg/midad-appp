@@ -148,3 +148,54 @@ test('platform: closing politely on Windows, and folder windows through the shel
   assert.ok(!calls.some((c) => c.includes('explorer.exe') && c[0] === 'taskkill.exe'), 'never stops explorer.exe');
   assert.deepEqual(await p.closeApp('youtube'), { ok: false, error: 'cannot_close' });
 });
+
+import { matchInstalled, arabicSkeleton, latinSkeleton } from '../src/core/app-match.js';
+
+const INSTALLED = [
+  { name: 'Spotify', id: 'SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify' }, { name: 'Zoom Workplace', id: 'zoom' },
+  { name: 'Uninstall Zoom', id: 'zoom-uninstall' }, { name: 'Microsoft Teams', id: 'teams' }, { name: 'Telegram Desktop', id: 'tg' },
+  { name: 'Discord', id: 'discord' }, { name: 'Adobe Photoshop 2025', id: 'ps' }, { name: 'Notepad++', id: 'npp' }, { name: 'Steam', id: 'steam' },
+  { name: 'Windows PowerShell', id: 'ps1' }, { name: 'Camera', id: 'cam' }, { name: 'Mail', id: 'mail' },
+];
+
+test('installed programs are found from Arabic or English names, and nonsense finds nothing', () => {
+  const cases = [['سبوتيفاي', 'Spotify'], ['زوم', 'Zoom Workplace'], ['تيمز', 'Microsoft Teams'], ['التليجرام', 'Telegram Desktop'], ['تيلغرام', 'Telegram Desktop'],
+    ['دسكورد', 'Discord'], ['فوتوشوب', 'Adobe Photoshop 2025'], ['Notepad++', 'Notepad++'], ['spotify', 'Spotify'], ['ستيم', 'Steam'],
+    ['باورشيل', 'Windows PowerShell'], ['الكاميرا', 'Camera'], ['البريد', 'Mail'], ['برنامج زوم', 'Zoom Workplace']];
+  for (const [spoken, want] of cases) assert.equal(matchInstalled(spoken, INSTALLED)?.name, want, spoken);
+  for (const spoken of ['الباب', 'سورة البقرة', 'شي', '']) assert.equal(matchInstalled(spoken, INSTALLED), null, spoken);
+  assert.equal(arabicSkeleton('سبوتيفاي'), latinSkeleton('Spotify'));
+});
+
+test('«افتح سبوتيفاي» asks main to open an installed program; a missing one gets an honest answer', () => {
+  const { brain } = makeBrain();
+  const r = brain.hear('افتح سبوتيفاي');
+  assert.deepEqual(r.action, { id: r.action.id, type: 'open_installed', params: { name: 'سبوتيفاي' } });
+  const ok = brain.actionResult(r.action.id, { ok: true, data: { name: 'Spotify' } });
+  assert.equal(ok.situation, 'open_ok');
+  assert.ok(ok.say.includes('Spotify'), ok.say);
+  const miss = brain.hear('افتح برنامج الطبخ');
+  assert.equal(brain.actionResult(miss.action.id, { ok: false, error: 'not_installed' }).situation, 'open_unknown');
+});
+
+test('«شغل سورة الرحمن» is not a program, so he offers YouTube; yes searches there', () => {
+  const { brain } = makeBrain();
+  const r = brain.hear('شغل سورة الرحمن');
+  assert.equal(r.action.type, 'open_installed');
+  const offer = brain.actionResult(r.action.id, { ok: false, error: 'not_installed' });
+  assert.equal(offer.situation, 'suggest_youtube');
+  const yes = brain.hear('ايوه');
+  assert.deepEqual(yes.action.params, { query: 'سورة الرحمن', engine: 'youtube' });
+});
+
+test('platform: installed programs come from Get-StartApps and open through the apps folder', async () => {
+  const launched = [];
+  const run = async (cmd, args) => ({ ok: true, code: 0, stdout: JSON.stringify(INSTALLED.map((a) => ({ Name: a.name, AppID: a.id }))) });
+  const launch = async (cmd, args) => { launched.push([cmd, ...args]); return true; };
+  const p = createPlatform({ platform: 'win32', run, launch, shell: { openExternal: async () => {}, openPath: async () => '' }, paths: {} });
+  assert.deepEqual(await p.openInstalled('سبوتيفاي'), { ok: true, data: { name: 'Spotify' } });
+  assert.deepEqual(launched[0], ['explorer.exe', 'shell:AppsFolder\\SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify']);
+  assert.deepEqual(await p.openInstalled('الباب'), { ok: false, error: 'not_installed' });
+  assert.equal(validateAction({ type: 'open_installed', params: { name: 'سبوتيفاي' } }), null);
+  assert.equal(validateAction({ type: 'open_installed', params: { name: 'x'.repeat(61) } }), 'bad_app');
+});

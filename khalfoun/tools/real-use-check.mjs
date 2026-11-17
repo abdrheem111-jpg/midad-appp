@@ -88,6 +88,15 @@ try {
   step('typed «افتح المفكرة» reaches him', heard);
   step('the open action runs', await until(async () => /action open_app .*→ ok/.test(await readLog()), 10000));
   step('Notepad actually opens', await until(async () => Number(notepadCount()) > before, 10000), `notepad processes: ${notepadCount()}`);
+
+  // Follow-up: «سكرها» closes what he just opened.
+  await sleep(1500);
+  typeCommand('سكرها');
+  step('«سكرها» closes Notepad', await until(async () => Number(notepadCount()) <= before, 10000), `notepad processes: ${notepadCount()}`);
+
+  // Any installed program by its Arabic name, found in the Start menu.
+  typeCommand('افتح باورشيل');
+  step('«افتح باورشيل» finds and opens an installed program', await until(async () => /action open_installed .*→ ok/.test(await readLog()), 15000));
 } finally {
   console.log('\n----- khalfoun-log.txt -----');
   console.log(await readLog());

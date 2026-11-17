@@ -6,6 +6,8 @@
 import { spawn, execFile } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { readdir } from 'node:fs/promises';
+import { matchInstalled } from '../../core/app-match.js';
 
 const WIN_START = {
   calculator: 'calc.exe', notepad: 'notepad.exe', paint: 'mspaint.exe', explorer: 'explorer.exe',
@@ -140,6 +142,46 @@ export function createPlatform(deps) {
     return closed ? { ok: true } : { ok: false, error: LINUX_PROCESSES[app] ? 'not_running' : 'cannot_close' };
   }
 
+  // ----- any installed program, by the name the person says
+  let installedCache = null;
+  /** Programs on the Start menu (Windows) or in Applications (macOS), cached for ten minutes. */
+  async function listInstalled() {
+    if (installedCache && Date.now() - installedCache.at < 10 * 60000) return installedCache.apps;
+    let apps = [];
+    if (platform === 'win32') {
+      const r = await powershell('[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-StartApps | Select-Object Name, AppID | ConvertTo-Json -Compress');
+      if (r.ok && r.stdout.trim()) {
+        try {
+          const data = JSON.parse(r.stdout.trim());
+          apps = (Array.isArray(data) ? data : [data]).map((a) => ({ name: String(a.Name || ''), id: String(a.AppID || '') })).filter((a) => a.name && a.id);
+        } catch { apps = []; }
+      }
+    } else if (platform === 'darwin') {
+      for (const dir of ['/Applications', '/System/Applications', join(deps.home || '', 'Applications')]) {
+        try {
+          for (const f of await readdir(dir)) if (f.endsWith('.app')) apps.push({ name: f.slice(0, -4), id: join(dir, f) });
+        } catch { /* missing folder */ }
+      }
+    }
+    installedCache = { at: Date.now(), apps };
+    return apps;
+  }
+
+  async function openInstalled(name) {
+    const app = matchInstalled(name, await listInstalled());
+    if (!app) return { ok: false, error: 'not_installed' };
+    if (platform === 'win32') {
+      // The id comes from Windows' own Start menu list; no shell is involved.
+      const started = await launch('explorer.exe', [`shell:AppsFolder\\${app.id}`]);
+      return started ? { ok: true, data: { name: app.name } } : { ok: false, error: 'launch_failed' };
+    }
+    if (platform === 'darwin') {
+      const r = await run('open', [app.id]);
+      return r.ok ? { ok: true, data: { name: app.name } } : { ok: false, error: 'launch_failed' };
+    }
+    return { ok: false, error: 'not_installed' };
+  }
+
   async function openUrl(url) {
     await shell.openExternal(url);
     return { ok: true };
@@ -205,5 +247,5 @@ export function createPlatform(deps) {
     return { ok: true, data: { file } };
   }
 
-  return { platform, openApp, closeApp, openUrl, openFolder, search, volume, typeText, screenshot };
+  return { platform, openApp, closeApp, openInstalled, listInstalled, openUrl, openFolder, search, volume, typeText, screenshot };
 }
