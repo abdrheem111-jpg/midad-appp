@@ -134,6 +134,27 @@ await check('emotion and animation commands do not break anything', async () => 
   await page.screenshot({ path: `${outDir}/5-after.png` });
 });
 
+await check('every expression with every animation draws without invalid values', async () => {
+  const bad = await page.evaluate(async () => {
+    const { FACES } = await import('/src/renderer/character.js');
+    const { ANIMATIONS } = await import('/src/renderer/animations.js');
+    const k = window.__khalfoun;
+    const problems = [];
+    for (const emotion of Object.keys(FACES)) {
+      for (const intensity of [1, 3]) {
+        k.character.setEmotion({ emotion, intensity, secondary: null });
+        for (const [name, anim] of Object.entries(ANIMATIONS)) {
+          for (const t of [0, anim.dur * 0.5]) k.character.render(1 / 60, anim.pose(t, 1));
+          if (/NaN|Infinity|undefined/.test(k.character.el.innerHTML)) { problems.push(`${emotion}/${intensity}/${name}`); break; }
+        }
+      }
+    }
+    k.character.setEmotion({ emotion: 'calm', intensity: 1, secondary: null });
+    return problems;
+  });
+  assert(bad.length === 0, `invalid drawing: ${bad.slice(0, 5).join(', ')}`);
+});
+
 await check('memory survives a reload (no onboarding the second time)', async () => {
   await page.waitForTimeout(900);
   await page.reload();

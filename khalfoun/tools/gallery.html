@@ -23,14 +23,17 @@ import { EMOTION_LABELS } from '../src/core/emotions.js';
 const grid = document.getElementById('grid');
 const params = new URLSearchParams(location.search);
 const mode = params.get('mode') || 'faces';
+const big = params.get('big');
+if (big) { document.getElementById('grid').style.gridTemplateColumns = 'repeat(3, 1fr)'; }
 const items = mode === 'faces'
-  ? Object.keys(FACES).map((e) => ({ label: EMOTION_LABELS[e], emotion: e, intensity: 2, anim: null }))
+  ? Object.keys(FACES).filter((e) => !params.get('only') || params.get('only').split(',').includes(e)).map((e) => ({ label: EMOTION_LABELS[e], emotion: e, intensity: 2, anim: null }))
   : (params.get('list') || 'walk,run,jump,celebrate,wave,cast,think,listen,laugh,dance,knock,sleep,trip,dangle,coffee,flex,sneeze,clap').split(',').map((a) => ({ label: a, emotion: 'happy', intensity: 1, anim: a }));
 for (const it of items) {
   const cell = document.createElement('div');
   cell.className = 'cell';
   const c = document.createElement('div');
   c.className = 'c';
+  if (big) { c.style.width = '330px'; c.style.height = '405px'; }
   cell.appendChild(c);
   const b = document.createElement('b');
   b.textContent = it.label;

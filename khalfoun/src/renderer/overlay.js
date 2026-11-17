@@ -12,7 +12,7 @@ import { getBridge } from './bridge.js';
 const CHAR_W = 170;
 const CHAR_H = 209;
 const PREVIEW_TASKBAR = 44;
-const IDLE_ANIMS = ['look_around', 'whistle', 'stretch', 'adjust', 'peek', 'sneeze', 'flex', 'yawn', 'scratch', 'spin', 'coffee'];
+const IDLE_ANIMS = ['look_around', 'whistle', 'stretch', 'adjust', 'peek', 'sneeze', 'flex', 'yawn', 'scratch', 'spin', 'coffee', 'cheeky', 'think'];
 
 const $ = (id) => document.getElementById(id);
 const bridge = getBridge();
@@ -386,6 +386,7 @@ function layout() {
 
 let last = performance.now();
 let nextFidget = 25;
+let lastX = motion.x;
 
 function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
@@ -411,6 +412,8 @@ function frame(now) {
     }
   }
 
+  character.setVelocity(dt > 0 ? (motion.x - lastX) / dt : 0);
+  lastX = motion.x;
   animator.setBase(motion.baseAnimation);
   if (motion.mode === 'walk' || motion.mode === 'run') character.setFacing(motion.facing);
   character.render(dt, animator.update(dt));
