@@ -37,7 +37,7 @@ for (const [ms, amp] of pattern) {
 }
 const micFile = join(tmpdir(), `khalfoun-mic-${process.pid}.wav`);
 await writeFile(micFile, encodeWav(samples, RATE));
-const browser = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${micFile}`] });
+const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${micFile}`] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 760 }, deviceScaleFactor: 1 });
 const problems = [];
 page.on('console', (m) => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
@@ -240,6 +240,19 @@ await check('he responds kindly to how you feel', async () => {
   await hear('نجحت في الامتحان', 1200);
   assert(/مبروك|بطل|تبارك/.test(await bubble()), `success: ${await bubble()}`);
   await page.evaluate(() => window.__khalfoun.motion.paused = false);
+});
+
+await check('he makes sounds in a real browser and stays silent when muted', async () => {
+  const before = await page.evaluate(() => window.__khalfoun.sounds.played);
+  await hear('قول نكتة', 900);
+  const after = await page.evaluate(() => window.__khalfoun.sounds.played);
+  assert(after > before, `no sound played (${before} -> ${after})`);
+  await hear('اسكت الأصوات', 900);
+  const muted = await page.evaluate(() => window.__khalfoun.sounds.played);
+  await hear('قول نكتة', 900);
+  assert(await page.evaluate(() => window.__khalfoun.sounds.played) === muted, 'sound played while muted');
+  await hear('شغل الأصوات', 600);
+  assert(await page.evaluate(() => window.__khalfoun.sounds.enabled), 'sounds not back on');
 });
 
 await check('every expression with every animation draws without invalid values', async () => {

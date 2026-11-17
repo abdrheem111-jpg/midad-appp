@@ -105,6 +105,7 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
+      autoplayPolicy: 'no-user-gesture-required',
       devTools: !app.isPackaged,
     },
   });

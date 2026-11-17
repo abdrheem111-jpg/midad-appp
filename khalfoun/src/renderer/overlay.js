@@ -12,6 +12,7 @@ import { WakeListener } from './wake-listener.js';
 import { findWakeWord } from '../core/wake.js';
 import { recognize } from '../core/intents.js';
 import { getBridge } from './bridge.js';
+import { SoundPlayer, ANIMATION_SOUND } from './sounds.js';
 
 const CHAR_W = 170;
 const CHAR_H = 209;
@@ -37,6 +38,7 @@ const character = createCharacter(els.stage);
 const animator = new Animator();
 const motion = new Motion(workArea(), { width: CHAR_W, height: CHAR_H });
 const recorder = new Recorder();
+const sounds = new SoundPlayer({ enabled: false });
 
 // ------------------------------------------------------------------ bubble
 
@@ -60,6 +62,7 @@ function showBubble(text, mood) {
     els.bubbleText.textContent = chars.slice(0, shown).join('');
     if (shown >= chars.length) clearInterval(typeTimer);
   }, 30);
+  sounds.babble(text, mood);
   const ms = Math.min(10000, 2200 + chars.length * 65);
   bubbleUntil = performance.now() + ms;
   bubbleTimer = setTimeout(hideBubble, ms);
@@ -80,6 +83,8 @@ function handle(reply) {
   if (reply.say) showBubble(reply.say, reply.emotion?.emotion);
   const anim = reply.animation || EMOTION_ANIMATION[reply.emotion?.emotion];
   if (anim && anim !== 'sleep') animator.play(anim);
+  if (reply.situation === 'sounds_on' || reply.situation === 'sounds_off') sounds.setEnabled(brain.memory.data.sounds !== false);
+  if (anim && ANIMATION_SOUND[anim]) setTimeout(() => sounds.effect(ANIMATION_SOUND[anim], reply.emotion?.emotion), 120);
   switch (reply.behavior) {
     case 'come': motion.come(); break;
     case 'away': motion.goAway(); break;
@@ -389,6 +394,7 @@ function openSettings() {
     ? `النموذج المستخدم: ${chatInfo.model}. يعمل على جهازك فقط.`
     : 'لا يوجد نموذج محلي الآن. ثبّت Ollama وشغّل نموذجاً (انظر README) فيكتشفه خلفون تلقائياً.';
   $('st-windows').checked = d.walkOnWindows !== false;
+  $('st-sounds').checked = d.sounds !== false;
   $('st-listen').disabled = !voiceAvailable;
   $('st-voice').textContent = voiceAvailable
     ? 'الاستماع الصوتي جاهز: اضغط زر الميكروفون أو Ctrl+Shift+Space وتكلم.'
@@ -448,6 +454,11 @@ $('st-chat').addEventListener('change', async () => {
   const want = $('st-chat').checked;
   const res = await bridge.updateSettings({ chatEnabled: want });
   brain.memory.set({ chatEnabled: res?.ok ? res.settings.chatEnabled !== false : !want });
+});
+$('st-sounds').addEventListener('change', () => {
+  brain.memory.set({ sounds: $('st-sounds').checked });
+  sounds.setEnabled($('st-sounds').checked);
+  if ($('st-sounds').checked) sounds.effect('ding');
 });
 $('st-windows').addEventListener('change', () => {
   brain.memory.set({ walkOnWindows: $('st-windows').checked });
@@ -517,6 +528,8 @@ function frame(now) {
 
   for (const ev of motion.update(dt)) {
     if (!brain) continue;
+    if (ev.type === 'hop') sounds.effect('boing');
+    if (ev.type === 'landed' && ev.impact > 500) sounds.effect('thud');
     if (ev.type === 'slip') handle(brain.event('slip'));
     else if (ev.type === 'landed' && ev.impact > 500) handle(brain.event('dropped'));
     else if (ev.type === 'landed' && ev.onWindow && Math.random() < 0.35) handle(brain.event('hop_window'));
@@ -561,7 +574,7 @@ async function start() {
 
   bridge.onEvent((ev) => {
     switch (ev?.type) {
-      case 'reminder': handle(brain.event('reminder_fire', { note: ev.note })); motion.come(); break;
+      case 'reminder': sounds.effect('chime'); handle(brain.event('reminder_fire', { note: ev.note })); motion.come(); break;
       case 'open-command': openCommand(); break;
       case 'ptt': listen(); break;
       case 'open-settings': openSettings(); break;
@@ -593,13 +606,14 @@ async function start() {
     const { createPreviewDesktop } = await import('./preview-desktop.js');
     preview = createPreviewDesktop(document.body, (list) => { lastWindows = list; applyWindows(); });
   }
+  sounds.setEnabled(brain.memory.data.sounds !== false);
   updateWake();
   updateWindowWatch();
   if (!brain.memory.data.onboarded) startOnboarding();
   else handle(brain.start());
 
   // Hooks for automated UI tests and debugging.
-  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, wake, updateWake, updateWindowWatch, get preview() { return preview; } };
+  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, get preview() { return preview; } };
   document.documentElement.dataset.ready = '1';
 }
 

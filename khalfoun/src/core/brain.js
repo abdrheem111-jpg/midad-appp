@@ -298,6 +298,10 @@ export class Brain {
       case 'dance': this.emotions.feel('dance', now); return this.reply('dance', { behavior: 'dance' });
       case 'jump': this.emotions.feel('joke', now); return this.reply('jump', { behavior: 'jump' });
       case 'open_settings': return this.reply('settings_open', { behavior: 'open_settings' });
+      case 'sounds':
+        this.memory.set({ sounds: s.on });
+        this.emotions.feel(s.on ? 'joke' : 'focus_mode', now);
+        return this.reply(s.on ? 'sounds_on' : 'sounds_off');
       case 'feeling': return this.feeling(s.kind, now);
       case 'costume':
         this.emotions.feel(s.name ? 'joke' : 'focus_mode', now);

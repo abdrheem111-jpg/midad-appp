@@ -323,6 +323,12 @@ export const TEMPLATES = [
   { id: 'tk_2', s: 'thinking', t: 'دقيقة، أفكر فيها...', a: 'think' },
   { id: 'tk_3', s: 'thinking', t: 'سؤال زين! خلني أشغّل مخي.', h: 1, a: 'think' },
 
+  // ---------- sounds ----------
+  { id: 'sn1', s: 'sounds_on', t: 'رجعت الأصوات! بيب بوب.', a: 'whistle' },
+  { id: 'sn2', s: 'sounds_on', t: 'تمام، بتسمع همهماتي من جديد.', a: 'happy' },
+  { id: 'sn3', s: 'sounds_off', t: 'سكتت الأصوات. بتكلم بصمت.', a: 'shush' },
+  { id: 'sn4', s: 'sounds_off', t: 'ولا صوت، مثل النينجا.', h: 1, a: 'shush' },
+
   // ---------- outfits ----------
   { id: 'cs_b1', s: 'costume_bisht', t: 'لبست البشت! شرايك، أشبه الشيوخ؟', a: 'proud' },
   { id: 'cs_b2', s: 'costume_bisht', t: 'البشت عليّ يزين، صح؟', h: 1, a: 'flex' },
