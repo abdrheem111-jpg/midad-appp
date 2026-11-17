@@ -215,6 +215,7 @@ export class Brain {
       this.emotions.feel('error', now);
       if (result?.error === 'level_too_low') return this.reply('need_level');
       if (result?.error === 'kids_mode') return this.reply('kids_blocked');
+      if (result?.error === 'no_pdf') return this.reply('pdf_none');
       return this.reply('failed');
     }
     this.markSuccess(now);
@@ -332,6 +333,17 @@ export class Brain {
         const preview = s.text.length > 40 ? `${s.text.slice(0, 40)}…` : s.text;
         return this.plan({ type: 'type_text', params: { text: s.text } },
           { situation: 'type_ok', sayOn: 'result', confirmWhat: `أكتب «${preview}» حيث المؤشر`, summary: `كتابة: ${preview}` }, now);
+      }
+      case 'pdf_write': case 'pdf_sign': {
+        let text = s.text;
+        if (r.intent === 'pdf_sign') {
+          if (!this.memory.data.name) { this.emotions.feel('curious', now); return this.reply('pdf_need_name'); }
+          text = `${this.memory.data.name} — ${this.formatDate(now)}`;
+        }
+        if (!text) { this.emotions.feel('not_understood', now); return this.reply('pdf_empty'); }
+        const preview = text.length > 40 ? `${text.slice(0, 40)}…` : text;
+        return this.plan({ type: 'pdf_write', params: { text, position: s.position || 'top' } },
+          { situation: 'pdf_ok', sayOn: 'result', confirmWhat: `أكتب «${preview}» في آخر ملف PDF (في نسخة جديدة، والأصل يبقى مثل ما هو)`, summary: `كتابة في PDF: ${preview}` }, now);
       }
       case 'reminder': {
         if (!s.minutes) { this.emotions.feel('not_understood', now); return this.reply('reminder_no_time'); }

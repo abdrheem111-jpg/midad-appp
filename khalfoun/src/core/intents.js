@@ -35,6 +35,7 @@ const L = {
   stopExact: N(['وقف', 'بس', 'خلاص', 'اسكت', 'وقف وقف', 'خلاص بس', 'كفايه', 'الغي', 'كنسل', 'بس بس', 'استوب']),
   yesExact: N(['نعم', 'اي', 'ايوه', 'ايوا', 'اكيد', 'تمام', 'اوكي', 'اوك', 'يب', 'صح', 'زين', 'ماشي', 'نفذ', 'سوها', 'سويها', 'يلا', 'يالله', 'طيب', 'اي نعم', 'اكيد سوها', 'ok', 'yes']),
   noExact: N(['لا', 'لا لا', 'لاء', 'خلها', 'خليها', 'بلاش', 'ما ابا', 'ما ابي', 'لا تسوي', 'لا تسويها', 'مب لازم', 'لا شكرا', 'no']),
+  pdfSign: N(['وقع الملف', 'وقع البي دي اف', 'وقع ملف البي دي اف', 'حط توقيعي', 'حط اسمي في الملف', 'وقع لي الملف', 'وقعلي الملف']),
   cancelReminders: N(['الغ التذكير', 'الغي التذكير', 'الغ التذكيرات', 'الغي التذكيرات', 'وقف التذكير', 'وقف التذكيرات', 'شيل التذكير', 'شيل التذكيرات', 'لا تذكرني', 'بلاش التذكير']),
   clearRoutines: N(['الغ العادات', 'لا تفتح شي لحالك', 'لا تفتح شي بروحك', 'انس العادات', 'وقف العادات']),
   remind: N(['ذكرني', 'نبهني', 'فكرني', 'ذكرني بعد', 'سولي تذكير', 'سو تذكير', 'حط تذكير', 'حط منبه']),
@@ -186,10 +187,22 @@ export function recognize(raw) {
     return out('reminder', { minutes, note: reminderNote(raw, L.remind, repeat), repeat }, minutes ? 0.92 : 0.6);
   }
 
+  if (findPhrase(padded, L.pdfSign)) {
+    return out('pdf_sign', { position: /(فوق|اعلى|الاعلى)/.test(text) ? 'top' : 'bottom' });
+  }
+
   const typeVerb = startsWithPhrase(text, L.type);
   if (typeVerb) {
-    const content = rawRestAfter(raw, L.type, N(['هذا', 'هذي', 'هالكلام', 'الكلام', 'التالي']));
-    return out('type_text', { text: content || '' }, content ? 0.93 : 0.6);
+    let content = rawRestAfter(raw, L.type, N(['هذا', 'هذي', 'هالكلام', 'الكلام', 'التالي'])) || '';
+    // «اكتب ... في ملف الـPDF» writes into the newest PDF instead of the active window
+    const pdfTail = /\s*(فوق|تحت|في الأعلى|في الاعلى|في الأسفل|في الاسفل)?\s*(في|ف|على|بـ?)\s*(ملف\s*)?(ال)?(pdf|بي\s*دي\s*اف|بيدي\s*اف|بي\s*دي\s*إف|الـ\s*pdf)\s*(فوق|تحت|في الأعلى|في الاعلى|في الأسفل|في الاسفل)?\s*$/iu;
+    const m = content.match(pdfTail);
+    if (m) {
+      const where = `${m[1] || ''} ${m[6] || ''}`;
+      content = content.slice(0, m.index).trim();
+      return out('pdf_write', { text: content, position: /(تحت|الأسفل|الاسفل)/.test(where) ? 'bottom' : 'top' }, content ? 0.92 : 0.6);
+    }
+    return out('type_text', { text: content }, content ? 0.93 : 0.6);
   }
 
   if (findPhrase(padded, L.volumeWord)) {

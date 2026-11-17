@@ -33,6 +33,7 @@ export function validateAction(action) {
       if (p.repeat && p.minutes < 5) return 'bad_reminder';
       return p.note === undefined || (typeof p.note === 'string' && p.note.length <= 200) ? null : 'bad_reminder';
     case 'cancel_reminders': return null;
+    case 'pdf_write': return str(p.text, 600) && ['top', 'bottom'].includes(p.position) ? null : 'bad_pdf';
     case 'organize_downloads': case 'undo_organize': return null;
     default: return 'unknown_action';
   }
@@ -63,6 +64,10 @@ export function createExecutor(deps) {
         case 'reminder':
           deps.scheduleReminder(Math.round(p.minutes), p.note || '', Boolean(p.repeat));
           return { ok: true };
+        case 'pdf_write': {
+          if (!deps.writePdf) return { ok: false, error: 'unsupported' };
+          return await deps.writePdf(p.text, p.position);
+        }
         case 'cancel_reminders':
           return { ok: true, data: { cancelled: deps.cancelReminders ? deps.cancelReminders() : 0 } };
         case 'organize_downloads': {

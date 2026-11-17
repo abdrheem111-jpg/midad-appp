@@ -20,6 +20,7 @@ import { findWhisper, transcribe } from './stt.js';
 import { WindowWatcher } from './windows-watcher.js';
 import { ChatClient, findLocalModel } from './chat.js';
 import { ReminderScheduler } from './reminders.js';
+import { writeIntoLatestPdf } from './actions/pdf.js';
 import { LEVEL_INFO } from '../core/permissions.js';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -170,6 +171,31 @@ async function captureScreen() {
   const source = sources.find((s) => s.display_id === String(display.id)) || sources[0];
   if (!source) throw new Error('no_screen');
   return source.thumbnail.toPNG();
+}
+
+let pdfFontCss = '';
+
+/** Renders overlay HTML to a one-page transparent PDF with Chromium (correct Arabic shaping). */
+async function renderOverlayPdf(html, size) {
+  const view = new BrowserWindow({ show: false, width: 800, height: 1000, webPreferences: { offscreen: true, javascript: false, sandbox: true } });
+  try {
+    await view.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    await view.webContents.executeJavaScript('document.fonts ? document.fonts.ready.then(() => true) : true', true).catch(() => true);
+    return await view.webContents.printToPDF({
+      pageSize: { width: size.width / 72, height: size.height / 72 },
+      margins: { top: 0, bottom: 0, left: 0, right: 0 },
+      printBackground: false,
+      preferCSSPageSize: true,
+    });
+  } finally {
+    view.destroy();
+  }
+}
+
+async function writePdf(text, position, dirs) {
+  const res = await writeIntoLatestPdf({ dirs, text, position, render: renderOverlayPdf, fontCss: pdfFontCss });
+  if (res.ok && !SMOKE) shell.openPath(res.data.file);
+  return res;
 }
 
 /** Hands keyboard focus back to the program the person was using before pasting. */
@@ -327,6 +353,11 @@ async function runSmokeTest(stores) {
     await hear('تراجع عن الترتيب');
     await waitFor("(window.__khalfoun.brain.memory.data.log.at(-1) || {}).summary === 'تراجع عن الترتيب'");
     step('undo organize via IPC', (await js('window.__khalfoun.brain.memory.data.log.at(-1)')).ok);
+    // Write Arabic text into the newest PDF (before organizing moves it), through the real renderer.
+    await hear('اكتب السلام عليكم ورحمة الله في ملف البي دي اف');
+    const pdfDone = await waitFor("(window.__khalfoun.brain.memory.data.log.at(-1) || {}).summary?.startsWith('كتابة في PDF')", 20000);
+    const pdfLog = await js('window.__khalfoun.brain.memory.data.log.at(-1)');
+    step('write Arabic text into a PDF copy', pdfDone && pdfLog.ok, pdfLog);
     // Main refuses an action the page should never send.
     const bad = await js("window.khalfoun.runAction({ id: 99, type: 'open_url', params: { url: 'https://evil.example' } })");
     step('main rejects unknown url', bad && bad.ok === false && bad.error === 'bad_url', bad);
@@ -366,7 +397,11 @@ async function start() {
   if (SMOKE) {
     downloadsDir = await mkdtemp(join(tmpdir(), 'khalfoun-dl-'));
     await mkdir(downloadsDir, { recursive: true });
-    for (const f of ['صورة.jpg', 'تقرير.pdf', 'اغنية.mp3', 'ملف.unknown']) await writeFile(join(downloadsDir, f), 'x');
+    for (const f of ['صورة.jpg', 'اغنية.mp3', 'ملف.unknown']) await writeFile(join(downloadsDir, f), 'x');
+    const { default: lib } = await import('pdf-lib');
+    const sample = await lib.PDFDocument.create();
+    sample.addPage([595, 842]);
+    await writeFile(join(downloadsDir, 'نموذج.pdf'), await sample.save());
   }
 
   const platform = createPlatform({
@@ -382,7 +417,12 @@ async function start() {
   const executor = createExecutor({
     platform, getSettings: () => settings, downloadsDir, journal: stores.journal, scheduleReminder,
     cancelReminders: () => reminderScheduler.cancelAll(),
+    writePdf: (text, position) => writePdf(text, position, [downloadsDir, app.getPath('documents')]),
   });
+  try {
+    const font = await readFile(join(ROOT, 'assets', 'fonts', 'Tajawal-700-arabic.woff2'));
+    pdfFontCss = `@font-face { font-family: 'Tajawal'; font-weight: 700; src: url(data:font/woff2;base64,${font.toString('base64')}) format('woff2'); }`;
+  } catch { /* system fonts still work */ }
   watcher = new WindowWatcher({
     onChange: (list) => send('windows', { list }),
     toDip: (r) => (process.platform === 'win32' ? screen.screenToDipRect(null, r) : r),

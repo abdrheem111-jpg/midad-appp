@@ -31,7 +31,7 @@ child.on('close', async (code) => {
   const line = out.split('\n').find((l) => l.startsWith('KHALFOUN_SMOKE '));
   if (!line) { console.error(out.slice(-3000)); console.error('لم يكتمل الفحص.'); process.exit(1); }
   const report = JSON.parse(line.slice('KHALFOUN_SMOKE '.length));
-  for (const s of report.steps) console.log(`${s.ok ? 'ok' : 'not ok'} - ${s.name}`);
+  for (const s of report.steps) console.log(`${s.ok ? 'ok' : 'not ok'} - ${s.name}${!s.ok && s.extra ? `\n  ${JSON.stringify(s.extra)}` : ''}`);
   for (const e of report.errors) console.log(`error: ${e}`);
   console.log(report.ok ? '\nالتطبيق الحقيقي اشتغل ونجحت كل الخطوات.' : '\nفي خطوات فشلت.');
   process.exit(report.ok && code === 0 ? 0 : 1);

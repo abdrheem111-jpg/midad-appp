@@ -28,6 +28,7 @@ export const ACTION_RISK = {
   reminder: 'none',
   cancel_reminders: 'none',
   type_text: 'modify',
+  pdf_write: 'modify',
   organize_downloads: 'modify',
   undo_organize: 'modify',
   delete_files: 'destructive',

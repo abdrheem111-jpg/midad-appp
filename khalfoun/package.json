@@ -67,5 +67,8 @@
       ],
       "language": "1025"
     }
+  },
+  "dependencies": {
+    "pdf-lib": "1.17.1"
   }
 }
