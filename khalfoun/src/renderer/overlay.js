@@ -6,6 +6,7 @@ import { Brain } from '../core/brain.js';
 import { createCharacter } from './character.js';
 import { Animator, EMOTION_ANIMATION } from './animations.js';
 import { Motion } from './motion.js';
+import { visiblePlatforms } from './platforms.js';
 import { Recorder } from './recorder.js';
 import { WakeListener } from './wake-listener.js';
 import { findWakeWord } from '../core/wake.js';
@@ -219,6 +220,26 @@ async function onWakeSentence(wav) {
   }
 }
 
+// ---------------------------------------------------------- open windows
+
+let lastWindows = [];
+const climbAllowed = () => brain?.memory.data.walkOnWindows !== false;
+
+function applyWindows() {
+  motion.setPlatforms(climbAllowed() ? visiblePlatforms(lastWindows, workArea(), { width: CHAR_W, height: CHAR_H }) : []);
+}
+
+/** Turns walking on windows on or off to match the setting. */
+function updateWindowWatch() {
+  const on = climbAllowed();
+  motion.climb = on;
+  if (bridge.watchWindows) bridge.watchWindows(on);
+  if (preview) preview.setEnabled(on);
+  applyWindows();
+}
+
+let preview = null;
+
 // ---------------------------------------------------------- pointer & mouse
 
 let interactive = false;
@@ -337,6 +358,7 @@ function openSettings() {
   radio('st-humor', d.humor);
   $('st-kids').checked = !!d.kidsMode;
   $('st-listen').checked = !!d.alwaysListen;
+  $('st-windows').checked = d.walkOnWindows !== false;
   $('st-listen').disabled = !voiceAvailable;
   $('st-voice').textContent = voiceAvailable
     ? 'الاستماع الصوتي جاهز: اضغط زر الميكروفون أو Ctrl+Shift+Space وتكلم.'
@@ -391,6 +413,10 @@ $('st-kids').addEventListener('change', async () => {
   const res = await bridge.updateSettings({ kidsMode: want });
   if (res?.ok) brain.updateSettings({ kidsMode: res.settings.kidsMode });
   $('st-kids').checked = !!brain.memory.data.kidsMode;
+});
+$('st-windows').addEventListener('change', () => {
+  brain.memory.set({ walkOnWindows: $('st-windows').checked });
+  updateWindowWatch();
 });
 $('st-listen').addEventListener('change', () => {
   brain.updateSettings({ alwaysListen: $('st-listen').checked });
@@ -455,7 +481,10 @@ function frame(now) {
   if (!asleep && motion.mode === 'sleep') motion.wake();
 
   for (const ev of motion.update(dt)) {
-    if (ev.type === 'landed' && brain) handle(brain.event('dropped'));
+    if (!brain) continue;
+    if (ev.type === 'slip') handle(brain.event('slip'));
+    else if (ev.type === 'landed' && ev.impact > 500) handle(brain.event('dropped'));
+    else if (ev.type === 'landed' && ev.onWindow && Math.random() < 0.35) handle(brain.event('hop_window'));
   }
 
   // occasional fidgets when nothing else is happening
@@ -477,7 +506,7 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-window.addEventListener('resize', () => motion.setArea(workArea()));
+window.addEventListener('resize', () => { motion.setArea(workArea()); applyWindows(); });
 
 // ------------------------------------------------------------------- start
 
@@ -501,6 +530,7 @@ async function start() {
       case 'ptt': listen(); break;
       case 'open-settings': openSettings(); break;
       case 'come': handle(brain.hear('تعال')); break;
+      case 'windows': lastWindows = Array.isArray(ev.list) ? ev.list : []; applyWindows(); break;
       default: break;
     }
   });
@@ -508,12 +538,17 @@ async function start() {
   setInterval(() => handle(brain.tick()), 4000);
   requestAnimationFrame(frame);
 
+  if (isPreview) {
+    const { createPreviewDesktop } = await import('./preview-desktop.js');
+    preview = createPreviewDesktop(document.body, (list) => { lastWindows = list; applyWindows(); });
+  }
   updateWake();
+  updateWindowWatch();
   if (!brain.memory.data.onboarded) startOnboarding();
   else handle(brain.start());
 
   // Hooks for automated UI tests and debugging.
-  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, wake, updateWake };
+  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, wake, updateWake, updateWindowWatch, get preview() { return preview; } };
   document.documentElement.dataset.ready = '1';
 }
 

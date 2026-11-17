@@ -56,6 +56,7 @@ function createPreviewBridge() {
       return { ok: true, text: queue.length ? queue.shift() : '' };
     },
     setInteractive() {},
+    watchWindows() {},
     onEvent(cb) { listeners.add(cb); return () => listeners.delete(cb); },
     quit() {},
     // test helpers

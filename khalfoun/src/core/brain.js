@@ -135,6 +135,8 @@ export class Brain {
       case 'tickle': this.emotions.feel('tickle', now); return this.reply('tickle');
       case 'drag': this.emotions.feel('dropped', now); return this.reply('drag');
       case 'dropped': this.emotions.feel('dropped', now); return this.reply('dropped');
+      case 'slip': this.emotions.feel('dropped', now); return this.reply('slip');
+      case 'hop_window': this.emotions.feel('curious', now); return this.reply('hop_window');
       case 'listening': this.emotions.feel('listening', now); return this.reply('listening');
       case 'stt_unavailable': this.emotions.feel('not_understood', now); return this.reply('stt_unavailable');
       case 'stt_empty': this.emotions.feel('not_understood', now); return this.reply('stt_empty');

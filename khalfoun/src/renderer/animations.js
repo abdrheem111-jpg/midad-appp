@@ -55,6 +55,7 @@ export const ANIMATIONS = {
   flex: { loop: false, dur: 1.8, pose: (t) => ({ armL: 100 + S(t * 8) * 6, armR: 100 - S(t * 8) * 6, sy: 1.04, sx: 1.06, headRot: -5, mouth: 'cheeky' }) },
   look_around: { loop: false, dur: 2.4, pose: (t) => ({ headRot: S(t * 2.6) * 12, bodyRot: S(t * 2.6) * 2, eyeMul: 1.05 }) },
   cheeky: { loop: false, dur: 1.4, pose: (t) => ({ mouth: 'cheeky', headRot: -8 + S(t * 6) * 4, eyeMode: 'arc', armL: -20 }) },
+  leap: { loop: true, dur: 0.5, pose: (t) => ({ armL: 105 + S(t * 12) * 8, armR: 105 - S(t * 12) * 8, legL: 16, legR: -16, sy: 1.05, sx: 0.97, kummaY: -3, mouth: 'o', tassel: -12 }) },
   calm: { loop: false, dur: 0.6, pose: () => ({}) },
   wake: { loop: false, dur: 1.2, pose: (t) => ({ y: -hop(clamp01(t / 0.5)) * 30, armL: 90, armR: 90, fx: t < 0.6 ? 'exclaim' : null }) },
 };

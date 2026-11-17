@@ -113,8 +113,13 @@ await check('dragging him up and letting go makes him fall back to the floor', a
   assert(mid.mode === 'drag', `mode ${mid.mode}`);
   await page.mouse.up();
   await page.waitForTimeout(1600);
-  const end = await page.evaluate(() => ({ y: window.__khalfoun.motion.y, floor: window.__khalfoun.motion.floor, mode: window.__khalfoun.motion.mode }));
-  assert(Math.abs(end.y - end.floor) < 1, `not on floor: ${JSON.stringify(end)}`);
+  const end = await page.evaluate(() => {
+    const m = window.__khalfoun.motion;
+    return { y: m.y, floor: m.floor, mode: m.mode, support: m.support, h: m.size.height };
+  });
+  const onFloor = Math.abs(end.y - end.floor) < 1 && !end.support;
+  const onWindow = end.support && Math.abs(end.y + end.h - end.support.y) < 1;
+  assert(onFloor || onWindow, `not standing anywhere: ${JSON.stringify(end)}`);
 });
 
 await check('double-click opens the command box; typed commands work', async () => {
@@ -150,6 +155,54 @@ await check('emotion and animation commands do not break anything', async () => 
   for (const t of ['قول نكتة', 'هههههه', 'ارقص', 'شاطر', 'انت غبي', 'روح نام', 'يا خلفون', 'خلني اركز', 'تعال', 'وقف']) await hear(t, 500);
   assert(await page.evaluate(() => typeof window.__khalfoun.brain.emotions.mood === 'number'), 'brain broken');
   await page.screenshot({ path: `${outDir}/5-after.png` });
+});
+
+await check('dropped above a window he lands and stands on it', async () => {
+  await page.evaluate(() => { const k = window.__khalfoun; k.preview.move('notes', 140, 300); k.preview.move('browser', 900, 420); });
+  await page.waitForTimeout(300);
+  const box = await page.locator('#stage').boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(370, 40, { steps: 15 });
+  await page.mouse.up();
+  await page.waitForTimeout(1500);
+  const st = await page.evaluate(() => ({ support: window.__khalfoun.motion.support, y: window.__khalfoun.motion.y }));
+  assert(st.support && st.support.id === 'notes' && st.y === 300 - 209, JSON.stringify(st));
+  await page.waitForTimeout(2600);
+  await page.screenshot({ path: `${outDir}/7-on-window.png` });
+});
+
+await check('yanking the window away makes him fall, complaining', async () => {
+  await page.evaluate(() => window.__khalfoun.motion.paused = true);
+  await page.evaluate(() => window.__khalfoun.preview.move('notes', 140, 520));
+  await page.waitForTimeout(1600);
+  const st = await page.evaluate(() => ({ support: window.__khalfoun.motion.support, mode: window.__khalfoun.motion.mode }));
+  assert(!st.support || st.support.y !== 300, JSON.stringify(st));
+  const text = await bubble();
+  assert(/النافذة|فوق|حرّك|وااا|آخ|سلام|شفت/.test(text), `bubble: ${text}`);
+});
+
+await check('closing the window under him drops him to what is below', async () => {
+  await page.waitForTimeout(2500);
+  const box = await page.locator('#stage').boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(1100, 60, { steps: 15 });
+  await page.mouse.up();
+  await page.waitForTimeout(1500);
+  let st = await page.evaluate(() => window.__khalfoun.motion.support);
+  assert(st && st.id === 'browser', `should be on the browser window: ${JSON.stringify(st)}`);
+  await page.evaluate(() => window.__khalfoun.preview.close('browser'));
+  await page.waitForTimeout(1600);
+  st = await page.evaluate(() => ({ support: window.__khalfoun.motion.support, y: window.__khalfoun.motion.y, floor: window.__khalfoun.motion.floor }));
+  assert(!st.support && Math.abs(st.y - st.floor) < 1, JSON.stringify(st));
+});
+
+await check('turning off walking on windows hides them from him', async () => {
+  await page.evaluate(() => { const k = window.__khalfoun; k.brain.memory.set({ walkOnWindows: false }); k.updateWindowWatch(); });
+  const st = await page.evaluate(() => ({ climb: window.__khalfoun.motion.climb, platforms: window.__khalfoun.motion.platforms.length }));
+  assert(st.climb === false && st.platforms === 0, JSON.stringify(st));
+  await page.evaluate(() => { const k = window.__khalfoun; k.brain.memory.set({ walkOnWindows: true }); k.updateWindowWatch(); k.motion.paused = false; });
 });
 
 await check('every expression with every animation draws without invalid values', async () => {

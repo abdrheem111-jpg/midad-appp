@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('khalfoun', {
   runAction: (action) => ipcRenderer.invoke('action:run', action),
   transcribe: (wav, purpose) => ipcRenderer.invoke('voice:transcribe', wav, purpose === 'wake' ? 'wake' : 'command'),
   setInteractive: (on) => ipcRenderer.send('ui:interactive', Boolean(on)),
+  watchWindows: (on) => ipcRenderer.send('ui:watch-windows', Boolean(on)),
   onEvent: (callback) => {
     const handler = (_event, payload) => callback(payload);
     ipcRenderer.on('khalfoun:event', handler);

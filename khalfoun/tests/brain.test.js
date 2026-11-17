@@ -125,7 +125,7 @@ test('every situation the brain can produce has replies', () => {
     'type_empty', 'reminder_set', 'reminder_no_time', 'reminder_fire', 'time', 'date', 'organize_ok', 'organize_empty',
     'undo_ok', 'undo_none', 'failed', 'feature_soon', 'need_level', 'kids_blocked', 'confirm_ask', 'confirmed', 'cancelled',
     'level_set', 'settings_open', 'stop', 'sleep', 'wake', 'come', 'away', 'dance', 'jump', 'humor_up', 'humor_down',
-    'humor_max', 'humor_min', 'mic_error', 'onboard_knock', 'idle_bored', 'idle_comment', 'poke', 'tickle', 'drag', 'dropped', 'onboard_done'];
+    'humor_max', 'humor_min', 'slip', 'hop_window', 'mic_error', 'onboard_knock', 'idle_bored', 'idle_comment', 'poke', 'tickle', 'drag', 'dropped', 'onboard_done'];
   for (const s of situations) {
     for (const humor of [0, 2]) {
       const r = engine.say(s, { humor, emotion: 'calm', vars: { app: 'x', query: 'x', target: 'x', duration: 'x', noteSuffix: '', time: 'x', date: 'x', day: 'x', count: '1', what: 'x', level: 'x', days: '3' } });

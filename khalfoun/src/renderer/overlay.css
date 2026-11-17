@@ -31,8 +31,35 @@ html.preview body {
     linear-gradient(160deg, #7fb2c9 0%, #c7dfe2 55%, #e9d6b3 100%);
 }
 
+/* Browser preview only: pretend app windows to walk on. */
+.fake-window {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: #fbfbfd;
+  border: 1px solid #b9c2cf;
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(20, 30, 50, 0.25);
+  overflow: hidden;
+  font-size: 15px;
+  color: #34404f;
+}
+.fake-bar {
+  height: 34px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  background: linear-gradient(#eef1f6, #e2e7ef);
+  border-bottom: 1px solid #c9d0db;
+  font-weight: 700;
+  cursor: move;
+  touch-action: none;
+}
+.fake-body { padding: 16px; line-height: 1.7; }
+
 .stage {
   position: absolute;
+  z-index: 4;
   left: 0;
   top: 0;
   width: 170px;

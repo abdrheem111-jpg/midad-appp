@@ -17,6 +17,7 @@ import { JsonStore } from './storage.js';
 import { createPlatform } from './actions/platform.js';
 import { createExecutor } from './actions/index.js';
 import { findWhisper, transcribe } from './stt.js';
+import { WindowWatcher } from './windows-watcher.js';
 import { LEVEL_INFO } from '../core/permissions.js';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -42,6 +43,7 @@ let tray = null;
 let settings = { ...DEFAULT_SETTINGS };
 let whisper = { available: false, bin: null, model: null, wakeModel: null };
 const reminders = new Set();
+let watcher = null;
 
 const send = (type, data = {}) => {
   if (win && !win.isDestroyed()) win.webContents.send('khalfoun:event', { type, ...data });
@@ -253,6 +255,12 @@ function setupIpc(stores, executor) {
     win.setIgnoreMouseEvents(!on, { forward: true });
   });
 
+  ipcMain.on('ui:watch-windows', (event, on) => {
+    if (!fromApp(event) || !watcher) return;
+    if (on) watcher.start().catch((err) => console.warn('window watcher failed:', err));
+    else watcher.stop();
+  });
+
   ipcMain.on('app:quit', (event) => { if (fromApp(event)) app.quit(); });
 }
 
@@ -355,6 +363,12 @@ async function start() {
     paths: { downloads: downloadsDir, documents: app.getPath('documents'), pictures: app.getPath('pictures') },
   });
   const executor = createExecutor({ platform, getSettings: () => settings, downloadsDir, journal: stores.journal, scheduleReminder });
+  watcher = new WindowWatcher({
+    onChange: (list) => send('windows', { list }),
+    toDip: (r) => (process.platform === 'win32' ? screen.screenToDipRect(null, r) : r),
+    getWorkArea: () => screen.getPrimaryDisplay().workArea,
+    selfPid: process.pid,
+  });
   setupIpc(stores, executor);
   createWindow();
   if (!SMOKE) {
@@ -378,6 +392,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
+    if (watcher) watcher.stop();
     for (const t of reminders) clearTimeout(t);
   });
   app.on('window-all-closed', () => app.quit());

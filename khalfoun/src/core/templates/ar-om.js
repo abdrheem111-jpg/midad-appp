@@ -234,6 +234,15 @@ export const TEMPLATES = [
   { id: 'cm3', s: 'come', t: 'هنا أنا! تامرني بشي؟', a: 'run' },
   { id: 'cl5', s: 'call', t: 'إيوه، معك.', a: 'listen' },
 
+  // ---------- windows ----------
+  { id: 'sl_1', s: 'slip', t: 'وااااا! منو حرّك النافذة؟!', a: 'dangle' },
+  { id: 'sl_2', s: 'slip', t: 'النافذة طارت من تحتي!', a: 'dangle' },
+  { id: 'sl_3', s: 'slip', t: 'كنت مرتاح فوق... ليش كذا؟!', h: 1, cat: 'chat:sulk', a: 'dangle' },
+  { id: 'sl_4', s: 'slip', t: 'سكرتها وأنا فوقها؟! زين، فهمت الرسالة.', h: 1, a: 'dangle' },
+  { id: 'hw_1', s: 'hop_window', t: 'المنظر من فوق أحلى!', a: 'proud' },
+  { id: 'hw_2', s: 'hop_window', t: 'هوب! صرت فوق النافذة.', a: 'happy' },
+  { id: 'hw_3', s: 'hop_window', t: 'لا تحركها وأنا فوقها، ترى أطيح!', h: 1, a: 'look_around' },
+
   // ---------- onboarding ----------
   { id: 'ob1', s: 'onboard_knock', t: 'السلام عليكم! ممكن أدخل؟ وعد ما ألمس شي إلا بإذنك.', a: 'knock' },
   { id: 'ob2', s: 'onboard_done', t: 'تشرفنا يا {name}! أنا خلفون. نادني متى ما تبغى.', a: 'celebrate' },
