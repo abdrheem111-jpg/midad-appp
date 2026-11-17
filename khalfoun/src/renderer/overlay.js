@@ -422,10 +422,40 @@ function openSettings(focus = null) {
   $('st-listen').disabled = !voiceAvailable;
   refreshSetup().then(() => { if (focus === 'setup') $('su-title').scrollIntoView({ block: 'start', behavior: 'smooth' }); });
   renderLog();
+  renderAliases();
   closeCommand();
   els.settings.hidden = false;
   setInteractive(true);
   stepAsideFrom(els.settings);
+}
+
+/** Phrases the person taught («لما أقول ... يعني ...»), each with a ✕ to forget it. */
+function renderAliases() {
+  const list = $('st-aliases');
+  list.textContent = '';
+  const items = brain.taughtPhrases();
+  if (!items.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'للحين ما علمتني شي. قول مثلاً: لما أقول صباحو يعني افتح المتصفح.';
+    list.appendChild(li);
+    return;
+  }
+  for (const { key, command } of items) {
+    const li = document.createElement('li');
+    const text = document.createElement('span');
+    const k = document.createElement('b');
+    k.textContent = `«${key}»`;
+    text.append(k, ` ← ${command}`);
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'x';
+    x.setAttribute('aria-label', `انسَ ${key}`);
+    x.textContent = '✕';
+    x.addEventListener('click', () => { brain.forgetPhrase(key); renderAliases(); });
+    li.append(text, x);
+    list.appendChild(li);
+  }
 }
 
 /** The «آخر ما سويته» list in the settings panel. */

@@ -199,3 +199,19 @@ test('platform: installed programs come from Get-StartApps and open through the 
   assert.equal(validateAction({ type: 'open_installed', params: { name: 'سبوتيفاي' } }), null);
   assert.equal(validateAction({ type: 'open_installed', params: { name: 'x'.repeat(61) } }), 'bad_app');
 });
+
+test('«افتح» alone guesses the usual app from habits; phrases can be forgotten', () => {
+  const { brain } = makeBrain();
+  assert.equal(brain.hear('افتح').situation, 'open_which');
+  for (let i = 0; i < 3; i += 1) sayOk(brain, 'افتح الوورد');
+  sayOk(brain, 'افتح الحاسبة');
+  const guess = brain.hear('افتح');
+  assert.equal(guess.situation, 'open_usual');
+  assert.ok(guess.say.includes('وورد'), guess.say);
+  assert.deepEqual(brain.hear('ايوه').action.params, { app: 'word' });
+  brain.hear('لما اقول شغلي يعني افتح الوورد');
+  assert.deepEqual(brain.taughtPhrases(), [{ key: 'شغلي', command: 'افتح الوورد' }]);
+  assert.equal(brain.hear('انس كلمة شغلي').situation, 'forget_done');
+  assert.deepEqual(brain.taughtPhrases(), []);
+  assert.equal(brain.hear('انس كلمة شغلي').situation, 'forget_none');
+});

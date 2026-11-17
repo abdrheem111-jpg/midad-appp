@@ -190,3 +190,14 @@ test('wav encoding, downsampling and loudness', () => {
   assert.equal(downsample(new Float32Array(48000), 48000, 16000).length, 16000);
   assert.equal(rms(new Float32Array([1, -1])), 1);
 });
+
+test('transcribe adds the person\'s taught words to whisper\'s prompt (commands only)', async () => {
+  let args = null;
+  const run = (bin, a, opts, cb) => { args = a; cb(null, 'صباحو'); };
+  const w = { bin: '/x/whisper-cli', model: '/x/ggml-small.bin', wakeModel: '/x/ggml-base.bin' };
+  await transcribe(w, encodeWav(new Float32Array(1600), 16000), { run, words: ['صباحو', 'شغلي'] });
+  const prompt = args[args.indexOf('--prompt') + 1];
+  assert.ok(prompt.includes('صباحو') && prompt.includes('شغلي') && prompt.startsWith('افتح'), prompt);
+  await transcribe(w, encodeWav(new Float32Array(1600), 16000), { run });
+  assert.ok(!args[args.indexOf('--prompt') + 1].includes('صباحو'));
+});

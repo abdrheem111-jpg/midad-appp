@@ -312,7 +312,11 @@ function setupIpc(stores, executor) {
       // Use most cores for a command (faster answer), fewer for wake-word checks running in the background.
       const cores = Math.max(1, cpus().length);
       const threads = isWake ? Math.min(4, Math.max(2, cores - 2)) : Math.min(8, Math.max(2, cores - 1));
-      const res = await transcribe(whisper, bytes, { purpose: isWake ? 'wake' : 'command', threads });
+      let words = [];
+      if (!isWake) {
+        try { words = Object.keys((await stores.memory.read()).aliases || {}); } catch { words = []; }
+      }
+      const res = await transcribe(whisper, bytes, { purpose: isWake ? 'wake' : 'command', threads, words });
       if (!isWake || !res.ok) diag.write(`voice (${isWake ? 'wake' : 'command'}, ${bytes.length} bytes) →`, res.ok ? `«${res.text}»` : `failed: ${res.error}`);
       return res;
     } finally {

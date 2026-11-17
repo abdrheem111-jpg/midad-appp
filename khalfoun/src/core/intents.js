@@ -386,6 +386,8 @@ function recognizeText(raw, fuzzy) {
   if (L.openIt.includes(text)) return out('open_again', {}, 0.85);
   const teach = parseTeach(raw);
   if (teach) return out('teach', teach, 0.9);
+  const forget = /^(?:انس|انسى|امسح|شيل|الغ|الغي)\s+(?:كلمه|كلمة|عباره|عبارة|جمله|جملة|الكلمه|العباره)\s+(.+)$/u.exec(normalize(raw).replace(/^(يا )?خلفون /, ''));
+  if (forget) return out('forget_phrase', { phrase: forget[1] }, 0.9);
 
   if (findPhrase(padded, L.cancelReminders)) return out('cancel_reminders');
   if (findPhrase(padded, L.clearRoutines)) return out('clear_routines');
@@ -463,7 +465,8 @@ function recognizeText(raw, fuzzy) {
   if (openVerb) {
     const app = findApp(text);
     if (app) return out('open', { app: app.id, kind: app.kind, url: app.url || null });
-    const name = rawRestAfter(raw, L.open, N(['لي', 'برنامج', 'تطبيق'])) || '';
+    const name = rawRestAfter(raw, L.open, N(['لي', 'برنامج', 'تطبيق', 'شي'])) || '';
+    if (!name) return out('open_which', {}, 0.8);
     return out('open_unknown', { name, play: /^(شغل|تشغل|نشغل)/.test(openVerb) }, 0.6);
   }
   if (startsWithPhrase(text, L.close)) {

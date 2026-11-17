@@ -432,6 +432,26 @@ export class Brain {
         this.emotions.feel('danger', now);
         return this.reply('feature_soon');
       case 'close': return this.planClose(s, now);
+      case 'open_which': {
+        // «افتح» alone: guess from what the person usually opens.
+        const guess = this.usualApp();
+        if (guess) {
+          this.pending = { kind: 'suggest', raw, intent: { intent: 'open', slots: guess.slots, confidence: 0.7, text: raw } };
+          this.emotions.feel('curious', now);
+          return this.reply('open_usual', { vars: { app: guess.name }, awaitingConfirm: true });
+        }
+        this.emotions.feel('curious', now);
+        return this.reply('open_which');
+      }
+      case 'forget_phrase': {
+        const aliases = { ...(this.memory.data.aliases || {}) };
+        const key = phraseKey(s.phrase);
+        if (!(key in aliases)) { this.emotions.feel('confused', now); return this.reply('forget_none', { vars: { phrase: s.phrase } }); }
+        delete aliases[key];
+        this.memory.set({ aliases });
+        this.emotions.feel('focus_mode', now);
+        return this.reply('forget_done', { vars: { phrase: s.phrase } });
+      }
       case 'open_again': {
         const last = this.context.lastOpen;
         if (!last) { this.emotions.feel('curious', now); return this.reply('open_which'); }
@@ -528,6 +548,33 @@ export class Brain {
         this.emotions.feel('not_understood', now);
         return this.reply('not_understood', { unknownText: raw });
     }
+  }
+
+  /** The app the person opens most (from the habit log), as open slots + name. */
+  usualApp() {
+    const habits = this.memory.data.habits || {};
+    let best = null;
+    for (const [key, times] of Object.entries(habits)) {
+      if (!Array.isArray(times) || times.length < 2) continue;
+      if (!best || times.length > best.n) best = { key, n: times.length };
+    }
+    if (!best) return null;
+    const [type, id] = best.key.split(':');
+    const app = APPS.find((a) => a.id === id || a.url === id);
+    if (!app) return null;
+    const kind = type === 'open_url' ? 'url' : type === 'open_folder' ? 'folder' : 'app';
+    return { slots: { app: app.id, kind, url: app.url || null }, name: APP_NAMES[app.id] || app.id };
+  }
+
+  /** Taught phrases for the settings panel: [{key, command}]. */
+  taughtPhrases() {
+    return Object.entries(this.memory.data.aliases || {}).map(([key, command]) => ({ key, command }));
+  }
+
+  forgetPhrase(key) {
+    const aliases = { ...(this.memory.data.aliases || {}) };
+    delete aliases[key];
+    this.memory.set({ aliases });
   }
 
   planClose(s, now) {

@@ -76,7 +76,7 @@ export function cleanTranscript(text) {
 /**
  * @param {{bin: string, model: string, wakeModel?: string}} whisper
  * @param {Uint8Array} wav 16 kHz mono WAV
- * @param {{run?: typeof execFile, threads?: number, purpose?: 'command'|'wake'}} [opts]
+ * @param {{run?: typeof execFile, threads?: number, purpose?: 'command'|'wake', words?: string[]}} [opts]
  * @returns {Promise<{ok: true, text: string} | {ok: false, error: string}>}
  */
 export async function transcribe(whisper, wav, opts = {}) {
@@ -88,7 +88,10 @@ export async function transcribe(whisper, wav, opts = {}) {
   try {
     await writeFile(file, wav);
     const model = opts.purpose === 'wake' && whisper.wakeModel ? whisper.wakeModel : whisper.model;
-    const args = ['-m', model, '-l', 'ar', '-f', file, '-nt', '-np', '-t', String(opts.threads || 4), '--prompt', PROMPT];
+    // The person's own words (taught phrases) help whisper spell them the same way.
+    const extra = (opts.words || []).filter((w) => typeof w === 'string' && w.trim()).slice(0, 12).join('، ');
+    const prompt = extra ? `${PROMPT} ${extra}.`.slice(0, 400) : PROMPT;
+    const args = ['-m', model, '-l', 'ar', '-f', file, '-nt', '-np', '-t', String(opts.threads || 4), '--prompt', prompt];
     const text = await new Promise((resolve, reject) => {
       run(whisper.bin, args, { windowsHide: true, timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
         if (err) reject(err);
