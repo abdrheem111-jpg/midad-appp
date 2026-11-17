@@ -152,3 +152,31 @@ test('corpus: fuzzy matching does not invent commands from unrelated words', () 
     assert.ok(['unknown', 'greet', 'feeling'].includes(recognize(s).intent), `${s} → ${recognize(s).intent}`);
   }
 });
+
+import { calculate } from '../src/core/calc.js';
+import { Brain } from '../src/core/brain.js';
+import { defaultMemory } from '../src/core/memory.js';
+
+test('calculations said the Omani way', () => {
+  const cases = [
+    ['كم ٢٥ ضرب ٤', 100], ['احسب ١٥٪ من ٢٠٠', 30], ['جذر ٨١', 9], ['كم ثلاثة زائد خمسة', 8], ['كم خمسة وعشرين في اربعة', 100],
+    ['100 / 8', 12.5], ['كم ٣ تربيع', 9], ['كم 2 اس 10', 1024], ['كم ١٠ بالمية من ٥٠', 5], ['كم ١٢ ناقص ٢٠', -8],
+    ['كم ٣ + ٤ × ٢', 11], ['كم (٣ + ٤) × ٢', 14], ['احسب ٢٥٠ مقسوم على ٤', 62.5], ['كم نص زائد ربع', 0.75], ['كم ١٫٥ ضرب ٤', 6],
+    ['كم ٩ مطروح منها ٤', 5], ['٧×٨', 56], ['كم 1,000 على 4', 250],
+  ];
+  for (const [text, want] of cases) assert.equal(calculate(text)?.value, want, text);
+  assert.deepEqual(calculate('كم ٧ على ٠'), { ok: false, error: 'div_zero' });
+  for (const text of ['كم الساعة', 'دور على مطاعم', 'ذكرني بعد ٥ دقايق', 'اكتب ٥ + ٥', 'افتح الحاسبة', 'كم عمرك', '٥']) assert.equal(calculate(text), null, text);
+  assert.equal(recognize('كم ٢٥ ضرب ٤').intent, 'calc');
+  assert.equal(recognize('ذكرني بعد ٥ دقايق').intent, 'reminder');
+  assert.equal(recognize('اكتب ٥ + ٥').intent, 'type_text');
+});
+
+test('he answers calculations with the expression and result in Arabic digits', () => {
+  const now = Date.UTC(2026, 10, 17, 8);
+  const brain = new Brain({ memoryData: { ...defaultMemory(now), onboarded: true, level: 2 }, clock: () => now, rng: () => 0.1 });
+  const r = brain.hear('كم ٢٥ ضرب ٤');
+  assert.equal(r.situation, 'calc_result');
+  assert.ok(r.say.includes('١٠٠') && r.say.includes('٢٥ × ٤'), r.say);
+  assert.equal(brain.hear('كم ٧ على ٠').situation, 'calc_div_zero');
+});

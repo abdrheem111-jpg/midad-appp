@@ -11,6 +11,7 @@ import { normalize, toArabicDigits } from './arabic.js';
 import { TEMPLATES, APP_NAMES } from './templates/ar-om.js';
 import { Quiz, parseArabicNumber } from './quiz.js';
 import { occasionFor } from './occasions.js';
+import { calculate } from './calc.js';
 
 const FEELING_LABEL = { tired: 'تعبان', sad: 'متضايق', sick: 'مريض', stressed: 'مضغوط' };
 const HOUR = 60 * 60 * 1000;
@@ -222,7 +223,7 @@ export class Brain {
 
   /** Keeps the context used by follow-ups and by learning the person's words. */
   remember(r, raw, out, now) {
-    const REPEATABLE = ['volume', 'joke', 'dance', 'jump', 'open', 'search', 'time', 'quiz', 'screenshot'];
+    const REPEATABLE = ['volume', 'joke', 'calc', 'dance', 'jump', 'open', 'search', 'time', 'quiz', 'screenshot'];
     if (REPEATABLE.includes(r.intent)) this.context.lastCommand = { raw, at: now };
     if (out?.situation === 'not_understood') this.context.lastUnknown = { raw, at: now };
     else if (r.intent !== 'repeat' && out?.action && this.context.lastUnknown) {
@@ -418,6 +419,15 @@ export class Brain {
         this.memory.set({ name: s.name });
         this.emotions.feel('greet', now);
         return this.reply('set_name');
+      case 'calc': {
+        const res = calculate(s.expr);
+        if (!res?.ok) {
+          this.emotions.feel('confused', now);
+          return this.reply(res?.error === 'div_zero' ? 'calc_div_zero' : 'calc_fail');
+        }
+        this.emotions.feel('success', now);
+        return this.reply('calc_result', { vars: { expr: res.expr, result: res.text } });
+      }
       case 'delete':
         this.emotions.feel('danger', now);
         return this.reply('feature_soon');
@@ -633,9 +643,9 @@ export class Brain {
   modelCommand(userText, command) {
     const now = this.clock();
     const r = recognize(command);
-    const COMMANDS = ['open', 'close', 'search', 'type_text', 'volume', 'reminder', 'screenshot', 'time', 'date', 'organize_downloads', 'quiz', 'joke', 'open_unknown'];
+    const COMMANDS = ['open', 'close', 'search', 'type_text', 'volume', 'reminder', 'screenshot', 'time', 'date', 'organize_downloads', 'quiz', 'joke', 'open_unknown', 'calc'];
     if (!COMMANDS.includes(r.intent)) return null;
-    if (['time', 'date', 'joke', 'quiz'].includes(r.intent)) return this.route(r, command, now); // harmless: just do it
+    if (['time', 'date', 'joke', 'quiz', 'calc'].includes(r.intent)) return this.route(r, command, now); // harmless: just do it
     this.pending = { kind: 'suggest', raw: command, intent: r };
     this.emotions.feel('curious', now);
     return this.reply('model_command', { vars: { command }, awaitingConfirm: true });

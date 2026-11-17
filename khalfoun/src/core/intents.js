@@ -4,6 +4,7 @@
 
 import { normalize, hasPhrase, parseMinutes } from './arabic.js';
 import { levenshtein } from './wake.js';
+import { calculate } from './calc.js';
 
 const N = (list) => list.map(normalize).sort((a, b) => b.length - a.length);
 
@@ -376,6 +377,8 @@ function recognizeText(raw, fuzzy) {
   if (L.yesExact.includes(text)) return out('yes', {}, 0.95);
   if (L.noExact.includes(text)) return out('no', {}, 0.95);
 
+  // «كم ٢٥ ضرب ٤», «احسب ١٥٪ من ٢٠٠»: only when every word belongs to the calculation.
+  if (calculate(raw)) return out('calc', { expr: String(raw).trim() }, 0.95);
   if (L.repeat.includes(text)) return out('repeat', {}, 0.85);
   if (L.closeIt.includes(text)) return out('close', { app: null, it: true }, 0.85);
   if (L.openIt.includes(text)) return out('open_again', {}, 0.85);
