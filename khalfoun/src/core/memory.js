@@ -25,6 +25,7 @@ export function defaultMemory(now = Date.now()) {
     // template id -> times shown (for long-term variety)
     seen: {},
     commands: {},
+    aliases: {}, // phrases the person taught: normalized phrase -> command
     log: [],
   };
 }
@@ -102,7 +103,7 @@ function migrate(data) {
   if (!data || typeof data !== 'object') return base;
   const merged = { ...base, ...data };
   merged.emotion = { ...base.emotion, ...(data.emotion || {}) };
-  for (const k of ['likes', 'seen', 'commands']) if (!merged[k] || typeof merged[k] !== 'object') merged[k] = {};
+  for (const k of ['likes', 'seen', 'commands', 'aliases']) if (!merged[k] || typeof merged[k] !== 'object') merged[k] = {};
   if (!Array.isArray(merged.log)) merged.log = [];
   merged.level = clamp(Number(merged.level) || 0, 0, 3);
   merged.humor = clamp(Number.isFinite(Number(merged.humor)) ? Number(merged.humor) : 1, 0, 2);

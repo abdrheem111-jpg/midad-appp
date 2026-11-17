@@ -24,6 +24,19 @@ const LINUX_APPS = {
   settings: [['gnome-control-center'], ['systemsettings']],
 };
 const URL_APPS = { browser: 'https://www.google.com' };
+/** Program files each app runs as, for closing it politely (like pressing its ✕). */
+const WIN_PROCESSES = {
+  calculator: ['CalculatorApp.exe', 'calc.exe'], notepad: ['notepad.exe'], paint: ['mspaint.exe'],
+  word: ['WINWORD.EXE'], excel: ['EXCEL.EXE'], powerpoint: ['POWERPNT.EXE'],
+  browser: ['msedge.exe', 'chrome.exe', 'firefox.exe', 'brave.exe', 'opera.exe'], settings: ['SystemSettings.exe'],
+};
+const MAC_QUIT = { ...MAC_APPS, browser: ['Safari', 'Google Chrome', 'Firefox', 'Microsoft Edge'], settings: ['System Settings', 'System Preferences'] };
+const LINUX_PROCESSES = {
+  calculator: ['gnome-calculator', 'kcalc', 'galculator', 'mate-calc'], notepad: ['gnome-text-editor', 'gedit', 'kate', 'mousepad', 'xed'],
+  paint: ['pinta', 'kolourpaint', 'gimp'], browser: ['firefox', 'chrome', 'chromium'], word: ['soffice.bin'], excel: ['soffice.bin'], powerpoint: ['soffice.bin'],
+};
+/** Folder windows («سكر الملفات») close through the shell, never by stopping explorer.exe itself. */
+const FOLDER_IDS = new Set(['explorer', 'downloads', 'documents', 'pictures']);
 
 export const SEARCH_URLS = {
   google: (q) => `https://www.google.com/search?q=${encodeURIComponent(q)}`,
@@ -95,6 +108,38 @@ export function createPlatform(deps) {
     return { ok: false, error: 'app_not_found' };
   }
 
+  /** Closes an app the same way its ✕ button would, so it can still ask to save. */
+  async function closeApp(app) {
+    if (platform === 'win32') {
+      if (FOLDER_IDS.has(app)) {
+        const r = await powershell('$n = 0; (New-Object -ComObject Shell.Application).Windows() | Where-Object { $_.FullName -like "*explorer.exe" } | ForEach-Object { $_.Quit(); $n++ }; Write-Output $n');
+        if (!r.ok) return { ok: false, error: 'close_failed' };
+        return Number(r.stdout.trim()) > 0 ? { ok: true } : { ok: false, error: 'not_running' };
+      }
+      const names = WIN_PROCESSES[app];
+      if (!names) return { ok: false, error: 'cannot_close' };
+      let closed = false;
+      for (const name of names) {
+        const r = await run('taskkill.exe', ['/IM', name]);
+        if (r.ok) closed = true;
+      }
+      return closed ? { ok: true } : { ok: false, error: 'not_running' };
+    }
+    if (platform === 'darwin') {
+      for (const name of MAC_QUIT[app] || []) {
+        const r = await run('osascript', ['-e', `if application "${name}" is running then tell application "${name}" to quit`]);
+        if (r.ok) return { ok: true };
+      }
+      return { ok: false, error: 'not_running' };
+    }
+    let closed = false;
+    for (const name of LINUX_PROCESSES[app] || []) {
+      const r = await run('pkill', ['-x', name]);
+      if (r.ok) closed = true;
+    }
+    return closed ? { ok: true } : { ok: false, error: LINUX_PROCESSES[app] ? 'not_running' : 'cannot_close' };
+  }
+
   async function openUrl(url) {
     await shell.openExternal(url);
     return { ok: true };
@@ -160,5 +205,5 @@ export function createPlatform(deps) {
     return { ok: true, data: { file } };
   }
 
-  return { platform, openApp, openUrl, openFolder, search, volume, typeText, screenshot };
+  return { platform, openApp, closeApp, openUrl, openFolder, search, volume, typeText, screenshot };
 }

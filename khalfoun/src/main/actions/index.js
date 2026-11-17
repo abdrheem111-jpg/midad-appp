@@ -9,6 +9,7 @@ import { organizeFolder, undoMoves } from './organize.js';
 const APP_IDS = new Set(APPS.filter((a) => a.kind === 'app').map((a) => a.id));
 const URLS = new Set(APPS.filter((a) => a.kind === 'url').map((a) => a.url));
 const FOLDERS = new Set(['downloads', 'documents', 'pictures']);
+const CLOSABLE = new Set([...APP_IDS, ...FOLDERS]);
 const MAX_REMINDER_MIN = 24 * 60;
 
 /**
@@ -21,6 +22,7 @@ export function validateAction(action) {
   const str = (v, max) => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
   switch (action.type) {
     case 'open_app': return APP_IDS.has(p.app) ? null : 'bad_app';
+    case 'close_app': return CLOSABLE.has(p.app) ? null : 'bad_app';
     case 'open_url': return URLS.has(p.url) ? null : 'bad_url';
     case 'open_folder': return FOLDERS.has(p.folder) ? null : 'bad_folder';
     case 'search': return str(p.query, 300) && ['google', 'youtube'].includes(p.engine) ? null : 'bad_search';
@@ -55,6 +57,7 @@ export function createExecutor(deps) {
     try {
       switch (action.type) {
         case 'open_app': return await platform.openApp(p.app);
+        case 'close_app': return await platform.closeApp(p.app);
         case 'open_url': return await platform.openUrl(p.url);
         case 'open_folder': return await platform.openFolder(p.folder);
         case 'search': return await platform.search(p.query.trim(), p.engine);

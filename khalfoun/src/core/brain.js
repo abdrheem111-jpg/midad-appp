@@ -2,7 +2,7 @@
 // permission, plans an action for the shell to run, updates emotions and picks
 // a reply. It never touches the OS itself, so it is fully testable.
 
-import { recognize } from './intents.js';
+import { recognize, splitCommands, nearestApp, phraseKey, APPS } from './intents.js';
 import { EmotionEngine } from './emotions.js';
 import { ResponseEngine } from './responses.js';
 import { decide, LEVEL_INFO } from './permissions.js';
@@ -59,6 +59,11 @@ export class Brain {
     this.quizTries = 0;
     this.rng = opts.rng || Math.random;
     this.lastIdleTalk = this.clock();
+    // Conversation context: what was last opened, the last command (for «مرة ثانية»),
+    // the last sentence he did not understand (to learn the person's own words),
+    // and commands still waiting from a sentence that held several.
+    this.context = { lastOpen: null, lastCommand: null, lastUnknown: null };
+    this.queue = [];
   }
 
   get settings() {
@@ -132,7 +137,36 @@ export class Brain {
     const now = this.clock();
     this.memory.touch(now);
     this.learnFromReaction(raw, now);
-    const r = recognize(raw);
+    // A sentence with several commands runs them one after another.
+    if (!this.pending && !this.quiz) {
+      const parts = splitCommands(raw);
+      if (parts.length > 1) {
+        this.queue = parts.slice(1);
+        return this.withMore(this.hearOne(parts[0], now));
+      }
+    }
+    this.queue = [];
+    return this.hearOne(raw, now);
+  }
+
+  /** The next command from a sentence that held several (the shell calls this after a short pause). */
+  continueQueue() {
+    const next = this.queue.shift();
+    if (!next) return null;
+    return this.withMore(this.hearOne(next, this.clock()));
+  }
+
+  withMore(reply) {
+    if (!reply) return reply;
+    if (reply.awaitingConfirm) { this.queue = []; return reply; } // wait for the answer instead
+    return this.queue.length ? { ...reply, more: true } : reply;
+  }
+
+  hearOne(raw, now) {
+    // Phrases the person taught («لما أقول صباحو يعني افتح المتصفح»).
+    const taught = (this.memory.data.aliases || {})[phraseKey(raw)];
+    const heard = taught ? taught : raw;
+    const r = recognize(heard);
     this.memory.recordCommand(r.intent);
 
     if (this.pending) {
@@ -152,6 +186,19 @@ export class Brain {
           return this.reply('cancelled', { event: null });
         }
       }
+      if (pending.kind === 'suggest' || pending.kind === 'learn') {
+        if (r.intent === 'yes') {
+          this.pending = null;
+          if (pending.kind === 'suggest') return this.route(pending.intent, pending.raw, now);
+          this.saveAlias(pending.phrase, pending.command);
+          this.emotions.feel('celebrate', now);
+          return this.reply('learn_saved', { vars: { phrase: pending.phrase, command: pending.command } });
+        }
+        if (r.intent === 'no' || r.intent === 'stop') {
+          this.pending = null;
+          return this.reply('cancelled', { event: null });
+        }
+      }
       if (r.intent === 'yes' && !pending.kind) {
         this.pending = null;
         return this.launch(pending.action, pending.spec, now, 'confirmed');
@@ -168,7 +215,33 @@ export class Brain {
       if (handled) return handled;
     }
 
-    return this.route(r, raw, now);
+    const out = this.route(r, heard, now);
+    this.remember(r, heard, out, now);
+    return out;
+  }
+
+  /** Keeps the context used by follow-ups and by learning the person's words. */
+  remember(r, raw, out, now) {
+    const REPEATABLE = ['volume', 'joke', 'dance', 'jump', 'open', 'search', 'time', 'quiz', 'screenshot'];
+    if (REPEATABLE.includes(r.intent)) this.context.lastCommand = { raw, at: now };
+    if (out?.situation === 'not_understood') this.context.lastUnknown = { raw, at: now };
+    else if (r.intent !== 'repeat' && out?.action && this.context.lastUnknown) {
+      const unknown = this.context.lastUnknown;
+      this.context.lastUnknown = null;
+      // A rephrase that worked right after something he did not get: offer to remember it.
+      if (now - unknown.at < 60000 && unknown.raw.length <= 40 && out.action.id && !normalize(raw).includes(normalize(unknown.raw))) {
+        const spec = this.inflight.get(out.action.id);
+        if (spec) spec.learnFrom = { phrase: unknown.raw, command: raw };
+      }
+    }
+  }
+
+  saveAlias(phrase, command) {
+    const aliases = { ...(this.memory.data.aliases || {}) };
+    aliases[phraseKey(phrase)] = command;
+    const keys = Object.keys(aliases);
+    if (keys.length > 200) delete aliases[keys[0]];
+    this.memory.set({ aliases });
   }
 
   /**
@@ -223,12 +296,19 @@ export class Brain {
     this.memory.log({ action: spec.action.type, ok: !!result?.ok, error: result?.error || null, summary: spec.summary || '' }, now);
     if (!result || !result.ok) {
       this.emotions.feel('error', now);
+      if (result?.error === 'not_running') return this.reply('close_not_running', { vars: spec.vars || {} });
+      if (result?.error === 'cannot_close') return this.reply('close_tab', { vars: spec.vars || {} });
       if (result?.error === 'level_too_low') return this.reply('need_level');
       if (result?.error === 'kids_mode') return this.reply('kids_blocked');
       if (result?.error === 'no_pdf') return this.reply('pdf_none');
       return this.reply('failed');
     }
     this.markSuccess(now);
+    if (spec.learnFrom && !this.pending) {
+      this.pending = { kind: 'learn', ...spec.learnFrom };
+      this.emotions.feel('curious', now);
+      return this.reply('learn_offer', { vars: spec.learnFrom, awaitingConfirm: true });
+    }
     if (['open_app', 'open_url', 'open_folder'].includes(spec.action.type) && !spec.routine) {
       const offer = this.learnHabit(spec, now);
       if (offer) return offer;
@@ -326,12 +406,43 @@ export class Brain {
         this.memory.set({ name: s.name });
         this.emotions.feel('greet', now);
         return this.reply('set_name');
-      case 'close': case 'delete':
-        this.emotions.feel(r.intent === 'delete' ? 'danger' : 'confused', now);
+      case 'delete':
+        this.emotions.feel('danger', now);
         return this.reply('feature_soon');
-      case 'open_unknown':
+      case 'close': return this.planClose(s, now);
+      case 'open_again': {
+        const last = this.context.lastOpen;
+        if (!last) { this.emotions.feel('curious', now); return this.reply('open_which'); }
+        return this.planOpen(last.slots, now);
+      }
+      case 'repeat': {
+        const last = this.context.lastCommand;
+        if (!last || now - last.at > 10 * 60000) { this.emotions.feel('curious', now); return this.reply('repeat_nothing'); }
+        const again = recognize(last.raw);
+        last.at = now;
+        return this.route(again, last.raw, now);
+      }
+      case 'teach': {
+        const target = recognize(s.command);
+        if (['unknown', 'open_unknown', 'teach', 'repeat'].includes(target.intent)) {
+          this.emotions.feel('not_understood', now);
+          return this.reply('teach_bad', { vars: { command: s.command } });
+        }
+        this.saveAlias(s.phrase, s.command);
+        this.emotions.feel('celebrate', now);
+        return this.reply('learn_saved', { vars: { phrase: s.phrase, command: s.command } });
+      }
+      case 'open_unknown': {
+        const near = s.name ? nearestApp(s.name) : null;
+        if (near) {
+          // «افتح الحاسوب» → «تقصد الحاسبة؟»
+          this.pending = { kind: 'suggest', raw, intent: { intent: 'open', slots: { app: near.id, kind: near.kind, url: near.url || null }, confidence: 0.8, text: raw } };
+          this.emotions.feel('curious', now);
+          return this.reply('suggest_app', { vars: { app: APP_NAMES[near.id] || near.id, target: s.name }, awaitingConfirm: true });
+        }
         this.emotions.feel('not_understood', now);
         return this.reply('open_unknown', { vars: { target: s.name || 'هذا' } });
+      }
       case 'open': return this.planOpen(s, now);
       case 'search': {
         if (!s.query) { this.emotions.feel('not_understood', now); return this.reply('search_empty'); }
@@ -386,7 +497,22 @@ export class Brain {
     }
   }
 
+  planClose(s, now) {
+    let app = s.app;
+    if (!app) {
+      const last = this.context.lastOpen;
+      if (!last || now - last.at > 60 * 60000) { this.emotions.feel('curious', now); return this.reply('close_which'); }
+      app = last.slots.app;
+    }
+    const appName = APP_NAMES[app] || app;
+    const known = APPS.find((a) => a.id === app);
+    if (known?.kind === 'url') { this.emotions.feel('confused', now); return this.reply('close_tab', { vars: { app: appName } }); }
+    return this.plan({ type: 'close_app', params: { app } },
+      { situation: 'close_ok', sayOn: 'start', vars: { app: appName }, confirmWhat: `أسكر ${appName}`, summary: `إغلاق ${appName}` }, now);
+  }
+
   planOpen(s, now) {
+    this.context.lastOpen = { slots: { app: s.app, kind: s.kind, url: s.url }, at: now };
     const appName = APP_NAMES[s.app] || s.app;
     let action;
     if (s.kind === 'url') action = { type: 'open_url', params: { url: s.url } };

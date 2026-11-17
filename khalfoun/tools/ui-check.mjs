@@ -89,6 +89,18 @@ await check('open command runs an action and talks about it', async () => {
   await page.screenshot({ path: `${outDir}/2-open.png` });
 });
 
+await check('two commands in one sentence run one after the other, and «سكرها» closes the last one', async () => {
+  const before = await page.evaluate(() => window.__khalfoun.bridge._actions.length);
+  await page.evaluate(() => window.__khalfoun.hear('افتح المفكرة وبعدين الرسام'));
+  await page.waitForTimeout(2600);
+  const acts = await page.evaluate((n) => window.__khalfoun.bridge._actions.slice(n), before);
+  assert(acts.length === 2 && acts[0].params.app === 'notepad' && acts[1].params.app === 'paint', JSON.stringify(acts));
+  await page.evaluate(() => window.__khalfoun.hear('سكرها'));
+  await page.waitForTimeout(600);
+  const last = await page.evaluate(() => window.__khalfoun.bridge._actions.at(-1));
+  assert(last.type === 'close_app' && last.params.app === 'paint', JSON.stringify(last));
+});
+
 await check('search and typing at full trust', async () => {
   await hear('دور لي عن مطاعم في مسقط');
   let last = await page.evaluate(() => window.__khalfoun.bridge._actions.at(-1));

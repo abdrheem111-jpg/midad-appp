@@ -3,14 +3,18 @@
 // intent name plus slots. The rules run offline and in well under a millisecond.
 
 import { normalize, hasPhrase, parseMinutes } from './arabic.js';
+import { levenshtein } from './wake.js';
 
 const N = (list) => list.map(normalize).sort((a, b) => b.length - a.length);
 
 const FILLERS = N([
   'يا خلفون', 'خلفون', 'لو سمحت', 'لوسمحت', 'من فضلك', 'الله يخليك', 'الله يعافيك',
   'بليز', 'يا', 'ممكن', 'تقدر', 'ابا', 'ابي', 'ابغى', 'ابغا', 'اريد', 'ودي', 'بغيت',
-  'ابغاك', 'ابيك', 'اباك', 'ابغيك', 'عاد', 'طال عمرك',
+  'ابغاك', 'ابيك', 'اباك', 'ابغيك', 'عاد', 'طال عمرك', 'لو تكرمت', 'بسرعه', 'الحين', 'هسه', 'خلنا',
+  'يا الغالي', 'الغالي', 'يا ريال', 'يا رجال', 'يا اخوي', 'اخوي', 'يا بعدي', 'بعد عمري', 'اذا ممكن', 'اذا سمحت',
 ]);
+/** Words that mean «I want»: «ابي الحاسبة» opens it. */
+const WANT = N(['ابا', 'ابي', 'ابغى', 'ابغا', 'اريد', 'ودي', 'بغيت', 'عطني', 'هات', 'جيب لي', 'جيبلي']);
 
 /** Apps and sites the assistant knows by name. `kind` decides how main opens it. */
 export const APPS = [
@@ -19,7 +23,7 @@ export const APPS = [
   { id: 'youtube', kind: 'url', url: 'https://www.youtube.com', names: ['يوتيوب', 'اليوتيوب', 'يوتيب', 'youtube'] },
   { id: 'whatsapp', kind: 'url', url: 'https://web.whatsapp.com', names: ['الواتساب', 'واتساب', 'الواتس', 'واتس اب', 'whatsapp'] },
   { id: 'calculator', kind: 'app', names: ['الحاسبه', 'حاسبه', 'الاله الحاسبه', 'الكالكوليتر', 'الحاسبة'] },
-  { id: 'notepad', kind: 'app', names: ['المفكره', 'مفكره', 'النوتباد', 'نوت باد', 'نوتباد', 'الملاحظات'] },
+  { id: 'notepad', kind: 'app', names: ['المفكره', 'مفكره', 'النوتباد', 'نوت باد', 'النوت باد', 'نوتباد', 'الملاحظات', 'المذكره'] },
   { id: 'paint', kind: 'app', names: ['الرسام', 'برنامج الرسم', 'بينت', 'البينت'] },
   { id: 'explorer', kind: 'app', names: ['الملفات', 'مستكشف الملفات', 'المستكشف', 'ملفاتي', 'المجلدات'] },
   { id: 'downloads', kind: 'folder', names: ['التنزيلات', 'التحميلات', 'الداونلود', 'مجلد التنزيلات'] },
@@ -34,7 +38,7 @@ export const APPS = [
 const L = {
   stopExact: N(['وقف', 'بس', 'خلاص', 'اسكت', 'وقف وقف', 'خلاص بس', 'كفايه', 'الغي', 'كنسل', 'بس بس', 'استوب']),
   yesExact: N(['نعم', 'اي', 'ايوه', 'ايوا', 'اكيد', 'تمام', 'اوكي', 'اوك', 'يب', 'صح', 'زين', 'ماشي', 'نفذ', 'سوها', 'سويها', 'يلا', 'يالله', 'طيب', 'اي نعم', 'اكيد سوها', 'ok', 'yes']),
-  noExact: N(['لا', 'لا لا', 'لاء', 'خلها', 'خليها', 'بلاش', 'ما ابا', 'ما ابي', 'لا تسوي', 'لا تسويها', 'مب لازم', 'لا شكرا', 'no']),
+  noExact: N(['لا', 'لا لا', 'لاء', 'خلها', 'خليها', 'بلاش', 'ما ابا', 'ما ابي', 'لا تسوي', 'لا تسويها', 'مب لازم', 'لا شكرا', 'لا خلها', 'لا خليها', 'لا بلاش', 'لا ما ابا', 'لا ما ابي', 'لا مب لازم', 'ما يحتاج', 'لا ما يحتاج', 'no']),
   soundsOff: N(['اسكت الاصوات', 'بدون اصوات', 'بلا اصوات', 'وقف الاصوات', 'سكت الاصوات', 'اكتم صوتك', 'لا تطلع اصوات', 'طفي الاصوات']),
   soundsOn: N(['شغل الاصوات', 'رجع الاصوات', 'شغل صوتك', 'ابا الاصوات', 'خل الاصوات']),
   pdfSign: N(['وقع الملف', 'وقع البي دي اف', 'وقع ملف البي دي اف', 'حط توقيعي', 'حط اسمي في الملف', 'وقع لي الملف', 'وقعلي الملف']),
@@ -43,8 +47,11 @@ const L = {
   remind: N(['ذكرني', 'نبهني', 'فكرني', 'ذكرني بعد', 'سولي تذكير', 'سو تذكير', 'حط تذكير', 'حط منبه']),
   type: N(['تكتب لي', 'تكتبلي', 'تكتب', 'اكتب لي', 'اكتبلي', 'اكتب', 'كتب لي', 'دون لي', 'دون']),
   search: N(['تدور لي عن', 'تدور لي على', 'تدورلي عن', 'تدور لي', 'تدورلي', 'تدور عن', 'تدور على', 'تدور', 'تبحث عن', 'تبحث لي عن', 'دور لي عن', 'دور لي على', 'دورلي عن', 'دورلي على', 'دور لي', 'دورلي', 'دور عن', 'دور على', 'دور', 'ابحث لي عن', 'ابحث عن', 'ابحث', 'فتش عن', 'فتش على', 'فتش', 'سيرش', 'سيرش عن']),
-  open: N(['تفتح لي', 'تفتحلي', 'تفتح', 'تفج', 'تشغل', 'تشغل لي', 'افتح لي', 'افتحلي', 'افتح', 'فج لي', 'فجلي', 'فج', 'فك لي', 'فك', 'شغل لي', 'شغللي', 'شغل', 'وديني', 'ودني', 'روح على']),
-  close: N(['سكر', 'سكرلي', 'اقفل', 'بند', 'اغلق', 'طفي البرنامج', 'سكر البرنامج']),
+  open: N(['تفتح لي', 'تفتحلي', 'تفتح', 'تفج', 'تشغل', 'تشغل لي', 'افتح لي', 'افتحلي', 'افتح', 'فتح لي', 'فتحلي', 'فتح', 'نفتح', 'فج لي', 'فجلي', 'فج', 'فك لي', 'فك', 'شغل لي', 'شغللي', 'شغل', 'نشغل', 'وديني', 'ودني', 'روح على', 'دخلني', 'دخل على']),
+  close: N(['سكر', 'سكرلي', 'سكر لي', 'تسكر', 'اقفل', 'اقفل لي', 'تقفل', 'بند', 'اغلق', 'طفي', 'طفي لي', 'طفي البرنامج', 'سكر البرنامج']),
+  closeIt: N(['سكره', 'سكرها', 'سكرهم', 'سكرة', 'اقفله', 'اقفلها', 'بنده', 'بندها', 'طفيه', 'طفيها', 'اغلقه', 'اغلقها', 'سكره خلاص', 'سكرها خلاص']),
+  openIt: N(['افتحه', 'افتحها', 'افتحه مره ثانيه', 'افتحها مره ثانيه', 'رجعه', 'رجعها', 'شغله', 'شغلها', 'فجه', 'فجها']),
+  repeat: N(['مره ثانيه', 'مرة ثانيه', 'عيدها', 'عيد', 'كمان مره', 'كمان', 'سوها مره ثانيه', 'سويها مره ثانيه', 'زيد', 'بعد', 'زيد بعد', 'اكثر', 'زياده', 'بعد زيد', 'نفس الشي', 'كرر', 'كررها', 'ثاني مره', 'مره ثاني']),
   volumeWord: N(['الصوت', 'الصوط', 'الساوند']),
   volumeUp: N(['ارفع', 'علي', 'كبر', 'زيد', 'عل', 'ما اسمع', 'ما اسمعه', 'اعلى']),
   volumeDown: N(['وطي', 'نزل', 'قصر', 'صغر', 'خفض', 'خفف', 'عالي', 'واجد عالي', 'ادنى']),
@@ -96,6 +103,117 @@ export const FEELINGS = [
   ['happy', N(['فرحان', 'فرحانه', 'مستانس', 'مستانسه', 'مبسوط', 'مبسوطه', 'وناسه', 'سعيد اليوم', 'مرتاح', 'مرتاحه', 'يومي حلو', 'يومي زين'])],
 ];
 
+/** True when the text is just an app's name, maybe with «برنامج/مجلد» or a want-word. */
+function APP_NAME_ONLY(text, app) {
+  const rest = WANT.reduce((t, w) => (t.startsWith(`${w} `) ? t.slice(w.length + 1) : t), text).replace(/^(برنامج|مجلد|موقع) /, '');
+  return app.names.includes(rest);
+}
+
+// ------------------------------------------------------------- teaching
+const TEACH_HEAD = /^(?:يا خلفون\s+|خلفون\s+)?(?:لما|لمن|اذا|إذا|متى ما|كل ما|كلما|يوم)\s+(?:اقول|أقول|قلت|اقولك|أقولك|قلتلك|قلت لك)(?:\s+لك)?\s+(.+)$/u;
+const TEACH_SEP = /\s+(?:يعني|معناها|معناه|قصدي|افهم|افهمها|افهمه|تراها|ترا|اقصد|أقصد)\s*[:،,]?\s+/u;
+
+/**
+ * «لما أقول صباحو يعني افتح المتصفح» → {phrase: 'صباحو', command: 'افتح المتصفح'}.
+ * Without «يعني», the command starts at the first command verb («لما أقول X افتح Y»).
+ */
+export function parseTeach(raw) {
+  const m = TEACH_HEAD.exec(String(raw || '').trim());
+  if (!m) return null;
+  let body = m[1].replace(/[«»"“”]/g, '').trim();
+  let phrase = null;
+  let command = null;
+  const sep = TEACH_SEP.exec(body);
+  if (sep) {
+    phrase = body.slice(0, sep.index);
+    command = body.slice(sep.index + sep[0].length);
+  } else {
+    const words = body.split(/\s+/);
+    const verbs = [...L.open, ...L.close, ...L.search, ...L.type, ...L.remind].filter((v) => !v.includes(' '));
+    const at = words.findIndex((w, i) => i > 0 && verbs.includes(normalize(w)));
+    if (at > 0) { phrase = words.slice(0, at).join(' '); command = words.slice(at).join(' '); }
+  }
+  phrase = (phrase || '').replace(/[،,:.!؟?]+$/u, '').trim();
+  command = (command || '').replace(/[،,:.!؟?]+$/u, '').trim();
+  if (!phrase || !command || phrase.length > 60 || command.length > 200) return null;
+  return { phrase, command };
+}
+
+/** The form a sentence is remembered under when the person teaches a phrase. */
+export function phraseKey(raw) {
+  return stripFillers(normalize(raw));
+}
+
+// ------------------------------------------------------- several commands
+const THEN = new Set(N(['وبعدين', 'بعدين', 'وبعدها', 'بعدها', 'ثم', 'وثم', 'وبعد كذا', 'بعد كذا']));
+const SPLIT_INTENTS = new Set(['open', 'close', 'search', 'type_text', 'pdf_write', 'volume', 'reminder', 'screenshot', 'time', 'date',
+  'joke', 'dance', 'jump', 'come', 'away', 'sleep', 'organize_downloads', 'cancel_reminders', 'quiz', 'sounds']);
+const LEAD_VERBS = new Set(N(['افتح', 'فج', 'شغل', 'سكر', 'اقفل', 'طفي', 'دور', 'ابحث', 'اكتب', 'ذكرني', 'ارفع', 'وطي', 'نزل', 'اكتم', 'رتب', 'صور', 'قول', 'ارقص', 'تعال', 'روح']));
+
+/**
+ * Splits «افتح الحاسبة وبعدين المفكرة» or «افتح الحاسبة وافتح الوورد» into
+ * separate commands. Only splits when every part is a command on its own, so
+ * text to type or search («دور عن خبز ثم حليب») stays whole.
+ * @param {string} raw
+ * @returns {string[]}
+ */
+export function splitCommands(raw) {
+  const tokens = String(raw || '').trim().split(/\s+/).filter(Boolean);
+  if (tokens.length < 3) return [String(raw || '').trim()];
+  const parts = [[]];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const t = tokens[i];
+    const n = normalize(t);
+    const two = i + 1 < tokens.length ? `${n} ${normalize(tokens[i + 1])}` : '';
+    if (parts.at(-1).length && THEN.has(two)) { parts.push([]); i += 1; continue; }
+    if (parts.at(-1).length && (THEN.has(n) || n === 'و')) { parts.push([]); continue; }
+    if (parts.at(-1).length && n.length > 2 && n.startsWith('و') && LEAD_VERBS.has(n.slice(1))) { parts.push([t.replace(/^و/u, '')]); continue; }
+    parts.at(-1).push(t);
+  }
+  let segs = parts.map((p) => p.join(' ').trim()).filter(Boolean);
+  // «افتح الحاسبة والمفكرة» / «...وبعدين المفكرة»: carry the verb over to a bare app name.
+  segs = segs.flatMap((seg, i) => {
+    if (i === 0) return [seg];
+    const prev = recognize(segs[0]);
+    const words = seg.split(/\s+/);
+    const bareApp = findApp(normalize(seg));
+    if (bareApp && words.length <= 3 && APP_NAME_ONLY(normalize(seg).replace(/^و/, ''), bareApp) && ['open', 'close'].includes(prev.intent)) {
+      const verb = prev.intent === 'open' ? 'افتح' : 'سكر';
+      return [`${verb} ${seg.replace(/^و/u, '')}`];
+    }
+    return [seg];
+  });
+  if (segs.length === 1) {
+    // «افتح الحاسبة والمفكرة» in one part: split on «و» + app name.
+    const m = /^(.*\S)\s+و(\S+(?:\s+\S+)?)$/u.exec(segs[0]);
+    if (m) {
+      const first = recognize(m[1]);
+      const app = findApp(normalize(m[2]));
+      if (['open', 'close'].includes(first.intent) && first.slots.app && app && APP_NAME_ONLY(normalize(m[2]), app)) {
+        return [m[1], `${first.intent === 'open' ? 'افتح' : 'سكر'} ${m[2]}`];
+      }
+    }
+    return segs;
+  }
+  const ok = segs.every((seg) => SPLIT_INTENTS.has(recognize(seg).intent));
+  return ok ? segs : [String(raw).trim()];
+}
+
+/** The closest known app to a name that was not recognized, or null. */
+export function nearestApp(name) {
+  const n = normalize(name);
+  if (!n || n.length < 3) return null;
+  let best = null;
+  for (const app of APPS) {
+    for (const an of app.names) {
+      const d = levenshtein(n, an);
+      const limit = Math.max(1, Math.min(2, Math.floor(an.length / 3)));
+      if (d <= limit && (!best || d < best.d)) best = { app, d };
+    }
+  }
+  return best ? best.app : null;
+}
+
 const MORNING = N(['صباح الخير', 'صباح النور']);
 const EVENING = N(['مساء الخير']);
 const YOUTUBE = N(['يوتيوب', 'اليوتيوب', 'يوتيب']);
@@ -118,6 +236,57 @@ function startsWithPhrase(text, list) {
   return null;
 }
 
+// ------------------------------------------------------------ typo tolerance
+// Words the rules know. A word outside this set that is one letter away from
+// exactly one known word (two letters for long words) is read as that word, so
+// typing slips and speech-recognition mistakes still work («افنح الحاسيه»).
+let VOCAB = null;
+const CORRECTION_CACHE = new Map();
+function vocab() {
+  if (VOCAB) return VOCAB;
+  VOCAB = new Set();
+  const add = (phrase) => { for (const w of phrase.split(' ')) if (w) VOCAB.add(w); };
+  for (const list of Object.values(L)) list.forEach(add);
+  for (const app of APPS) app.names.forEach(add);
+  for (const [, words] of FEELINGS) words.forEach(add);
+  FILLERS.forEach(add);
+  WANT.forEach(add);
+  // everyday words that must never be "corrected" into commands
+  N(['الكلام', 'هالكلام', 'كلام', 'التالي', 'برنامج', 'لي', 'كتاب', 'كتابه', 'كتب', 'الكتاب', 'تسلم', 'يسلم', 'عليك', 'عليكم', 'امي', 'ابوي', 'البحر', 'المدرسه', 'السياره', 'قصه', 'الفضاء',
+    'حلو', 'حلوه', 'رايك', 'شو', 'ايش', 'وش', 'في', 'عن', 'على', 'من', 'الى', 'مع', 'هذا', 'هذي', 'اليوم', 'امس', 'بكره', 'شوي',
+    'واجد', 'وايد', 'زين', 'كيف', 'ليش', 'متى', 'وين', 'منو', 'انا', 'انت', 'هو', 'هي', 'احنا', 'والله', 'صدق', 'كذا', 'ثاني', 'ثانيه',
+    'العب', 'نلعب', 'اكل', 'ماي', 'شاي', 'قهوه', 'صلاه', 'الصلاه', 'الجمعه', 'سلام', 'حبيبي', 'قلبي', 'صديقي', 'استاذ', 'الاستاذ',
+    'المعلم', 'الطلاب', 'درس', 'الدرس', 'واجب', 'الواجب', 'امتحان', 'الامتحان', 'اختبار', 'الاختبار', 'رياضيات', 'علوم', 'عربي',
+    'قرات', 'قريت', 'شفت', 'سمعت', 'رحت', 'جيت', 'خربانه', 'خربان', 'جميل', 'جميله', 'ساعه', 'ساعات', 'دقيقه', 'دقايق']).forEach(add);
+  return VOCAB;
+}
+
+function correctWord(w) {
+  if (w.length < 4 || /\d/.test(w)) return w;
+  const known = vocab();
+  if (known.has(w)) return w;
+  if (CORRECTION_CACHE.has(w)) return CORRECTION_CACHE.get(w);
+  let best = null;
+  let bestD = Infinity;
+  let tie = false;
+  const maxD = w.length >= 8 ? 2 : 1;
+  for (const k of known) {
+    if (k.length < 4 || Math.abs(k.length - w.length) > maxD) continue;
+    const d = levenshtein(w, k);
+    if (d > maxD) continue;
+    if (d < bestD) { best = k; bestD = d; tie = false; } else if (d === bestD && k !== best) tie = true;
+  }
+  const out = best && !tie ? best : w;
+  if (CORRECTION_CACHE.size > 2000) CORRECTION_CACHE.clear();
+  CORRECTION_CACHE.set(w, out);
+  return out;
+}
+
+/** Corrects near-miss words in normalized text (see above). */
+export function correctTypos(normalizedText) {
+  return normalizedText.split(' ').map(correctWord).join(' ');
+}
+
 /** Finds a known app/site name inside normalized text. */
 export function findApp(normalizedText) {
   const padded = ` ${normalizedText} `;
@@ -136,7 +305,7 @@ export function findApp(normalizedText) {
  */
 export function rawRestAfter(raw, verbs, skip = []) {
   const tokens = String(raw).trim().split(/\s+/).filter(Boolean);
-  const norm = tokens.map(normalize);
+  const norm = tokens.map((t) => (fuzzyPass ? correctWord(normalize(t)) : normalize(t)));
   for (let i = 0; i < norm.length; i += 1) {
     for (const verb of verbs) {
       const parts = verb.split(' ');
@@ -169,8 +338,34 @@ function reminderNote(raw, verbs, repeat = false) {
  * @returns {{intent: string, slots: Record<string, any>, confidence: number, text: string}}
  */
 export function recognize(raw) {
+  const exact = recognizeOnce(raw, false);
+  if (!['unknown', 'open_unknown'].includes(exact.intent) && !(exact.intent === 'close' && !exact.slots.app)) return exact;
+  // Not understood as written: try again reading near-miss words as known ones,
+  // and accept only a command (never a chat reply) from that second reading.
+  const fuzzy = recognizeOnce(raw, true);
+  if (FUZZY_OK.has(fuzzy.intent) && !(fuzzy.intent === 'close' && !fuzzy.slots.app)) {
+    return { ...fuzzy, confidence: Math.min(fuzzy.confidence, 0.8), slots: { ...fuzzy.slots, corrected: true } };
+  }
+  return exact;
+}
+
+/** Intents a typo-corrected reading may produce. */
+const FUZZY_OK = new Set(['open', 'close', 'search', 'type_text', 'pdf_write', 'pdf_sign', 'volume', 'reminder', 'cancel_reminders',
+  'screenshot', 'time', 'date', 'joke', 'organize_downloads', 'quiz', 'help', 'dance', 'come', 'away', 'sounds', 'setup', 'open_settings']);
+let fuzzyPass = false;
+
+function recognizeOnce(raw, fuzzy) {
+  fuzzyPass = fuzzy;
+  try {
+    return recognizeText(raw, fuzzy);
+  } finally {
+    fuzzyPass = false;
+  }
+}
+
+function recognizeText(raw, fuzzy) {
   const normalized = normalize(raw);
-  const text = stripFillers(normalized);
+  const text = stripFillers(fuzzy ? correctTypos(normalized) : normalized);
   const padded = ` ${text} `;
   const out = (intent, slots = {}, confidence = 0.9) => ({ intent, slots, confidence, text });
 
@@ -180,6 +375,12 @@ export function recognize(raw) {
   if (L.stopExact.includes(text)) return out('stop', {}, 0.98);
   if (L.yesExact.includes(text)) return out('yes', {}, 0.95);
   if (L.noExact.includes(text)) return out('no', {}, 0.95);
+
+  if (L.repeat.includes(text)) return out('repeat', {}, 0.85);
+  if (L.closeIt.includes(text)) return out('close', { app: null, it: true }, 0.85);
+  if (L.openIt.includes(text)) return out('open_again', {}, 0.85);
+  const teach = parseTeach(raw);
+  if (teach) return out('teach', teach, 0.9);
 
   if (findPhrase(padded, L.cancelReminders)) return out('cancel_reminders');
   if (findPhrase(padded, L.clearRoutines)) return out('clear_routines');
@@ -198,6 +399,13 @@ export function recognize(raw) {
     let content = rawRestAfter(raw, L.type, N(['هذا', 'هذي', 'هالكلام', 'الكلام', 'التالي'])) || '';
     // «اكتب ... في ملف الـPDF» writes into the newest PDF instead of the active window
     const pdfTail = /\s*(فوق|تحت|في الأعلى|في الاعلى|في الأسفل|في الاسفل)?\s*(في|ف|على|بـ?)\s*(ملف\s*)?(ال)?(pdf|بي\s*دي\s*اف|بيدي\s*اف|بي\s*دي\s*إف|الـ\s*pdf)\s*(فوق|تحت|في الأعلى|في الاعلى|في الأسفل|في الاسفل)?\s*$/iu;
+    // «اكتب في البي دي اف ...» names the PDF first
+    const pdfHead = /^\s*(في|ف|على)\s*(ملف\s*)?(ال)?(pdf|بي\s*دي\s*اف|بيدي\s*اف|بي\s*دي\s*إف)\s*[:،,]?\s*/iu;
+    const h = content.match(pdfHead);
+    if (h) {
+      const rest = content.slice(h[0].length).trim();
+      return out('pdf_write', { text: rest, position: 'top' }, rest ? 0.9 : 0.6);
+    }
     const m = content.match(pdfTail);
     if (m) {
       const where = `${m[1] || ''} ${m[6] || ''}`;
@@ -236,6 +444,14 @@ export function recognize(raw) {
   if (setupMatch) return out('setup', { part: /عقل|مخ|ذكاء/.test(setupMatch[4]) ? 'brain' : 'voice' });
   if (findPhrase(padded, L.settings)) return out('open_settings');
 
+  // «ابي الحاسبة» / just «الحاسبة»: open it.
+  {
+    const bare = findApp(text);
+    if (bare && APP_NAME_ONLY(text, bare)) {
+      const wanted = WANT.some((w) => hasPhrase(` ${normalized} `, w));
+      return out('open', { app: bare.id, kind: bare.kind, url: bare.url || null }, wanted ? 0.85 : 0.7);
+    }
+  }
   const openVerb = startsWithPhrase(text, L.open);
   if (openVerb) {
     const app = findApp(text);
@@ -285,6 +501,7 @@ export function recognize(raw) {
     const part = findPhrase(padded, MORNING) ? 'morning' : findPhrase(padded, EVENING) ? 'evening' : 'any';
     return out('greet', { part });
   }
+  if (/ (تسلم|يسلم|يسلمون|تسلمون) (عليك|عليكم) /.test(padded)) return out('greet', { part: 'any' }, 0.8);
   if (findPhrase(padded, L.thanks)) return out('thanks');
   if (findPhrase(padded, L.praise)) return out('praise');
   if (findPhrase(padded, L.scold)) return out('scold');

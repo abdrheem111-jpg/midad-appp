@@ -22,6 +22,7 @@ export const ACTION_RISK = {
   open_app: 'open',
   open_url: 'open',
   open_folder: 'open',
+  close_app: 'modify', // an app may hold unsaved work; it still gets to ask to save
   search: 'open',
   volume: 'system',
   screenshot: 'system',

@@ -118,6 +118,8 @@ function handle(reply) {
     default: break;
   }
   if (reply.action) runAction(reply.action);
+  // «افتح الحاسبة وبعدين المفكرة»: the next command follows after a short pause.
+  if (reply.more) setTimeout(() => handle(brain.continueQueue()), 1600);
 }
 
 async function runAction(action) {
