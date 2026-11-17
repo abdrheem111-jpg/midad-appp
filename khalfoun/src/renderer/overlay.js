@@ -123,6 +123,7 @@ function hear(text) {
   const t = String(text || '').trim();
   if (!t) return;
   const reply = brain.hear(t);
+  bridge.note?.(`heard «${t}» → ${reply?.situation || 'nothing'}${reply?.action ? ` (action ${reply.action.type})` : ''}${reply?.awaitingConfirm ? ' (asks to confirm)' : ''}`);
   if (reply?.situation === 'not_understood' && reply.unknownText && chatOn() && !chatting) {
     askModel(t, reply);
     return;

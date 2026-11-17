@@ -38,6 +38,10 @@ jobs:
         env:
           KHALFOUN_SMOKE_SETUP: '1'
         run: npm run smoke
+      - name: Real use with the keyboard (Ctrl+Shift+K, typed Arabic command)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: node tools/real-use-check.mjs
       - name: Real Windows checks (windows, apps, volume, typing)
         if: runner.os == 'Windows'
         run: npm run check:windows
@@ -113,3 +117,6 @@ jobs:
           Write-Host "Installed at $installed"
           $env:KHALFOUN_APP_EXE = $installed
           npm run smoke
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # Then use the installed copy the way a person does, with the real keyboard.
+          node tools/real-use-check.mjs

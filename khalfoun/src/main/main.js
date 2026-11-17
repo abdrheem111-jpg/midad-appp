@@ -22,6 +22,7 @@ import { ChatClient, findLocalModel } from './chat.js';
 import { ReminderScheduler } from './reminders.js';
 import { writeIntoLatestPdf } from './actions/pdf.js';
 import { LEVEL_INFO } from '../core/permissions.js';
+import { DiagLog } from './diag.js';
 import {
   setupVoice, pullOllamaModel, ollamaStatus, setupErrorText, packSizeMB,
   VOICE_PACKS, WHISPER_PROGRAM, WHISPER_MODELS, BRAIN_MODELS, OLLAMA_DOWNLOAD_PAGE,
@@ -53,6 +54,7 @@ let watcher = null;
 let chat = null; // ChatClient when a local model is found
 let chatInfo = null;
 let voiceDirs = [];
+let diag = { write() {} }; // DiagLog once the profile folder is known
 let lookForModel = async () => {};
 
 const send = (type, data = {}) => {
@@ -122,6 +124,16 @@ function createWindow() {
   win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(`${ORIGIN}/`)) e.preventDefault(); });
   win.once('ready-to-show', () => win.showInactive());
   win.on('closed', () => { win = null; });
+  win.webContents.on('console-message', (...args) => {
+    const e = args[0];
+    const level = typeof e === 'object' && e !== null && 'level' in e ? e.level : args[1];
+    const message = typeof e === 'object' && e !== null && 'message' in e ? e.message : args[2];
+    if (level === 'error' || level === 'warning' || level === 2 || level === 3) diag.write(`page ${level === 'error' || level === 3 ? 'error' : 'warning'}:`, String(message));
+  });
+  win.webContents.on('render-process-gone', (_e, details) => diag.write('page crashed:', details));
+  win.webContents.on('unresponsive', () => diag.write('page not responding'));
+  win.webContents.on('did-fail-load', (_e, code, desc, url) => diag.write('page failed to load:', code, desc, url));
+  win.webContents.on('preload-error', (_e, path, err) => diag.write('preload error:', path, String(err)));
   win.loadURL(START_URL);
 }
 
@@ -143,6 +155,7 @@ function buildTray() {
     { label: 'تعال يا خلفون', click: showAnd('come') },
     { label: 'الإعدادات', click: () => { if (win) { win.show(); win.focus(); send('open-settings'); } } },
     { type: 'separator' },
+    { label: 'سجل خلفون (لو في مشكلة)', click: () => { shell.openPath(diag.file || '').catch(() => {}); } },
     { label: 'إخفاء / إظهار', click: () => { if (!win) return; if (win.isVisible()) win.hide(); else win.showInactive(); } },
     ...(canAutoStart ? [{ label: 'تشغيل مع بدء الجهاز', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }) }] : []),
     { label: 'خروج', click: () => app.quit() },
@@ -155,6 +168,7 @@ function registerShortcuts() {
   const ok1 = globalShortcut.register('CommandOrControl+Shift+Space', () => { if (win) { win.showInactive(); send('ptt'); } });
   const ok2 = globalShortcut.register('CommandOrControl+Shift+K', () => { if (win) { win.show(); win.focus(); send('open-command'); } });
   if (!ok1 || !ok2) console.warn('Some keyboard shortcuts are taken by another program.');
+  diag.write('shortcuts', { 'Ctrl+Shift+Space': ok1, 'Ctrl+Shift+K': ok2 });
 }
 
 let reminderScheduler = null;
@@ -266,12 +280,15 @@ function setupIpc(stores, executor) {
     }
     settings = next;
     await stores.settings.write(settings);
+    diag.write('settings', { level: settings.level, kidsMode: settings.kidsMode, onboarded: settings.onboarded, chatEnabled: settings.chatEnabled });
     return { ok: true, settings };
   });
 
   ipcMain.handle('action:run', async (event, action) => {
-    if (!fromApp(event)) return { ok: false, error: 'forbidden' };
-    return executor.run(action);
+    if (!fromApp(event)) { diag.write('action refused: not from the app page'); return { ok: false, error: 'forbidden' }; }
+    const result = await executor.run(action);
+    diag.write('action', action?.type, action?.params || {}, '→', result?.ok ? 'ok' : `failed: ${result?.error}`);
+    return result;
   });
 
   let sttBusy = false;
@@ -283,7 +300,9 @@ function setupIpc(stores, executor) {
     if (isWake && sttBusy) return { ok: false, error: 'busy' };
     sttBusy = true;
     try {
-      return await transcribe(whisper, bytes, { purpose: isWake ? 'wake' : 'command' });
+      const res = await transcribe(whisper, bytes, { purpose: isWake ? 'wake' : 'command' });
+      if (!isWake || !res.ok) diag.write(`voice (${isWake ? 'wake' : 'command'}, ${bytes.length} bytes) →`, res.ok ? `«${res.text}»` : `failed: ${res.error}`);
+      return res;
     } finally {
       sttBusy = false;
     }
@@ -333,9 +352,11 @@ function setupIpc(stores, executor) {
       await setupVoice({ dir: voiceDirs[0], pack: packId, fetchFn: (url, init) => net.fetch(url, init), signal: controller.signal, onProgress: progress('voice') });
       whisper = await findWhisper({ dirs: voiceDirs });
       send('voice-ready', { available: whisper.available });
+      diag.write('voice setup', packId, '→', whisper.available ? 'ready' : 'files missing after download');
       return { ok: whisper.available, error: whisper.available ? undefined : 'not_found', text: whisper.available ? undefined : setupErrorText('') };
     } catch (err) {
       console.warn('voice setup failed:', err);
+      diag.write('voice setup', packId, 'failed:', String(err?.message || err));
       return { ok: false, error: String(err?.message || err), text: setupErrorText(err) };
     } finally {
       setupJob = null;
@@ -359,6 +380,7 @@ function setupIpc(stores, executor) {
       return { ok: Boolean(chat), model: chatInfo?.model || null, text: chat ? undefined : 'نزل النموذج بس ما قدرت أكلمه. جرّب بعد شوي.' };
     } catch (err) {
       console.warn('brain setup failed:', err);
+      diag.write('brain setup', choice, 'failed:', String(err?.message || err));
       return { ok: false, error: String(err?.message || err), text: setupErrorText(err) };
     } finally {
       setupJob = null;
@@ -375,6 +397,10 @@ function setupIpc(stores, executor) {
     if (!fromApp(event)) return false;
     await shell.openExternal(OLLAMA_DOWNLOAD_PAGE);
     return true;
+  });
+
+  ipcMain.on('diag:note', (event, text) => {
+    if (fromApp(event)) diag.write('page:', String(text || '').slice(0, 600));
   });
 
   ipcMain.on('ui:watch-windows', (event, on) => {
@@ -487,6 +513,7 @@ async function start() {
   serveAppProtocol();
   setupPermissions();
   const userData = app.getPath('userData');
+  diag = new DiagLog(userData);
   const stores = {
     memory: new JsonStore(userData, 'memory.json', {}),
     settings: new JsonStore(userData, 'settings.json', DEFAULT_SETTINGS),
@@ -495,6 +522,7 @@ async function start() {
   settings = { ...DEFAULT_SETTINGS, ...(await stores.settings.read()) };
   voiceDirs = [join(userData, 'voice'), join(ROOT, 'voice')];
   whisper = await findWhisper({ dirs: voiceDirs });
+  diag.write('start', { version: app.getVersion(), platform: process.platform, arch: process.arch, packaged: app.isPackaged, level: settings.level, kidsMode: settings.kidsMode, onboarded: settings.onboarded, voice: whisper.available ? { bin: whisper.bin, model: whisper.model } : 'not installed' });
 
   let downloadsDir = app.getPath('downloads');
   if (SMOKE) {
@@ -561,6 +589,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => { if (win) { win.showInactive(); send('come'); } });
   app.whenReady().then(start).catch((err) => {
     console.error('Khalfoun could not start:', err);
+    diag.write('could not start:', String(err?.stack || err));
     app.exit(1);
   });
   app.on('will-quit', () => {
