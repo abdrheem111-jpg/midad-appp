@@ -7,9 +7,9 @@
 
 import {
   app, BrowserWindow, ipcMain, protocol, screen, shell, clipboard, desktopCapturer, Tray, Menu,
-  nativeImage, globalShortcut, dialog, Notification, session,
+  nativeImage, globalShortcut, dialog, Notification, session, net,
 } from 'electron';
-import { readFile, mkdtemp, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdtemp, writeFile, mkdir, stat } from 'node:fs/promises';
 import { join, extname, normalize, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +22,10 @@ import { ChatClient, findLocalModel } from './chat.js';
 import { ReminderScheduler } from './reminders.js';
 import { writeIntoLatestPdf } from './actions/pdf.js';
 import { LEVEL_INFO } from '../core/permissions.js';
+import {
+  setupVoice, pullOllamaModel, ollamaStatus, setupErrorText, packSizeMB,
+  VOICE_PACKS, WHISPER_PROGRAM, WHISPER_MODELS, BRAIN_MODELS, OLLAMA_DOWNLOAD_PAGE,
+} from './setup.js';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const ORIGIN = 'app://khalfoun';
@@ -48,6 +52,8 @@ let whisper = { available: false, bin: null, model: null, wakeModel: null };
 let watcher = null;
 let chat = null; // ChatClient when a local model is found
 let chatInfo = null;
+let voiceDirs = [];
+let lookForModel = async () => {};
 
 const send = (type, data = {}) => {
   if (win && !win.isDestroyed()) win.webContents.send('khalfoun:event', { type, ...data });
@@ -297,6 +303,80 @@ function setupIpc(stores, executor) {
     return chat.reply({ text: String(p.text || '').slice(0, 500), name: String(p.name || '').slice(0, 40), humor: Number(p.humor) || 1, history, kidsMode: !!settings.kidsMode });
   });
 
+  // ----- one-click setup (voice and local brain), started from the settings panel
+  let setupJob = null; // { kind, controller }
+  const progress = (kind) => (p) => send('setup-progress', { kind, ...p });
+
+  ipcMain.handle('setup:status', async (event) => {
+    if (!fromApp(event)) return null;
+    const dir = voiceDirs[0];
+    const has = async (f) => { try { return (await stat(join(dir, f))).size > 0; } catch { return false; } };
+    const haveProgram = Boolean(whisper.bin) || (await has(WHISPER_PROGRAM.files[0]));
+    const haveModels = [];
+    for (const m of Object.keys(WHISPER_MODELS)) if (await has(m)) haveModels.push(m);
+    const packs = Object.fromEntries(Object.entries(VOICE_PACKS).map(([id, p]) => [id, { label: p.label, mb: packSizeMB(id, { haveProgram, haveModels }) }]));
+    const ollama = await ollamaStatus();
+    return {
+      busy: setupJob?.kind || null,
+      voice: { available: whisper.available, supported: process.platform === 'win32' || haveProgram, packs },
+      brain: { ollamaRunning: ollama.running, ollamaModels: ollama.models, chatAvailable: Boolean(chat), model: chatInfo?.model || null, choices: BRAIN_MODELS },
+    };
+  });
+
+  ipcMain.handle('setup:voice', async (event, packId) => {
+    if (!fromApp(event)) return { ok: false, error: 'forbidden' };
+    if (setupJob) return { ok: false, error: 'busy', text: 'فيه تنزيل شغّال الحين.' };
+    if (!Object.hasOwn(VOICE_PACKS, packId)) return { ok: false, error: 'unknown_pack' };
+    const controller = new AbortController();
+    setupJob = { kind: 'voice', controller };
+    try {
+      await setupVoice({ dir: voiceDirs[0], pack: packId, fetchFn: (url, init) => net.fetch(url, init), signal: controller.signal, onProgress: progress('voice') });
+      whisper = await findWhisper({ dirs: voiceDirs });
+      send('voice-ready', { available: whisper.available });
+      return { ok: whisper.available, error: whisper.available ? undefined : 'not_found', text: whisper.available ? undefined : setupErrorText('') };
+    } catch (err) {
+      console.warn('voice setup failed:', err);
+      return { ok: false, error: String(err?.message || err), text: setupErrorText(err) };
+    } finally {
+      setupJob = null;
+    }
+  });
+
+  ipcMain.handle('setup:brain', async (event, choice) => {
+    if (!fromApp(event)) return { ok: false, error: 'forbidden' };
+    if (setupJob) return { ok: false, error: 'busy', text: 'فيه تنزيل شغّال الحين.' };
+    if (!Object.hasOwn(BRAIN_MODELS, choice)) return { ok: false, error: 'unknown_choice' };
+    const { model } = BRAIN_MODELS[choice];
+    const controller = new AbortController();
+    setupJob = { kind: 'brain', controller };
+    try {
+      const status = await ollamaStatus();
+      if (!status.running) return { ok: false, error: 'ollama_not_running', text: 'Ollama مو شغّال. ثبّته أو شغّله وبعدين جرّب.' };
+      if (!status.models.includes(model)) await pullOllamaModel({ model, signal: controller.signal, onProgress: progress('brain') });
+      chat = null;
+      await lookForModel(model);
+      send('chat-ready', { available: Boolean(chat), model: chatInfo?.model || null });
+      return { ok: Boolean(chat), model: chatInfo?.model || null, text: chat ? undefined : 'نزل النموذج بس ما قدرت أكلمه. جرّب بعد شوي.' };
+    } catch (err) {
+      console.warn('brain setup failed:', err);
+      return { ok: false, error: String(err?.message || err), text: setupErrorText(err) };
+    } finally {
+      setupJob = null;
+    }
+  });
+
+  ipcMain.handle('setup:cancel', (event) => {
+    if (!fromApp(event) || !setupJob) return false;
+    setupJob.controller.abort();
+    return true;
+  });
+
+  ipcMain.handle('setup:get-ollama', async (event) => {
+    if (!fromApp(event)) return false;
+    await shell.openExternal(OLLAMA_DOWNLOAD_PAGE);
+    return true;
+  });
+
   ipcMain.on('ui:watch-windows', (event, on) => {
     if (!fromApp(event) || !watcher) return;
     if (on) watcher.start().catch((err) => console.warn('window watcher failed:', err));
@@ -368,6 +448,27 @@ async function runSmokeTest(stores) {
     await new Promise((r) => setTimeout(r, 1200));
     const saved = await stores.memory.read();
     step('memory saved to disk without permission fields', saved.name === 'سعيد' && !('level' in saved));
+    // One-click setup: the page can see what is installed and what each pack costs.
+    const st = await js('window.khalfoun.setup.status()');
+    step('setup status over IPC', st && st.voice?.packs?.balanced?.mb > 400 && st.brain?.choices?.standard?.model === 'qwen2.5:3b', st);
+    if (process.platform !== 'win32') {
+      const r = await js("window.khalfoun.setup.voice('light')");
+      step('voice setup explains it is Windows-only here', r && r.ok === false && r.error === 'unsupported_platform' && /ويندوز/.test(r.text), r);
+    } else if (process.env.KHALFOUN_SMOKE_SETUP === '1') {
+      // Real download from the official pages, checksum, unzip, then one real transcription.
+      const r = await js("window.khalfoun.setup.voice('light')");
+      step('voice setup downloads, verifies and installs whisper', r && r.ok === true && whisper.available, { r, whisper });
+      const t = await js(`(() => {
+        const n = 16000, b = new ArrayBuffer(44 + n * 2), v = new DataView(b);
+        const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+        w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true);
+        v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, 16000, true); v.setUint32(28, 32000, true);
+        v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+        for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.round(Math.sin(i / 8) * 3000 * Math.sin(i / 1600)), true);
+        return window.khalfoun.transcribe(new Uint8Array(b), 'command');
+      })()`);
+      step('installed whisper transcribes a recording', t && t.ok === true, t);
+    }
     if (process.env.KHALFOUN_SMOKE_SHOT) {
       await hear('قول نكتة');
       await new Promise((r) => setTimeout(r, 1800));
@@ -392,7 +493,8 @@ async function start() {
     journal: new JsonStore(userData, 'organize-journal.json', { moves: [] }),
   };
   settings = { ...DEFAULT_SETTINGS, ...(await stores.settings.read()) };
-  whisper = await findWhisper({ dirs: [join(userData, 'voice'), join(ROOT, 'voice')] });
+  voiceDirs = [join(userData, 'voice'), join(ROOT, 'voice')];
+  whisper = await findWhisper({ dirs: voiceDirs });
 
   let downloadsDir = app.getPath('downloads');
   if (SMOKE) {
@@ -433,9 +535,9 @@ async function start() {
   setupIpc(stores, executor);
   createWindow();
   // Look for a local language model now and every five minutes until one appears.
-  const lookForModel = async () => {
+  lookForModel = async (preferred) => {
     if (chat) return;
-    chatInfo = await findLocalModel();
+    chatInfo = await findLocalModel(preferred ? { preferred } : {});
     if (chatInfo) chat = new ChatClient(chatInfo);
   };
   if (!SMOKE) {

@@ -297,6 +297,46 @@ html.preview body {
 .log li { margin-bottom: 4px; }
 .log .bad { color: var(--red); }
 
+/* one-click setup of listening and the local brain */
+.setup h3 { margin-top: 4px; }
+.setup-card { border: 2px solid var(--line); border-radius: 14px; padding: 10px 12px; margin-bottom: 10px; }
+.setup-card .fine { margin-top: 4px; }
+.setup-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pill { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: #f3eee2; color: var(--ink-soft); white-space: nowrap; }
+.pill.ok { background: var(--accent-soft); color: var(--accent); }
+.setup-controls { display: flex; gap: 8px; margin-top: 8px; }
+.setup-controls select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 14px;
+  padding: 8px;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+}
+.small-btn {
+  flex: none;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.small-btn:hover { background: #276a43; }
+.small-btn:disabled, .setup-controls select:disabled { opacity: 0.5; cursor: default; }
+.small-btn:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.setup-progress { margin: 4px 0 8px; }
+.setup-progress .bar { height: 10px; border-radius: 999px; background: #f3eee2; overflow: hidden; }
+.setup-progress .bar i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 999px; transition: width 200ms linear; }
+.setup-progress-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px; font-size: 13px; color: var(--ink-soft); }
+.setup-progress-row .ghost { padding: 4px 12px; font-size: 13px; }
+
 [hidden] { display: none !important; }
 
 @media (prefers-reduced-motion: reduce) {

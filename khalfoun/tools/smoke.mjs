@@ -25,7 +25,8 @@ let out = '';
 child.on('error', (err) => { console.error(`لم يبدأ التطبيق: ${err.message}`); process.exit(1); });
 child.stdout.on('data', (d) => { out += d; });
 child.stderr.on('data', (d) => { out += d; });
-const timer = setTimeout(() => child.kill('SIGKILL'), 90000);
+// A real voice download (KHALFOUN_SMOKE_SETUP=1) needs more time than the usual checks.
+const timer = setTimeout(() => child.kill('SIGKILL'), process.env.KHALFOUN_SMOKE_SETUP === '1' ? 600000 : 90000);
 child.on('close', async (code) => {
   clearTimeout(timer);
   await rm(userData, { recursive: true, force: true });

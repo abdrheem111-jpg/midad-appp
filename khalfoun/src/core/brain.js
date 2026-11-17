@@ -173,7 +173,8 @@ export class Brain {
 
   /**
    * Non-verbal events from the shell: poke, tickle, drag, dropped, listening,
-   * stt_unavailable, stt_empty, reminder_fire, other_assistant.
+   * stt_unavailable, stt_empty, reminder_fire, other_assistant, setup_start,
+   * setup_done, setup_failed ({kind: 'voice'|'brain'}).
    */
   event(name, data = {}) {
     const now = this.clock();
@@ -192,6 +193,15 @@ export class Brain {
         this.emotions.feel('greet', now);
         return this.reply('reminder_fire', { vars: { noteSuffix: noteSuffix(data.note) } });
       }
+      case 'setup_start':
+        this.emotions.feel('focus_mode', now);
+        return this.reply(data.kind === 'brain' ? 'setup_brain_start' : 'setup_voice_start');
+      case 'setup_done':
+        this.emotions.feel('celebrate', now);
+        return this.reply(data.kind === 'brain' ? 'setup_brain_done' : 'setup_voice_done', { vars: { model: data.model || '' } });
+      case 'setup_failed':
+        this.emotions.feel('error', now);
+        return this.reply('setup_failed', { vars: { reason: data.reason || 'صار خطأ أثناء التجهيز.' } });
       case 'wake_call':
         if (this.emotions.asleep) { this.emotions.feel('wake', now); return this.reply('wake', { behavior: 'wake' }); }
         this.emotions.feel('listening', now);
@@ -298,6 +308,7 @@ export class Brain {
       case 'dance': this.emotions.feel('dance', now); return this.reply('dance', { behavior: 'dance' });
       case 'jump': this.emotions.feel('joke', now); return this.reply('jump', { behavior: 'jump' });
       case 'open_settings': return this.reply('settings_open', { behavior: 'open_settings' });
+      case 'setup': this.emotions.feel('curious', now); return this.reply(s.part === 'brain' ? 'setup_hint_brain' : 'setup_hint_voice', { behavior: 'open_settings' });
       case 'sounds':
         this.memory.set({ sounds: s.on });
         this.emotions.feel(s.on ? 'joke' : 'focus_mode', now);

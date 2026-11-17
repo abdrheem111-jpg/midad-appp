@@ -81,8 +81,32 @@
     <label class="check"><input id="st-windows" type="checkbox"> يمشي فوق النوافذ المفتوحة</label>
     <label class="check"><input id="st-listen" type="checkbox"> استمع لندائي «يا خلفون» دائماً (دون ضغط زر)</label>
     <label class="check"><input id="st-chat" type="checkbox"> عقل خلفون: يسولف بحرية عبر نموذج على جهازك</label>
-    <p id="st-chat-info" class="fine"></p>
-    <p id="st-voice" class="fine"></p>
+    <section class="setup" aria-labelledby="su-title">
+      <h3 id="su-title">تجهيز خلفون</h3>
+      <div class="setup-card" id="su-voice">
+        <div class="setup-head"><b>الاستماع</b><span id="su-voice-state" class="pill"></span></div>
+        <p id="su-voice-text" class="fine"></p>
+        <div id="su-voice-controls" class="setup-controls">
+          <select id="su-voice-pack" aria-label="حجم نموذج الاستماع"></select>
+          <button id="su-voice-go" type="button" class="small-btn">جهّز الاستماع</button>
+        </div>
+      </div>
+      <div class="setup-card" id="su-brain">
+        <div class="setup-head"><b>العقل (حوار حر)</b><span id="su-brain-state" class="pill"></span></div>
+        <p id="su-brain-text" class="fine"></p>
+        <div id="su-brain-controls" class="setup-controls">
+          <select id="su-brain-choice" aria-label="حجم نموذج العقل"></select>
+          <button id="su-brain-go" type="button" class="small-btn"></button>
+        </div>
+      </div>
+      <div id="su-progress" class="setup-progress" hidden role="status" aria-live="polite">
+        <div class="bar"><i id="su-bar"></i></div>
+        <div class="setup-progress-row">
+          <span id="su-progress-text"></span>
+          <button id="su-cancel" type="button" class="ghost">وقّف</button>
+        </div>
+      </div>
+    </section>
     <h3>آخر ما سويته</h3>
     <ol id="st-log" class="log"></ol>
     <div class="actions">

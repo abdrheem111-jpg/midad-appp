@@ -116,3 +116,12 @@ test('rawRestAfter keeps the original spelling', () => {
   assert.equal(rawRestAfter('اكتب: مرحباً بكم يا خلفون', ['اكتب']), 'مرحباً بكم');
   assert.equal(rawRestAfter('لا شي هنا', ['اكتب']), null);
 });
+
+test('«جهّز الاستماع» and «نزّل عقلك» ask for the one-click setup', () => {
+  for (const t of ['جهّز الاستماع', 'ركب لي السماعة', 'ثبت اذانك']) assert.deepEqual([recognize(t).intent, recognize(t).slots.part], ['setup', 'voice'], t);
+  for (const t of ['نزّل عقلك', 'جهز العقل', 'ركب لك مخ']) assert.deepEqual([recognize(t).intent, recognize(t).slots.part], ['setup', 'brain'], t);
+  // «نزّل الصوت» means turn the volume down, not install listening.
+  assert.equal(recognize('نزل الصوت').intent, 'volume');
+  assert.notEqual(recognize('نزل نموذج').intent, 'setup');
+  assert.equal(recognize('افتح اعداداتك').intent, 'open_settings');
+});

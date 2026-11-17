@@ -10,6 +10,13 @@ contextBridge.exposeInMainWorld('khalfoun', {
   runAction: (action) => ipcRenderer.invoke('action:run', action),
   chat: (payload) => ipcRenderer.invoke('chat:reply', payload),
   transcribe: (wav, purpose) => ipcRenderer.invoke('voice:transcribe', wav, purpose === 'wake' ? 'wake' : 'command'),
+  setup: {
+    status: () => ipcRenderer.invoke('setup:status'),
+    voice: (pack) => ipcRenderer.invoke('setup:voice', String(pack)),
+    brain: (choice) => ipcRenderer.invoke('setup:brain', String(choice)),
+    cancel: () => ipcRenderer.invoke('setup:cancel'),
+    getOllama: () => ipcRenderer.invoke('setup:get-ollama'),
+  },
   setInteractive: (on) => ipcRenderer.send('ui:interactive', Boolean(on)),
   watchWindows: (on) => ipcRenderer.send('ui:watch-windows', Boolean(on)),
   onEvent: (callback) => {

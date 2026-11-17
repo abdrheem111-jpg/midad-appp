@@ -381,6 +381,75 @@ await check('known commands never go to the model; a failed model falls back pol
   assert(/فهمت|وصلتني|تعلمتها|أذني|وضّح|وضح|صعب/.test(await cbubble()), `fallback: ${await cbubble()}`);
 });
 
+/** Waits until `fn` is true on `pg`, or fails the check after `ms`. */
+async function untilOn(pg, fn, ms = 5000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (await pg.evaluate(fn).catch(() => false)) return;
+    await pg.waitForTimeout(150);
+  }
+  throw new Error(`timed out waiting for: ${String(fn).slice(0, 120)}`);
+}
+
+// ----- one-click setup from the settings panel (simulated downloads)
+const spage = await browser.newPage({ viewport: { width: 1280, height: 760 } });
+spage.on('pageerror', (e) => problems.push(`setup page error: ${e.message}`));
+await spage.goto(`${base}?fakeollama=1`);
+await spage.evaluate(() => {
+  localStorage.setItem('khalfoun.settings', JSON.stringify({ onboarded: true, level: 2, kidsMode: false }));
+  localStorage.setItem('khalfoun.memory', JSON.stringify({ name: 'عبدالرحيم', humor: 1 }));
+});
+await spage.reload();
+await spage.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 15000 });
+const sbubble = () => spage.locator('#bubble-text').textContent();
+
+await check('«جهّز الاستماع» opens the setup cards with sizes, balanced chosen', async () => {
+  await spage.waitForTimeout(1200);
+  await spage.evaluate(() => window.__khalfoun.hear('جهز الاستماع'));
+  await untilOn(spage, () => !document.getElementById('settings').hidden);
+  await untilOn(spage, () => document.getElementById('su-voice-pack').options.length === 3);
+  const info = await spage.evaluate(() => ({
+    state: document.getElementById('su-voice-state').textContent,
+    pack: document.getElementById('su-voice-pack').value,
+    labels: [...document.getElementById('su-voice-pack').options].map((o) => o.textContent),
+    brainBtn: document.getElementById('su-brain-go').textContent,
+  }));
+  assert(info.state === 'غير مركّب', info.state);
+  assert(info.pack === 'balanced', info.pack);
+  assert(info.labels.some((l) => l.includes('٦٣٩ ميجا')), info.labels.join(' | '));
+  assert(info.brainBtn === 'نزّل العقل', info.brainBtn);
+  await untilOn(spage, () => /تجهيز خلفون|اختار حجم/.test(document.getElementById('bubble-text').textContent), 4000).catch(async () => { throw new Error(`bubble: ${await sbubble()}`); });
+});
+
+await check('pressing «جهّز الاستماع» shows progress, then voice becomes ready', async () => {
+  await spage.click('#su-voice-go');
+  await untilOn(spage, () => !document.getElementById('su-progress').hidden);
+  await untilOn(spage, () => /٪/.test(document.getElementById('su-progress-text').textContent));
+  await spage.screenshot({ path: `${outDir}/11-setup-progress.png` });
+  assert(await spage.evaluate(() => document.getElementById('su-voice-go').disabled), 'button stays enabled while busy');
+  await untilOn(spage, () => document.getElementById('su-voice-state').textContent === 'جاهز', 8000);
+  assert(await spage.evaluate(() => document.getElementById('su-progress').hidden), 'progress still shown');
+  assert(!(await spage.evaluate(() => document.getElementById('st-listen').disabled)), 'always-listen still disabled');
+  await untilOn(spage, () => /أسمعك|آذاني|أسمع/.test(document.getElementById('bubble-text').textContent), 4000).catch(async () => { throw new Error(`bubble: ${await sbubble()}`); });
+  const calls = await spage.evaluate(() => window.__khalfoun.bridge._setup.calls);
+  assert(JSON.stringify(calls) === '[["voice","balanced"]]', JSON.stringify(calls));
+});
+
+await check('the brain is pulled through Ollama, and a download can be stopped', async () => {
+  await spage.selectOption('#su-brain-choice', 'standard');
+  await spage.click('#su-brain-go');
+  await untilOn(spage, () => /العقل/.test(document.getElementById('su-progress-text').textContent));
+  await spage.click('#su-cancel');
+  await untilOn(spage, () => document.getElementById('su-progress').hidden, 5000);
+  await untilOn(spage, () => /وقّفت/.test(document.getElementById('bubble-text').textContent), 4000).catch(async () => { throw new Error(`bubble after stop: ${await sbubble()}`); });
+  await spage.waitForTimeout(400);
+  await spage.click('#su-brain-go');
+  await untilOn(spage, () => document.getElementById('su-brain-state').textContent === 'جاهز', 8000);
+  assert(!(await spage.evaluate(() => document.getElementById('st-chat').disabled)), 'chat toggle still disabled');
+  assert(/qwen2\.5:3b/.test(await spage.locator('#su-brain-text').textContent()), 'model name missing');
+  await spage.screenshot({ path: `${outDir}/12-setup-ready.png` });
+});
+
 await browser.close();
 server.close();
 if (problems.length) {

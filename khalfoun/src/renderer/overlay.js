@@ -11,6 +11,7 @@ import { Recorder } from './recorder.js';
 import { WakeListener } from './wake-listener.js';
 import { findWakeWord } from '../core/wake.js';
 import { recognize } from '../core/intents.js';
+import { toArabicDigits } from '../core/arabic.js';
 import { getBridge } from './bridge.js';
 import { SoundPlayer, ANIMATION_SOUND } from './sounds.js';
 
@@ -93,7 +94,7 @@ function handle(reply) {
     case 'dance': if (!reply.animation || reply.animation === 'dance') animator.play(Math.random() < 0.5 ? 'cane_dance' : 'dance', 4.8); else animator.play(reply.animation, 4.8); break;
     case 'jump': animator.play('jump'); break;
     case 'stop': motion.stop(); animator.stop(); break;
-    case 'open_settings': openSettings(); break;
+    case 'open_settings': openSettings(String(reply.situation || '').startsWith('setup_hint') ? 'setup' : null); break;
     default: break;
   }
   if (reply.action) runAction(reply.action);
@@ -381,7 +382,7 @@ function radio(name, value) {
   if (el) el.checked = true;
 }
 
-function openSettings() {
+function openSettings(focus = null) {
   const d = brain.memory.data;
   $('st-name').value = d.name || '';
   radio('st-level', d.level || 1);
@@ -390,15 +391,20 @@ function openSettings() {
   $('st-listen').checked = !!d.alwaysListen;
   $('st-chat').checked = d.chatEnabled !== false;
   $('st-chat').disabled = !chatInfo.available;
-  $('st-chat-info').textContent = chatInfo.available
-    ? `النموذج المستخدم: ${chatInfo.model}. يعمل على جهازك فقط.`
-    : 'لا يوجد نموذج محلي الآن. ثبّت Ollama وشغّل نموذجاً (انظر README) فيكتشفه خلفون تلقائياً.';
   $('st-windows').checked = d.walkOnWindows !== false;
   $('st-sounds').checked = d.sounds !== false;
   $('st-listen').disabled = !voiceAvailable;
-  $('st-voice').textContent = voiceAvailable
-    ? 'الاستماع الصوتي جاهز: اضغط زر الميكروفون أو Ctrl+Shift+Space وتكلم.'
-    : 'الاستماع الصوتي غير مركّب بعد. شوف ملف README لتركيب نموذج الاستماع، ولين ذاك اكتب أوامرك.';
+  refreshSetup().then(() => { if (focus === 'setup') $('su-title').scrollIntoView({ block: 'start', behavior: 'smooth' }); });
+  renderLog();
+  closeCommand();
+  els.settings.hidden = false;
+  setInteractive(true);
+  stepAsideFrom(els.settings);
+}
+
+/** The «آخر ما سويته» list in the settings panel. */
+function renderLog() {
+  const d = brain.memory.data;
   const log = $('st-log');
   log.textContent = '';
   const fmt = new Intl.DateTimeFormat('ar-OM', { hour: 'numeric', minute: '2-digit' });
@@ -414,10 +420,6 @@ function openSettings() {
     if (!entry.ok) li.className = 'bad';
     log.appendChild(li);
   }
-  closeCommand();
-  els.settings.hidden = false;
-  setInteractive(true);
-  stepAsideFrom(els.settings);
 }
 
 /** Walks out from under a panel so he stays visible beside it. */
@@ -431,6 +433,103 @@ function stepAsideFrom(panel) {
 }
 
 function closeSettings() { els.settings.hidden = true; }
+
+// ------------------------------------------------- one-click setup (settings)
+
+let setupStatus = null;
+const fmtMB = (mb) => (mb >= 1000 ? `${toArabicDigits((mb / 1000).toFixed(1))} جيجا` : `${toArabicDigits(Math.max(1, Math.round(mb)))} ميجا`);
+
+function fillSelect(sel, options, keep) {
+  const prev = keep ? sel.value : null;
+  sel.textContent = '';
+  for (const [value, label] of options) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    sel.appendChild(opt);
+  }
+  if (prev && options.some(([v]) => v === prev)) sel.value = prev;
+}
+
+/** Fills the two setup cards from the main process's view of what is installed. */
+async function refreshSetup() {
+  if (!bridge.setup) { $('su-voice').closest('.setup').hidden = true; return; }
+  try { setupStatus = await bridge.setup.status(); } catch { setupStatus = null; }
+  if (!setupStatus) return;
+  const busy = setupStatus.busy;
+  const v = setupStatus.voice;
+  const vState = $('su-voice-state');
+  vState.textContent = v.available ? 'جاهز' : 'غير مركّب';
+  vState.classList.toggle('ok', !!v.available);
+  fillSelect($('su-voice-pack'), Object.entries(v.packs).map(([id, p]) => [id, `${p.label}${id === 'balanced' ? ' (ينصح به)' : ''}${p.mb ? ` · ${fmtMB(p.mb)}` : ' · موجود'}`]), true);
+  if (!$('su-voice-pack').dataset.touched) $('su-voice-pack').value = 'balanced';
+  $('su-voice-text').textContent = !v.supported
+    ? 'التجهيز التلقائي للاستماع متوفر على ويندوز. على هذا الجهاز ركّب whisper.cpp يدوياً (انظر README).'
+    : v.available
+      ? 'اضغط الميكروفون أو Ctrl+Shift+Space وتكلم. تقدر تنزّل حجم أدق من هنا متى ما بغيت.'
+      : 'ينزّل برنامج الاستماع ونموذجه مرة وحدة، وبعدها يشتغل دون إنترنت. «متوازن» يناسب أغلب الأجهزة، و«دقيق» أفهم للهجة لكنه أبطأ.';
+  $('su-voice-go').textContent = v.available ? 'نزّل هذا الحجم' : 'جهّز الاستماع';
+  $('su-voice-controls').hidden = !v.supported;
+
+  const b = setupStatus.brain;
+  const bState = $('su-brain-state');
+  bState.textContent = b.chatAvailable ? 'جاهز' : b.ollamaRunning ? 'ينقصه نموذج' : 'يحتاج Ollama';
+  bState.classList.toggle('ok', !!b.chatAvailable);
+  fillSelect($('su-brain-choice'), Object.entries(b.choices).map(([id, c]) => [id, `${c.label} · ${c.model} · ${fmtMB(c.approxMB)}`]), true);
+  $('su-brain-choice').hidden = !b.ollamaRunning;
+  $('su-brain-text').textContent = b.chatAvailable
+    ? `يسولف عبر ${b.model} على جهازك فقط، وما يطلع منه شي للإنترنت.`
+    : b.ollamaRunning
+      ? 'Ollama شغّال. اختار حجم النموذج واضغط «نزّل العقل». «عادي» يناسب أغلب الأجهزة.'
+      : 'العقل يحتاج برنامج Ollama المجاني. نزّله وثبّته من صفحته، وبعدين ارجع هنا واضغط «نزّل العقل».';
+  $('su-brain-go').textContent = b.ollamaRunning ? 'نزّل العقل' : 'افتح صفحة Ollama';
+  for (const id of ['su-voice-go', 'su-voice-pack', 'su-brain-go', 'su-brain-choice']) $(id).disabled = Boolean(busy);
+}
+
+function showSetupProgress(p) {
+  const box = $('su-progress');
+  box.hidden = false;
+  const pct = p.total ? Math.min(100, Math.round((p.done / p.total) * 100)) : 0;
+  $('su-bar').style.width = `${pct}%`;
+  const what = p.kind === 'brain' ? 'العقل' : 'الاستماع';
+  $('su-progress-text').textContent = p.step === 'done'
+    ? `خلص تنزيل ${what}، جاري التركيب...`
+    : p.total
+      ? `ينزّل ${what}: ${toArabicDigits(pct)}٪ (${fmtMB(p.done / 1e6)} من ${fmtMB(p.total / 1e6)})`
+      : `ينزّل ${what}...`;
+}
+
+async function runSetup(kind, choice) {
+  handle(brain.event('setup_start', { kind }));
+  for (const id of ['su-voice-go', 'su-voice-pack', 'su-brain-go', 'su-brain-choice']) $(id).disabled = true;
+  showSetupProgress({ kind, step: 'start', done: 0, total: 0 });
+  let res;
+  try {
+    res = kind === 'brain' ? await bridge.setup.brain(choice) : await bridge.setup.voice(choice);
+  } catch (err) {
+    res = { ok: false, text: String(err?.message || err) };
+  }
+  $('su-progress').hidden = true;
+  if (res?.ok) {
+    sounds.effect('yay');
+    handle(brain.event('setup_done', { kind, model: res.model }));
+    brain.memory.log({ action: `setup_${kind}`, ok: true, summary: kind === 'brain' ? 'تجهيز العقل' : 'تجهيز الاستماع' });
+  } else {
+    handle(brain.event('setup_failed', { kind, reason: res?.text }));
+    brain.memory.log({ action: `setup_${kind}`, ok: false, error: res?.error || null, summary: kind === 'brain' ? 'تجهيز العقل' : 'تجهيز الاستماع' });
+  }
+  renderLog();
+  refreshSetup();
+}
+
+$('su-voice-pack').addEventListener('change', () => { $('su-voice-pack').dataset.touched = '1'; });
+$('su-voice-go').addEventListener('click', () => runSetup('voice', $('su-voice-pack').value));
+$('su-brain-go').addEventListener('click', async () => {
+  if (setupStatus?.brain?.ollamaRunning) { runSetup('brain', $('su-brain-choice').value); return; }
+  await bridge.setup.getOllama();
+  handle(brain.reply('setup_hint_brain'));
+});
+$('su-cancel').addEventListener('click', () => bridge.setup.cancel());
 
 $('st-close').addEventListener('click', closeSettings);
 $('st-name').addEventListener('change', () => brain.updateSettings({ name: $('st-name').value }));
@@ -580,6 +679,16 @@ async function start() {
       case 'open-settings': openSettings(); break;
       case 'come': handle(brain.hear('تعال')); break;
       case 'windows': lastWindows = Array.isArray(ev.list) ? ev.list : []; applyWindows(); break;
+      case 'setup-progress': showSetupProgress(ev); break;
+      case 'voice-ready':
+        voiceAvailable = !!ev.available;
+        $('st-listen').disabled = !voiceAvailable;
+        updateWake();
+        break;
+      case 'chat-ready':
+        chatInfo = { available: !!ev.available, model: ev.model || null };
+        $('st-chat').disabled = !chatInfo.available;
+        break;
       default: break;
     }
   });

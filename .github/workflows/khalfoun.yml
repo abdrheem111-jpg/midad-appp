@@ -33,6 +33,11 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y xvfb
       - name: Real app smoke test
         run: npm run smoke
+      - name: Real voice setup (download, verify, install and run whisper)
+        if: runner.os == 'Windows'
+        env:
+          KHALFOUN_SMOKE_SETUP: '1'
+        run: npm run smoke
       - name: Real Windows checks (windows, apps, volume, typing)
         if: runner.os == 'Windows'
         run: npm run check:windows

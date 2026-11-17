@@ -385,3 +385,18 @@ test('stress: 2000 random sentences never throw and always answer in Arabic', ()
     brain.tick();
   }
 });
+
+test('setup: asking opens the settings, and progress events get their own replies', () => {
+  const { brain } = makeBrain();
+  const ask = brain.hear('جهز الاستماع');
+  assert.equal(ask.behavior, 'open_settings');
+  assert.equal(ask.situation, 'setup_hint_voice');
+  assert.equal(brain.hear('نزل عقلك').situation, 'setup_hint_brain');
+  assert.equal(brain.event('setup_start', { kind: 'voice' }).situation, 'setup_voice_start');
+  const done = brain.event('setup_done', { kind: 'brain', model: 'qwen2.5:3b' });
+  assert.equal(done.situation, 'setup_brain_done');
+  const failed = brain.event('setup_failed', { kind: 'voice', reason: 'ما في مساحة كافية على القرص.' });
+  assert.equal(failed.situation, 'setup_failed');
+  assert.ok(failed.say.includes('ما في مساحة'), failed.say);
+  assert.ok(brain.event('setup_failed', { kind: 'voice' }).say.length > 3);
+});

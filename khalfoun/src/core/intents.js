@@ -231,6 +231,9 @@ export function recognize(raw) {
   if (startsWithPhrase(text, L.organize) && findApp(text)?.id === 'downloads') return out('organize_downloads');
   if (startsWithPhrase(text, L.undo) && /(ترتيب|رتبت|تنزيلات|التنزيلات|رجع|تراجع)/.test(text)) return out('undo_organize', {}, 0.85);
 
+  // «جهّز الاستماع» / «نزّل عقلك»: shows the one-click setup in the settings panel.
+  const setupMatch = /^(جهز|ركب|نزل|ثبت|حمل)( لي| لك)? (ال)?(استماع|سماعه|سماعتك|اذانك|اذنك|عقل|عقلك|مخ|مخك|ذكاء|ذكاءك)( |$)/.exec(text);
+  if (setupMatch) return out('setup', { part: /عقل|مخ|ذكاء/.test(setupMatch[4]) ? 'brain' : 'voice' });
   if (findPhrase(padded, L.settings)) return out('open_settings');
 
   const openVerb = startsWithPhrase(text, L.open);
