@@ -148,7 +148,8 @@ html.preview body {
   border-bottom: 2px solid var(--ink);
   transform: translateX(-50%) rotate(45deg);
 }
-.bubble p { margin: 0; }
+.bubble p { margin: 0; white-space: pre-line; }
+.bubble.long { max-width: min(460px, calc(100vw - 32px)); max-height: 60vh; overflow-y: auto; font-size: 15px; line-height: 1.6; cursor: pointer; }
 .bubble.mood-happy, .bubble.mood-excited, .bubble.mood-proud { border-radius: 22px 22px 22px 22px / 26px 26px 18px 18px; }
 .bubble.mood-amazed, .bubble.mood-scared { border-width: 3px; }
 .bubble.mood-sleepy, .bubble.mood-bored { color: var(--ink-soft); font-weight: 400; }

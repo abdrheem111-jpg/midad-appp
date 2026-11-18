@@ -28,7 +28,8 @@ export function validateAction(action) {
     case 'press_key': return KEY_IDS.has(p.key) ? null : 'bad_key';
     case 'open_url': return URLS.has(p.url) ? null : 'bad_url';
     case 'open_folder': return FOLDERS.has(p.folder) ? null : 'bad_folder';
-    case 'search': return str(p.query, 300) && ['google', 'youtube'].includes(p.engine) ? null : 'bad_search';
+    case 'search': return str(p.query, 300) && ['google', 'youtube', 'translate', 'meaning'].includes(p.engine) ? null : 'bad_search';
+    case 'read_selection': case 'read_screen': case 'active_window': return null;
     case 'volume': return ['up', 'down', 'mute'].includes(p.direction) ? null : 'bad_volume';
     case 'screenshot': return null;
     case 'type_text': return str(p.text, 2000) ? null : 'bad_text';
@@ -65,6 +66,9 @@ export function createExecutor(deps) {
         case 'close_app': return await platform.closeApp(p.app);
         case 'open_installed': return await platform.openInstalled(p.name.trim());
         case 'press_key': return await platform.pressKey(p.key);
+        case 'read_selection': return await platform.readSelection();
+        case 'read_screen': return deps.readScreen ? await deps.readScreen() : { ok: false, error: 'unsupported' };
+        case 'active_window': return deps.activeWindow ? await deps.activeWindow() : { ok: false, error: 'unsupported' };
         case 'open_url': return await platform.openUrl(p.url);
         case 'open_folder': return await platform.openFolder(p.folder);
         case 'search': return await platform.search(p.query.trim(), p.engine);

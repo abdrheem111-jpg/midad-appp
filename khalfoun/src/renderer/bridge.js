@@ -97,6 +97,9 @@ function createPreviewBridge() {
         // Preview: one "minute" lasts one second so the reminder can be seen.
         setTimeout(() => emit({ type: 'reminder', note: action.params.note }), action.params.minutes * 1000);
       }
+      if (action.type === 'read_selection') return { ok: true, data: { text: window.__fakeSelection || '' } };
+      if (action.type === 'read_screen') return window.__fakeScreen === undefined ? { ok: false, error: 'unsupported' } : { ok: true, data: { text: window.__fakeScreen } };
+      if (action.type === 'active_window') return window.__fakeWindow ? { ok: true, data: window.__fakeWindow } : { ok: false, error: 'unsupported' };
       if (action.type === 'cancel_reminders') return { ok: true, data: { cancelled: 1 } };
       if (action.type === 'organize_downloads') return { ok: true, data: { moved: 7 } };
       if (action.type === 'undo_organize') return { ok: true, data: { restored: 7 } };
@@ -117,6 +120,13 @@ function createPreviewBridge() {
       const next = queue.shift();
       const m = /^أمر:\s*(.+)$/u.exec(next);
       return m ? { ok: true, command: m[1].trim() } : { ok: true, text: next };
+    },
+    async chatTask(payload) {
+      if (!fakeChat) return { ok: false, error: 'chat_unavailable' };
+      chatCalls.push({ task: payload.mode, text: payload.text });
+      await new Promise((r) => setTimeout(r, 300));
+      const queue = window.__fakeChat || [];
+      return queue.length ? { ok: true, text: queue.shift() } : { ok: false, error: 'timeout' };
     },
     setInteractive() {},
     watchWindows() {},

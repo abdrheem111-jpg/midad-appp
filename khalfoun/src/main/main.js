@@ -9,7 +9,7 @@ import {
   app, BrowserWindow, ipcMain, protocol, screen, shell, clipboard, desktopCapturer, Tray, Menu,
   nativeImage, globalShortcut, dialog, Notification, session, net,
 } from 'electron';
-import { readFile, mkdtemp, writeFile, mkdir, stat } from 'node:fs/promises';
+import { readFile, mkdtemp, writeFile, mkdir, stat, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { join, extname, normalize, relative, sep } from 'node:path';
 import { tmpdir, cpus } from 'node:os';
@@ -24,6 +24,8 @@ import { ReminderScheduler } from './reminders.js';
 import { writeIntoLatestPdf } from './actions/pdf.js';
 import { LEVEL_INFO } from '../core/permissions.js';
 import { DiagLog } from './diag.js';
+import { ocrImage } from './ocr.js';
+import { TASK_MODES } from '../core/chat-prompt.js';
 import {
   setupVoice, pullOllamaModel, ollamaStatus, setupErrorText, packSizeMB,
   VOICE_PACKS, WHISPER_PROGRAM, WHISPER_MODELS, BRAIN_MODELS, OLLAMA_DOWNLOAD_PAGE,
@@ -248,27 +250,40 @@ function releaseFocus() {
 }
 
 /**
- * Process id of the program in front right now (Windows), or null. A small
- * PowerShell helper stays running so the answer comes back in milliseconds.
+ * The program in front right now (Windows): {pid, process, title}, or null.
+ * A small PowerShell helper stays running so the answer comes back in milliseconds.
  */
 let fgHelper = null;
-function foregroundPid() {
+const FG_SCRIPT = `
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+Add-Type -Name F -Namespace K -MemberDefinition @'
+[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+'@
+while ($null -ne ($line = [Console]::In.ReadLine())) {
+  $h = [K.F]::GetForegroundWindow(); $p = 0; [void][K.F]::GetWindowThreadProcessId($h, [ref]$p)
+  $sb = New-Object System.Text.StringBuilder 512; [void][K.F]::GetWindowText($h, $sb, 512)
+  $n = ''; try { $n = (Get-Process -Id $p -ErrorAction Stop).ProcessName } catch {}
+  [Console]::Out.WriteLine("$p\t$n\t" + ($sb.ToString() -replace '[\r\n\t]', ' ')); [Console]::Out.Flush()
+}
+`;
+function foregroundInfo() {
   if (process.platform !== 'win32') return Promise.resolve(null);
   if (!fgHelper) {
-    const script = [
-      "Add-Type -Name F -Namespace K -MemberDefinition '[DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);'",
-      'while ($null -ne ($line = [Console]::In.ReadLine())) { $p = 0; [void][K.F]::GetWindowThreadProcessId([K.F]::GetForegroundWindow(), [ref]$p); [Console]::Out.WriteLine($p); [Console]::Out.Flush() }',
-    ].join('; ');
-    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+    const encoded = Buffer.from(FG_SCRIPT, 'utf16le').toString('base64');
+    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+    child.stdout.setEncoding('utf8');
     fgHelper = { child, waiting: [], buf: '' };
     child.stdout.on('data', (d) => {
       fgHelper.buf += d;
       let nl;
       while ((nl = fgHelper.buf.indexOf('\n')) >= 0) {
-        const pid = Number(fgHelper.buf.slice(0, nl).trim());
+        const [pidText, proc = '', ...title] = fgHelper.buf.slice(0, nl).replace(/\r$/, '').split('\t');
         fgHelper.buf = fgHelper.buf.slice(nl + 1);
+        const pid = Number(pidText);
         const next = fgHelper.waiting.shift();
-        if (next) next(Number.isInteger(pid) && pid > 0 ? pid : null);
+        if (next) next(Number.isInteger(pid) && pid > 0 ? { pid, process: proc, title: title.join(' ').trim() } : null);
       }
     });
     const reset = () => { if (fgHelper) for (const w of fgHelper.waiting) w(null); fgHelper = null; };
@@ -277,11 +292,43 @@ function foregroundPid() {
   }
   const helper = fgHelper;
   return new Promise((resolve) => {
-    const timer = setTimeout(() => { const k = helper.waiting.indexOf(done); if (k >= 0) helper.waiting.splice(k, 1); resolve(null); }, 1500);
-    function done(pid) { clearTimeout(timer); resolve(pid); }
+    const timer = setTimeout(() => { const k = helper.waiting.indexOf(done); if (k >= 0) helper.waiting.splice(k, 1); resolve(null); }, 2500);
+    function done(info) { clearTimeout(timer); resolve(info); }
     helper.waiting.push(done);
     try { helper.child.stdin.write('fg\n'); } catch { done(null); }
   });
+}
+const foregroundPid = async () => (await foregroundInfo())?.pid ?? null;
+
+/** The person's program (not Khalfoun): the one in front, or the one he took the focus from. */
+async function activeWindow() {
+  if (process.platform !== 'win32') return { ok: false, error: 'unsupported' };
+  const own = new Set([process.pid, ...app.getAppMetrics().map((m) => m.pid)]);
+  const info = await foregroundInfo();
+  if (info && !own.has(info.pid)) return { ok: true, data: { process: info.process, title: info.title } };
+  if (lastOther) return { ok: true, data: lastOther };
+  return { ok: false, error: 'unknown_window' };
+}
+let lastOther = null;
+
+/** Reads the screen (without Khalfoun on it) with Windows' own OCR. */
+async function readScreen() {
+  if (process.platform !== 'win32') return { ok: false, error: 'unsupported' };
+  const dir = await mkdtemp(join(tmpdir(), 'khalfoun-ocr-'));
+  const file = join(dir, 'screen.png');
+  try {
+    if (win && !win.isDestroyed()) win.setOpacity(0);
+    await new Promise((r) => setTimeout(r, 180));
+    const png = await captureScreen();
+    await writeFile(file, png);
+  } finally {
+    if (win && !win.isDestroyed()) win.setOpacity(1);
+  }
+  try {
+    return await ocrImage(file);
+  } finally {
+    rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 /** Brings Khalfoun's window forward for typing, even right after he gave the focus away. */
@@ -290,10 +337,11 @@ async function focusOverlay() {
   clearTimeout(focusTimer);
   if (!win.isFocused()) {
     // Remember who had the focus, so typing later goes back to that program.
-    const pid = await foregroundPid();
+    const info = await foregroundInfo();
+    const pid = info?.pid ?? null;
     const own = new Set([process.pid, ...app.getAppMetrics().map((m) => m.pid)]);
-    if (pid && !own.has(pid)) returnPid = pid;
-    diag.write('focus taken from program', pid ?? 'unknown');
+    if (pid && !own.has(pid)) { returnPid = pid; lastOther = { process: info.process, title: info.title }; }
+    diag.write('focus taken from program', pid ?? 'unknown', info?.process || '');
   }
   win.setFocusable(true);
   win.show();
@@ -360,7 +408,8 @@ function setupIpc(stores, executor) {
   ipcMain.handle('action:run', async (event, action) => {
     if (!fromApp(event)) { diag.write('action refused: not from the app page'); return { ok: false, error: 'forbidden' }; }
     const result = await executor.run(action);
-    diag.write('action', action?.type, action?.params || {}, '→', result?.ok ? 'ok' : `failed: ${result?.error}`);
+    const seen = typeof result?.data?.text === 'string' ? ` text(${result.data.language || ''}): «${result.data.text.replace(/\s+/g, ' ').slice(0, 120)}»` : '';
+    diag.write('action', action?.type, action?.params || {}, '→', result?.ok ? `ok${seen}` : `failed: ${result?.error}`);
     return result;
   });
 
@@ -393,6 +442,16 @@ function setupIpc(stores, executor) {
   ipcMain.on('ui:interactive', (event, on) => {
     if (!fromApp(event) || !win) return;
     win.setIgnoreMouseEvents(!on, { forward: true });
+  });
+
+  ipcMain.handle('chat:task', async (event, payload) => {
+    if (!fromApp(event)) return { ok: false, error: 'forbidden' };
+    if (!chat || settings.chatEnabled === false) return { ok: false, error: 'chat_unavailable' };
+    const p = payload && typeof payload === 'object' ? payload : {};
+    if (!TASK_MODES.includes(p.mode)) return { ok: false, error: 'bad_mode' };
+    const res = await chat.task({ mode: p.mode, text: String(p.text || '').slice(0, 4000), kidsMode: !!settings.kidsMode });
+    diag.write('model task', p.mode, '→', res.ok ? `${res.text.length} chars` : `failed: ${res.error}`);
+    return res;
   });
 
   ipcMain.handle('chat:reply', async (event, payload) => {
@@ -639,6 +698,8 @@ async function start() {
   const executor = createExecutor({
     platform, getSettings: () => settings, downloadsDir, journal: stores.journal, scheduleReminder,
     cancelReminders: () => reminderScheduler.cancelAll(),
+    readScreen,
+    activeWindow,
     writePdf: (text, position, page) => writePdf(text, position, [downloadsDir, app.getPath('documents')], page),
   });
   try {

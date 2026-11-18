@@ -116,6 +116,19 @@ try {
   try { clip = execFileSync('powershell', ['-NoProfile', '-Command', '[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Clipboard -Raw'], { encoding: 'utf8' }); } catch { /* empty */ }
   step('the dictated words really reached Notepad (copied back by voice)', clip.includes('مرحبا، هذا اختبار'), `clipboard: ${JSON.stringify(clip.slice(0, 80))}`);
 
+  // Eyes: the selection (still selected in Notepad) is read with «شو مكتوب».
+  typeCommand('شو مكتوب');
+  step('«شو مكتوب» reads the selected text in Notepad', await until(async () => /action read_selection \{\} → ok text\(\): «مرحبا، هذا اختبار/.test(await readLog()), 10000));
+  // Eyes: English words typed into Notepad are read back from the screen with Windows OCR.
+  typeCommand('ابدأ الإملاء');
+  await until(async () => /heard «ابدأ الإملاء» → dictation_start[\s\S]*heard «ابدأ الإملاء» → dictation_start/.test(await readLog()), 8000);
+  typeCommand('Khalfoun can read this screen');
+  await until(async () => /Khalfoun can read this screen \"\} → ok/.test(await readLog()), 10000);
+  typeCommand('خلاص');
+  await sleep(1500);
+  typeCommand('اقرأ الشاشة');
+  step('«اقرأ الشاشة» reads words on the screen with Windows OCR', await until(async () => /action read_screen \{\} → ok text\([^)]*\): «[^»]*(Khalfoun|read this screen)/i.test(await readLog()), 45000));
+
   // Any installed program by its Arabic name, found in the Start menu.
   typeCommand('افتح باورشيل');
   step('«افتح باورشيل» finds and opens an installed program', await until(async () => /action open_installed .*→ ok/.test(await readLog()), 15000));

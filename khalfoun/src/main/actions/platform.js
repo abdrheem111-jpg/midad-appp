@@ -71,6 +71,8 @@ const FOLDER_IDS = new Set(['explorer', 'downloads', 'documents', 'pictures']);
 export const SEARCH_URLS = {
   google: (q) => `https://www.google.com/search?q=${encodeURIComponent(q)}`,
   youtube: (q) => `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`,
+  translate: (q) => `https://translate.google.com/?sl=auto&tl=${/[\u0600-\u06FF]/.test(q) ? 'en' : 'ar'}&op=translate&text=${encodeURIComponent(q)}`,
+  meaning: (q) => `https://www.almaany.com/ar/dict/ar-ar/${encodeURIComponent(q.trim().split(/\s+/)[0])}/`,
 };
 
 /** Default launcher: resolves true once the program started, false if it is missing. */
@@ -269,6 +271,28 @@ export function createPlatform(deps) {
     return r.ok ? { ok: true } : { ok: false, error: 'paste_failed' };
   }
 
+  /**
+   * Reads the text selected in the person's window: copies it (Ctrl+C), reads
+   * the clipboard, then puts the clipboard back the way it was.
+   */
+  async function readSelection() {
+    const cb = deps.clipboard;
+    if (!cb) return { ok: false, error: 'no_clipboard' };
+    const previous = cb.readText();
+    cb.writeText('');
+    const target = deps.beforeType ? deps.beforeType() : null;
+    await wait(250);
+    let r;
+    if (platform === 'win32') r = await powershell(`$w = New-Object -ComObject WScript.Shell; ${activate(target)}$w.SendKeys('^c')`);
+    else if (platform === 'darwin') r = await run('osascript', ['-e', 'tell application "System Events" to keystroke "c" using command down']);
+    else r = await run('xdotool', ['key', '--clearmodifiers', 'ctrl+c']);
+    await wait(400);
+    const text = cb.readText();
+    cb.writeText(previous);
+    if (!r.ok) return { ok: false, error: 'copy_failed' };
+    return { ok: true, data: { text: String(text || '').slice(0, 6000) } };
+  }
+
   /** Presses one key or shortcut from the fixed list in the window the person was using. */
   async function pressKey(key) {
     const target = deps.beforeType ? deps.beforeType() : null; // give the focus back to the person's window
@@ -301,5 +325,5 @@ export function createPlatform(deps) {
     return { ok: true, data: { file } };
   }
 
-  return { platform, openApp, closeApp, openInstalled, listInstalled, pressKey, openUrl, openFolder, search, volume, typeText, screenshot };
+  return { platform, openApp, closeApp, openInstalled, listInstalled, pressKey, readSelection, openUrl, openFolder, search, volume, typeText, screenshot };
 }

@@ -2,7 +2,7 @@
 // OpenAI-style API that Ollama, llama.cpp's server and LM Studio all offer.
 // Nothing is sent to the internet: only local addresses are accepted.
 
-import { buildMessages, cleanReply, isSafe, isLocalEndpoint, extractCommand } from '../core/chat-prompt.js';
+import { buildMessages, cleanReply, isSafe, isLocalEndpoint, extractCommand, buildTaskMessages, cleanTaskReply } from '../core/chat-prompt.js';
 
 export const DEFAULT_ENDPOINTS = [
   'http://127.0.0.1:11434/v1', // Ollama
@@ -60,6 +60,30 @@ export class ChatClient {
    * @param {{text: string, name?: string, kidsMode?: boolean, humor?: number, history?: Array<{user: string, khalfoun: string}>}} ctx
    * @returns {Promise<{ok: true, text: string} | {ok: false, error: string}>}
    */
+  /**
+   * Works on a piece of text: summarize, explain, questions or solve.
+   * @param {{mode: string, text: string, kidsMode?: boolean}} ctx
+   */
+  async task(ctx) {
+    if (this.busy) return { ok: false, error: 'busy' };
+    if (!ctx?.text || typeof ctx.text !== 'string') return { ok: false, error: 'bad_text' };
+    this.busy = true;
+    try {
+      const data = await getJSON(this.fetchFn, `${this.endpoint}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: this.model, messages: buildTaskMessages(ctx), temperature: 0.4, max_tokens: 700, stream: false }),
+      }, Math.max(this.timeoutMs, 90000));
+      const text = cleanTaskReply(data?.choices?.[0]?.message?.content);
+      if (!isSafe(text, !!ctx.kidsMode)) return { ok: false, error: 'unsafe_or_empty' };
+      return { ok: true, text };
+    } catch (err) {
+      return { ok: false, error: err?.name === 'AbortError' ? 'timeout' : String(err?.message || err) };
+    } finally {
+      this.busy = false;
+    }
+  }
+
   async reply(ctx) {
     if (this.busy) return { ok: false, error: 'busy' };
     if (!ctx?.text || typeof ctx.text !== 'string') return { ok: false, error: 'bad_text' };

@@ -99,3 +99,35 @@ export function isLocalEndpoint(url) {
     return false;
   }
 }
+
+// ------------------------------------------------------------- tasks on text
+const TASKS = {
+  summarize: 'لخّص النص التالي في ثلاث نقاط قصيرة وواضحة بالعربية المبسطة. كل نقطة في سطر يبدأ بـ «-».',
+  explain: 'اشرح النص التالي لطالب مدرسة بأسلوب بسيط وممتع في ثلاث أو أربع جمل، بلهجة عُمانية خفيفة، مع مثال قصير من الحياة إن أمكن.',
+  questions: 'اكتب خمسة أسئلة قصيرة مرقّمة عن النص التالي تناسب طلاب المدرسة (تنوّع: اختيار من متعدد، صح أو خطأ، سؤال قصير). بعد الأسئلة اكتب سطراً «الإجابات:» ثم الإجابات مرقّمة باختصار.',
+  solve: 'حل المسألة التالية خطوة بخطوة باختصار وبالعربية، واكتب الجواب النهائي في آخر سطر يبدأ بـ «الجواب:».',
+};
+export const TASK_MODES = Object.keys(TASKS);
+
+/** Messages asking the local model to work on a piece of text the person selected or that is on screen. */
+export function buildTaskMessages(ctx) {
+  const task = TASKS[ctx.mode] || TASKS.explain;
+  const system = [
+    'أنت «خلفون»، مساعد تعليمي عُماني على سطح المكتب يساعد المعلمين والطلاب.',
+    'اكتب بالعربية فقط، بدون رموز تنسيق مثل ** أو #.',
+    'لا تخترع معلومات غير موجودة في النص؛ إذا كان النص غير واضح قل ذلك باختصار.',
+    ctx.kidsMode ? 'المستخدم طفل: اجعل كلامك بسيطاً ومشجعاً وآمناً تماماً.' : '',
+  ].filter(Boolean).join('\n');
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: `${task}\n\nالنص:\n${String(ctx.text || '').slice(0, 3500)}` },
+  ];
+}
+
+/** Cleans a task answer: keeps line breaks and lists, drops formatting marks, caps the length. */
+export function cleanTaskReply(raw) {
+  let t = String(raw || '').replace(/<think>[\s\S]*?<\/think>/gi, ' ');
+  t = t.replace(/```[\s\S]*?```/g, ' ').replace(/[*#`~|>]/g, '');
+  t = t.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter((l, i, all) => l || (all[i - 1] && all[i - 1].trim())).join('\n').trim();
+  return t.length > 1500 ? `${t.slice(0, 1500).trimEnd()}…` : t;
+}

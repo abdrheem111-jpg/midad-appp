@@ -64,9 +64,10 @@ export class Brain {
     // Conversation context: what was last opened, the last command (for «مرة ثانية»),
     // the last sentence he did not understand (to learn the person's own words),
     // and commands still waiting from a sentence that held several.
-    this.context = { lastOpen: null, lastCommand: null, lastUnknown: null };
+    this.context = { lastOpen: null, lastCommand: null, lastUnknown: null, lastText: null, lastAnswer: null };
     this.queue = [];
     this.dictation = null; // {target: 'window'|'pdf', lines, page, position, lastAt}
+    this.chatAvailable = false; // set by the shell when a local model is ready (summaries, questions...)
   }
 
   get settings() {
@@ -282,6 +283,101 @@ export class Brain {
     return this.reply(d.typed ? 'dictation_done' : 'dictation_empty', { vars: { count: toArabicDigits(d.typed) }, behavior: 'dictation_off' });
   }
 
+  // ------------------------------------------------------------ eyes
+
+  setChatAvailable(on) { this.chatAvailable = !!on; }
+
+  /** What he read (selection or screen) arrives: remember it and do what was asked with it. */
+  afterSee(see, result, now) {
+    let text = String(result?.data?.text || '').trim();
+    if (!text) {
+      const last = this.context.lastText;
+      if (see.op !== 'read' && last && now - last.at < 10 * 60000) text = last.text;
+      else { this.emotions.feel('confused', now); return this.reply(see.source === 'screen' ? 'screen_nothing' : 'see_nothing'); }
+    }
+    this.context.lastText = { text, at: now, source: see.source };
+    return this.actOnText(see.op, text, see.source, now);
+  }
+
+  actOnText(op, text, source, now) {
+    const flat = text.replace(/\s+/g, ' ').trim();
+    const words = flat ? flat.split(' ').length : 0;
+    switch (op) {
+      case 'read': {
+        const preview = flat.length > 170 ? `${flat.slice(0, 170)}…` : flat;
+        this.emotions.feel('curious', now);
+        return this.reply(source === 'screen' ? 'screen_read' : 'see_read', { vars: { preview, words: toArabicDigits(words) } });
+      }
+      case 'count': {
+        const lines = text.split('\n').filter((l) => l.trim()).length;
+        this.emotions.feel('success', now);
+        return this.reply('see_count', { vars: { words: toArabicDigits(words), chars: toArabicDigits(flat.length), lines: toArabicDigits(lines) } });
+      }
+      case 'search':
+        return this.plan({ type: 'search', params: { query: flat.slice(0, 200), engine: 'google' } },
+          { situation: 'search_ok', sayOn: 'start', vars: { query: flat.slice(0, 40) }, summary: `بحث: ${flat.slice(0, 30)}` }, now);
+      case 'translate':
+        return this.plan({ type: 'search', params: { query: flat.slice(0, 300), engine: 'translate' } },
+          { situation: 'see_translate', sayOn: 'start', summary: 'ترجمة النص المحدد' }, now);
+      case 'meaning':
+        return this.plan({ type: 'search', params: { query: flat.split(' ')[0], engine: 'meaning' } },
+          { situation: 'see_meaning', sayOn: 'start', vars: { word: flat.split(' ')[0] }, summary: `معنى: ${flat.split(' ')[0]}` }, now);
+      case 'solve': {
+        const math = calculate(flat.replace(/[=؟?]+\s*$/u, '').replace(/^(كم|احسب|حل)\s+/u, ''));
+        if (math?.ok) {
+          this.context.lastAnswer = { text: `${math.expr} = ${math.text}`, at: now };
+          this.emotions.feel('success', now);
+          return this.reply('calc_result', { vars: { expr: math.expr, result: math.text } });
+        }
+        if (this.chatAvailable) return this.askModel('solve', text, now);
+        this.emotions.feel('confused', now);
+        return this.reply('solve_need_brain');
+      }
+      case 'summarize': case 'explain': case 'questions':
+        if (this.chatAvailable) return this.askModel(op, text, now);
+        this.emotions.feel('confused', now);
+        return this.reply('see_need_brain', { vars: { what: TASK_LABEL[op] } });
+      default:
+        return this.reply('see_read', { vars: { preview: flat.slice(0, 170), words: toArabicDigits(words) } });
+    }
+  }
+
+  /** Asks the shell to have the local model work on the text; the answer comes back through taskReply. */
+  askModel(mode, text, now) {
+    this.emotions.feel('focus_mode', now);
+    return { ...this.reply('see_thinking', { vars: { what: TASK_LABEL[mode] } }), ask: { mode, text: text.slice(0, 4000) } };
+  }
+
+  /** The local model's answer to a task (summary, explanation, questions, solution). */
+  taskReply(mode, res) {
+    const now = this.clock();
+    if (!res?.ok || !res.text) {
+      this.emotions.feel('error', now);
+      return this.reply('task_failed');
+    }
+    this.context.lastAnswer = { text: res.text, at: now };
+    this.emotions.feel('streak', now);
+    const hint = mode === 'questions' ? 'قول «اكتبها» وأكتب الأسئلة في الملف.' : 'قول «اكتبها» وأكتبه لك في الملف.';
+    return {
+      ...this.reply('task_answer', { event: null }), say: `${res.text}\n\n(${hint})`, situation: 'task_answer', animation: 'proud', long: true,
+    };
+  }
+
+  /** «شو أقدر أسوي هنا»: suggestions for the program the person is using. */
+  contextHelp(win, now) {
+    const proc = String(win.process || '').toLowerCase();
+    const title = String(win.title || '');
+    let situation = 'ctx_other';
+    if (/winword/.test(proc)) situation = 'ctx_word';
+    else if (/acro|foxit|sumatra|pdf/.test(proc) || /\.pdf\b/i.test(title)) situation = 'ctx_pdf';
+    else if (/msedge|chrome|firefox|brave|opera/.test(proc)) situation = 'ctx_browser';
+    else if (/powerpnt/.test(proc)) situation = 'ctx_powerpoint';
+    else if (/excel/.test(proc)) situation = 'ctx_excel';
+    else if (/notepad/.test(proc)) situation = 'ctx_notepad';
+    this.emotions.feel('curious', now);
+    return this.reply(situation, { vars: { app: title.slice(0, 40) || proc || 'هذا البرنامج' } });
+  }
+
   /** Keeps the context used by follow-ups and by learning the person's words. */
   remember(r, raw, out, now) {
     const REPEATABLE = ['move', 'key', 'volume', 'joke', 'calc', 'dance', 'jump', 'open', 'search', 'time', 'quiz', 'screenshot'];
@@ -359,6 +455,12 @@ export class Brain {
     if (!result || !result.ok) {
       this.emotions.feel('error', now);
       if (spec.dictation && this.dictation) { this.dictation = null; return this.reply('dictation_failed', { behavior: 'dictation_off' }); }
+      if (spec.see) {
+        if (result?.error === 'unsupported') return this.reply(spec.see.source === 'screen' ? 'screen_unsupported' : 'failed');
+        if (result?.error === 'no_ocr_language') return this.reply('screen_no_language');
+        return this.reply(spec.see.source === 'screen' ? 'screen_failed' : 'see_failed');
+      }
+      if (spec.contextHelp) return this.reply('help');
       if (result?.error === 'not_running') return this.reply('close_not_running', { vars: spec.vars || {} });
       if (result?.error === 'not_installed') {
         const target = spec.vars?.target || '';
@@ -378,6 +480,8 @@ export class Brain {
       return this.reply('failed');
     }
     if (spec.dictation) return spec.sayOn === 'result' ? this.reply(spec.situation) : null;
+    if (spec.see) return this.afterSee(spec.see, result, now);
+    if (spec.contextHelp) return this.contextHelp(result.data || {}, now);
     this.markSuccess(now);
     if (spec.learnFrom && !this.pending) {
       this.pending = { kind: 'learn', ...spec.learnFrom };
@@ -507,6 +611,19 @@ export class Brain {
         }
         return start();
       }
+      case 'see': {
+        const read = s.source === 'screen' ? { type: 'read_screen', params: {} } : { type: 'read_selection', params: {} };
+        return this.plan(read, { situation: s.source === 'screen' ? 'screen_looking' : 'see_looking', sayOn: 'start', see: s,
+          summary: s.source === 'screen' ? 'قراءة الشاشة' : 'قراءة النص المحدد' }, now);
+      }
+      case 'type_last': {
+        const last = this.context.lastAnswer;
+        if (!last || now - last.at > 30 * 60000) { this.emotions.feel('confused', now); return this.reply('type_last_none'); }
+        return this.plan({ type: 'type_text', params: { text: last.text.slice(0, 2000) } },
+          { situation: 'type_ok', sayOn: 'result', confirmWhat: 'أكتب الجواب الأخير حيث المؤشر', summary: 'كتابة الجواب' }, now);
+      }
+      case 'context_help':
+        return this.plan({ type: 'active_window', params: {} }, { situation: 'help', sayOn: 'result', contextHelp: true, summary: 'معرفة البرنامج المفتوح' }, now);
       case 'key': {
         const name = KEYS[s.key]?.ar || s.key;
         return this.plan({ type: 'press_key', params: { key: s.key } },
@@ -969,6 +1086,7 @@ export class Brain {
   }
 }
 
+const TASK_LABEL = { summarize: 'التلخيص', explain: 'الشرح', questions: 'الأسئلة', solve: 'حل المسألة' };
 const DICTATION_END = new Set(['خلاص', 'خلصت', 'انتهيت', 'تم', 'بس خلاص', 'خلاص بس', 'وقف الاملاء', 'خلاص الاملاء', 'انهي الاملاء', 'وقف', 'بس', 'خلصنا', 'كفايه'].map(normalize));
 const DICTATION_CANCEL = new Set(['الغ الاملاء', 'الغي الاملاء', 'كنسل الاملاء', 'لا تكتب شي', 'انس اللي قلته'].map(normalize));
 const DICTATION_UNDO = new Set(['امسح اخر جمله', 'امسح الجمله', 'امسح اللي قلته', 'امسح الجمله الاخيره', 'شيل اخر جمله', 'امسحها', 'غلط امسحها'].map(normalize));

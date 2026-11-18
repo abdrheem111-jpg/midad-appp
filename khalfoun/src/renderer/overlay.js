@@ -49,11 +49,11 @@ let bubbleUntil = 0;
 
 let framesThisSecond = 0; // drawing health, reported in the diagnostics log
 
-function showBubble(text, mood) {
+function showBubble(text, mood, long = false) {
   clearTimeout(bubbleTimer);
   clearInterval(typeTimer);
   els.bubble.hidden = false;
-  els.bubble.className = `bubble mood-${mood || 'calm'}`;
+  els.bubble.className = `bubble mood-${mood || 'calm'}${long ? ' long' : ''}`;
   // restart the pop animation
   void els.bubble.offsetWidth;
   const chars = Array.from(String(text || ''));
@@ -72,7 +72,8 @@ function showBubble(text, mood) {
   typeTimer = setInterval(reveal, 30);
   setTimeout(() => { if (els.bubbleText.textContent !== full && !els.bubble.hidden && els.bubble.getAttribute('aria-label') === full) { clearInterval(typeTimer); els.bubbleText.textContent = full; } }, chars.length * 15 + 400);
   sounds.babble(full, mood);
-  const ms = Math.min(10000, 2200 + chars.length * 65);
+  // Long answers (summaries, questions) stay up longer; a click on the bubble closes it.
+  const ms = Math.min(long ? 60000 : 10000, 2200 + chars.length * 65);
   bubbleUntil = performance.now() + ms;
   bubbleTimer = setTimeout(hideBubble, ms);
   // One health check per bubble for the diagnostics log.
@@ -101,7 +102,7 @@ function handle(reply) {
   if (recentSituations.length > 20) recentSituations.shift();
   if (reply.emotion) character.setEmotion(reply.emotion);
   if (reply.costume !== undefined) character.setCostume(reply.costume);
-  if (reply.say) showBubble(reply.say, reply.emotion?.emotion);
+  if (reply.say) showBubble(reply.say, reply.emotion?.emotion, reply.long);
   const anim = reply.animation || EMOTION_ANIMATION[reply.emotion?.emotion];
   if (anim && anim !== 'sleep') animator.play(anim);
   if (reply.situation === 'sounds_on' || reply.situation === 'sounds_off') sounds.setEnabled(brain.memory.data.sounds !== false);
@@ -132,8 +133,21 @@ function handle(reply) {
     default: break;
   }
   if (reply.action) runAction(reply.action);
+  if (reply.ask) runTask(reply.ask);
   // «افتح الحاسبة وبعدين المفكرة»: the next command follows after a short pause.
   if (reply.more) setTimeout(() => handle(brain.continueQueue()), 1600);
+}
+
+/** Summaries, explanations, questions and solutions from the local model. */
+async function runTask(ask) {
+  let res;
+  try {
+    res = typeof bridge.chatTask === 'function' ? await bridge.chatTask(ask) : { ok: false, error: 'chat_unavailable' };
+  } catch (err) {
+    res = { ok: false, error: String(err?.message || err) };
+  }
+  bridge.note?.(`model task ${ask.mode} → ${res?.ok ? 'ok' : `failed: ${res?.error}`}`);
+  handle(brain.taskReply(ask.mode, res));
 }
 
 async function runAction(action) {
@@ -245,6 +259,7 @@ async function listen() {
 }
 
 els.mic.addEventListener('click', listen);
+els.bubble.addEventListener('click', () => hideBubble());
 
 // ------------------------------------------------------- «يا خلفون» wake word
 
@@ -637,6 +652,7 @@ $('st-chat').addEventListener('change', async () => {
   const want = $('st-chat').checked;
   const res = await bridge.updateSettings({ chatEnabled: want });
   brain.memory.set({ chatEnabled: res?.ok ? res.settings.chatEnabled !== false : !want });
+  brain.setChatAvailable(chatOn());
 });
 $('st-sounds').addEventListener('change', () => {
   brain.memory.set({ sounds: $('st-sounds').checked });
@@ -763,6 +779,7 @@ async function start() {
     },
   });
 
+  brain.setChatAvailable(chatOn());
   bridge.onEvent((ev) => {
     switch (ev?.type) {
       case 'reminder': sounds.effect('chime'); handle(brain.event('reminder_fire', { note: ev.note })); motion.come(); break;
@@ -780,6 +797,7 @@ async function start() {
       case 'chat-ready':
         chatInfo = { available: !!ev.available, model: ev.model || null };
         $('st-chat').disabled = !chatInfo.available;
+        brain.setChatAvailable(chatOn());
         break;
       default: break;
     }

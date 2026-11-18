@@ -446,6 +446,25 @@ await check('a sentence only the model understands becomes a command, after a ye
   assert(last?.type === 'search' && last.params.engine === 'youtube' && last.params.query === 'أناشيد', JSON.stringify(last));
 });
 
+await check('eyes: «سو أسئلة من هذا» reads the selection, the model writes questions, «اكتبها» types them', async () => {
+  await cpage.evaluate(() => {
+    window.__fakeSelection = 'الماء يغلي عند مئة درجة ويتجمد عند الصفر.';
+    window.__fakeChat = ['١. عند كم درجة يغلي الماء؟\n٢. متى يتجمد؟\nالإجابات:\n١. مئة ٢. صفر'];
+    window.__khalfoun.hear('سو أسئلة من هذا');
+  });
+  await untilOn(cpage, () => window.__khalfoun.lastReply?.situation === 'task_answer', 6000);
+  await untilOn(cpage, () => document.getElementById('bubble-text').textContent.includes('اكتبها'), 4000);
+  assert(await cpage.evaluate(() => document.getElementById('bubble').classList.contains('long')), 'long bubble');
+  await cpage.screenshot({ path: `${outDir}/14-eyes-questions.png` });
+  await cpage.evaluate(() => window.__khalfoun.hear('اكتبها'));
+  await cpage.waitForTimeout(300);
+  assert(await cpage.evaluate(() => window.__khalfoun.lastReply?.awaitingConfirm), 'assistant level asks before typing');
+  await cpage.evaluate(() => window.__khalfoun.hear('ايوه'));
+  await cpage.waitForTimeout(700);
+  const last = await cpage.evaluate(() => window.__khalfoun.bridge._actions.at(-1));
+  assert(last.type === 'type_text' && last.params.text.startsWith('١. عند كم درجة'), JSON.stringify(last));
+});
+
 // ----- one-click setup from the settings panel (simulated downloads)
 const spage = await browser.newPage({ viewport: { width: 1280, height: 760 } });
 spage.on('pageerror', (e) => problems.push(`setup page error: ${e.message}`));
