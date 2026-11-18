@@ -143,6 +143,7 @@ function handle(reply) {
   }
   if (reply.action) runAction(reply.action);
   if (reply.ask) runTask(reply.ask);
+  if (reply.look) runLook(reply.look);
   // «افتح الحاسبة وبعدين المفكرة»: the next command follows after a short pause.
   if (reply.more) setTimeout(() => handle(brain.continueQueue()), 1600);
 }
@@ -310,6 +311,18 @@ async function runTask(ask) {
   }
   bridge.note?.(`model task ${ask.mode} → ${res?.ok ? 'ok' : `failed: ${res?.error}`}`);
   handle(brain.taskReply(ask.mode, res));
+}
+
+/** AI eyes: the vision model looks at the screen (Khalfoun hides for the picture). */
+async function runLook(look) {
+  let res;
+  try {
+    res = typeof bridge.visionLook === 'function' ? await bridge.visionLook(look) : { ok: false, error: 'vision_unavailable' };
+  } catch (err) {
+    res = { ok: false, error: String(err?.message || err) };
+  }
+  bridge.note?.(`vision ${look.mode} → ${res?.ok ? 'ok' : `failed: ${res?.error}`}`);
+  handle(brain.taskReply(look.mode, res));
 }
 
 async function runAction(action) {
@@ -739,7 +752,7 @@ async function refreshSetup() {
   fillSelect($('su-brain-choice'), Object.entries(b.choices).map(([id, c]) => [id, `${c.label} · ${c.model} · ${fmtMB(c.approxMB)}`]), true);
   $('su-brain-choice').hidden = !b.ollamaRunning;
   $('su-brain-text').textContent = b.chatAvailable
-    ? `يسولف عبر ${b.model} على جهازك فقط، وما يطلع منه شي للإنترنت.`
+    ? `يسولف عبر ${b.model} على جهازك فقط، وما يطلع منه شي للإنترنت. ${b.vision ? `العيون الذكية جاهزة (${b.vision}): قول «اشرح اللي في الشاشة».` : 'للعيون الذكية (يفهم الصور) اختار «عقل + عيون ذكية» ونزّله.'}`
     : b.ollamaRunning
       ? 'Ollama شغّال. اختار حجم النموذج واضغط «نزّل العقل». «عادي» يناسب أغلب الأجهزة.'
       : 'العقل يحتاج برنامج Ollama المجاني. نزّله وثبّته من صفحته، وبعدين ارجع هنا واضغط «نزّل العقل».';
@@ -930,7 +943,7 @@ window.addEventListener('resize', () => { motion.setArea(workArea()); applyWindo
 async function start() {
   const loaded = await bridge.loadState();
   voiceAvailable = !!loaded?.voice?.available;
-  chatInfo = { available: !!loaded?.chat?.available, model: loaded?.chat?.model || null };
+  chatInfo = { available: !!loaded?.chat?.available, model: loaded?.chat?.model || null, vision: loaded?.chat?.vision || null };
   const memoryData = { ...(loaded?.memory || {}), ...(loaded?.settings || {}) };
   let saveTimer = null;
   brain = new Brain({
@@ -942,6 +955,7 @@ async function start() {
   });
 
   brain.setChatAvailable(chatOn());
+  brain.setVisionAvailable(Boolean(chatInfo.vision) && chatOn());
   bridge.onEvent((ev) => {
     switch (ev?.type) {
       case 'reminder': sounds.effect('chime'); handle(brain.event('reminder_fire', { note: ev.note })); motion.come(); break;
@@ -959,9 +973,10 @@ async function start() {
         updateWake();
         break;
       case 'chat-ready':
-        chatInfo = { available: !!ev.available, model: ev.model || null };
+        chatInfo = { available: !!ev.available, model: ev.model || null, vision: ev.vision || null };
         $('st-chat').disabled = !chatInfo.available;
         brain.setChatAvailable(chatOn());
+        brain.setVisionAvailable(Boolean(ev.vision) && chatOn());
         break;
       default: break;
     }

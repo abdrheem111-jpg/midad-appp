@@ -69,6 +69,7 @@ export class Brain {
     this.queue = [];
     this.dictation = null; // {target: 'window'|'pdf', lines, page, position, lastAt}
     this.chatAvailable = false; // set by the shell when a local model is ready (summaries, questions...)
+    this.visionAvailable = false; // a local model that understands images is ready
   }
 
   get settings() {
@@ -293,6 +294,8 @@ export class Brain {
   // ------------------------------------------------------------ eyes
 
   setChatAvailable(on) { this.chatAvailable = !!on; }
+
+  setVisionAvailable(on) { this.visionAvailable = !!on; }
 
   /** What he read (selection or screen) arrives: remember it and do what was asked with it. */
   afterSee(see, result, now) {
@@ -726,6 +729,14 @@ export class Brain {
       }
       case 'timer_stop': return this.reply('timer_stopped', { behavior: 'timer:stop' });
       case 'see': {
+        // AI eyes: a vision model looks at the screen itself (pictures, drawings, worksheets).
+        const LOOKS = { read: 'describe', describe: 'describe', explain: 'explain', solve: 'solve', questions: 'questions', summarize: 'summarize' };
+        if (s.source === 'screen' && this.visionAvailable && LOOKS[s.op]) {
+          const mode = LOOKS[s.op];
+          this.emotions.feel('focus_mode', now);
+          return { ...this.reply('look_thinking', { vars: { what: LOOK_LABEL[mode] } }), look: { mode } };
+        }
+        if (s.op === 'describe') s.op = 'read';
         const read = s.source === 'screen' ? { type: 'read_screen', params: {} } : { type: 'read_selection', params: {} };
         return this.plan(read, { situation: s.source === 'screen' ? 'screen_looking' : 'see_looking', sayOn: 'start', see: s,
           summary: s.source === 'screen' ? 'قراءة الشاشة' : 'قراءة النص المحدد' }, now);
@@ -1200,6 +1211,7 @@ export class Brain {
   }
 }
 
+const LOOK_LABEL = { describe: 'الشاشة', explain: 'شرح اللي في الشاشة', solve: 'حل التمرين', questions: 'الأسئلة', summarize: 'التلخيص' };
 const TASK_LABEL = { summarize: 'التلخيص', explain: 'الشرح', questions: 'الأسئلة', solve: 'حل المسألة' };
 const DICTATION_END = new Set(['خلاص', 'خلصت', 'انتهيت', 'تم', 'بس خلاص', 'خلاص بس', 'وقف الاملاء', 'خلاص الاملاء', 'انهي الاملاء', 'وقف', 'بس', 'خلصنا', 'كفايه'].map(normalize));
 const DICTATION_CANCEL = new Set(['الغ الاملاء', 'الغي الاملاء', 'كنسل الاملاء', 'لا تكتب شي', 'انس اللي قلته'].map(normalize));

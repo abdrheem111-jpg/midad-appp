@@ -131,3 +131,28 @@ export function cleanTaskReply(raw) {
   t = t.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter((l, i, all) => l || (all[i - 1] && all[i - 1].trim())).join('\n').trim();
   return t.length > 1500 ? `${t.slice(0, 1500).trimEnd()}…` : t;
 }
+
+// ------------------------------------------------------------- looking at the screen
+const LOOK = {
+  describe: 'صف ما تراه في لقطة الشاشة هذه باختصار في جملتين أو ثلاث: ما البرنامج أو المحتوى الظاهر، وما أهم شيء فيه.',
+  explain: 'اشرح المحتوى التعليمي الظاهر في لقطة الشاشة (نص، صورة، رسم، جدول أو شكل) لطالب مدرسة بأسلوب بسيط في ثلاث أو أربع جمل.',
+  solve: 'في لقطة الشاشة تمرين أو مسألة. حلها خطوة بخطوة باختصار، واكتب الجواب النهائي في آخر سطر يبدأ بـ «الجواب:». إذا لم تجد مسألة قل ذلك.',
+  questions: 'اكتب خمسة أسئلة قصيرة مرقّمة عن المحتوى التعليمي الظاهر في لقطة الشاشة، ثم سطراً «الإجابات:» والإجابات باختصار.',
+  summarize: 'لخّص المحتوى الظاهر في لقطة الشاشة في ثلاث نقاط قصيرة، كل نقطة في سطر يبدأ بـ «-».',
+};
+export const LOOK_MODES = Object.keys(LOOK);
+
+/** OpenAI-style vision messages (Ollama accepts base64 data URLs). */
+export function buildVisionMessages(ctx) {
+  const task = LOOK[ctx.mode] || LOOK.describe;
+  const system = [
+    'أنت «خلفون»، مساعد تعليمي عُماني على سطح المكتب. تنظر إلى لقطة شاشة من جهاز المستخدم.',
+    'اكتب بالعربية فقط، بدون رموز تنسيق مثل ** أو #. لا تخترع ما لا تراه.',
+    ctx.kidsMode ? 'المستخدم طفل: كلامك بسيط ومشجع وآمن تماماً.' : '',
+  ].filter(Boolean).join('\n');
+  const mime = String(ctx.image).startsWith('/9j/') ? 'image/jpeg' : 'image/png';
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: [{ type: 'text', text: task }, { type: 'image_url', image_url: { url: `data:${mime};base64,${ctx.image}` } }] },
+  ];
+}

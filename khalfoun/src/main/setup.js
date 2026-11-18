@@ -37,6 +37,7 @@ export const VOICE_PACKS = {
 export const BRAIN_MODELS = {
   standard: { model: 'qwen2.5:3b', label: 'عادي', approxMB: 1900 },
   strong: { model: 'qwen2.5:7b', label: 'قوي', approxMB: 4700 },
+  vision: { model: 'gemma3:4b', label: 'عقل + عيون ذكية (يفهم الصور)', approxMB: 3300 },
 };
 
 export const OLLAMA_URL = 'http://127.0.0.1:11434';

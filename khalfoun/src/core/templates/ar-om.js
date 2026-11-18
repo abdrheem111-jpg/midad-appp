@@ -258,6 +258,8 @@ export const TEMPLATES = [
   { id: 'svb1', s: 'solve_need_brain', t: 'إذا كانت عملية حسابية حددها وقول «احسبها». المسائل الكلامية تحتاج عقل خلفون (Ollama) من الإعدادات.', a: 'think' },
   { id: 'sth1', s: 'see_thinking', t: 'أشتغل على {what}... لحظات.', a: 'think' },
   { id: 'sth2', s: 'see_thinking', t: 'خلني أفكر في {what}، ثواني بس.', h: 1, a: 'think' },
+  { id: 'lkt1', s: 'look_thinking', t: 'خلني أطالع بعيوني الذكية... ({what})', a: 'look_around' },
+  { id: 'lkt2', s: 'look_thinking', t: 'لحظة، أدقق في الشاشة وأفكر.', a: 'think' },
   { id: 'tka1', s: 'task_answer', t: 'تفضل.', a: 'proud' },
   { id: 'tkf1', s: 'task_failed', t: 'العقل تعثر هالمرة. جرب مرة ثانية، أو حدد نص أقصر.', a: 'sad' },
   { id: 'tln1', s: 'type_last_none', t: 'ما عندي جواب جديد أكتبه. اطلب مني ملخص أو أسئلة أول.', a: 'shrug' },

@@ -18,6 +18,7 @@ function createPreviewBridge() {
   // window.__fakeTranscripts, so the whole voice path can be tested in a browser.
   const fakeVoice = typeof location !== 'undefined' && new URLSearchParams(location.search).has('fakevoice');
   const fakeChat = typeof location !== 'undefined' && new URLSearchParams(location.search).has('fakechat');
+  const fakeVision = typeof location !== 'undefined' && new URLSearchParams(location.search).has('fakevision');
   const chatCalls = [];
   const transcribeCalls = [];
   const listeners = new Set();
@@ -47,7 +48,8 @@ function createPreviewBridge() {
         voice: { available: setupState.voice, supported: true, packs: { light: { label: 'خفيف', mb: 152 }, balanced: { label: 'متوازن', mb: 639 }, accurate: { label: 'دقيق', mb: 726 } } },
         brain: {
           ollamaRunning: fakeOllama, ollamaModels: setupState.chat ? [setupState.model] : [], chatAvailable: setupState.chat, model: setupState.model,
-          choices: { standard: { model: 'qwen2.5:3b', label: 'عادي', approxMB: 1900 }, strong: { model: 'qwen2.5:7b', label: 'قوي', approxMB: 4700 } },
+          vision: fakeVision ? 'gemma3:4b' : null,
+          choices: { standard: { model: 'qwen2.5:3b', label: 'عادي', approxMB: 1900 }, strong: { model: 'qwen2.5:7b', label: 'قوي', approxMB: 4700 }, vision: { model: 'gemma3:4b', label: 'عقل + عيون ذكية (يفهم الصور)', approxMB: 3300 } },
         },
       };
     },
@@ -79,7 +81,7 @@ function createPreviewBridge() {
         memory: readJSON(MEM_KEY),
         settings: readJSON(SET_KEY) || { onboarded: false, level: 0, kidsMode: false },
         voice: { available: fakeVoice },
-        chat: { available: fakeChat, model: fakeChat ? 'test-model' : null },
+        chat: { available: fakeChat, model: fakeChat ? 'test-model' : null, vision: fakeVision ? 'gemma3:4b' : null },
         platform: 'preview',
       };
     },
@@ -120,6 +122,13 @@ function createPreviewBridge() {
       const next = queue.shift();
       const m = /^أمر:\s*(.+)$/u.exec(next);
       return m ? { ok: true, command: m[1].trim() } : { ok: true, text: next };
+    },
+    async visionLook(payload) {
+      if (!fakeVision) return { ok: false, error: 'vision_unavailable' };
+      chatCalls.push({ look: payload.mode });
+      await new Promise((r) => setTimeout(r, 300));
+      const queue = window.__fakeChat || [];
+      return queue.length ? { ok: true, text: queue.shift() } : { ok: false, error: 'timeout' };
     },
     async chatTask(payload) {
       if (!fakeChat) return { ok: false, error: 'chat_unavailable' };

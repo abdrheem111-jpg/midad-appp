@@ -160,3 +160,43 @@ test('model tasks: clear instructions, clean answers, ChatClient.task', async ()
   const client = new ChatClient({ endpoint: 'http://127.0.0.1:11434/v1', model: 'm', fetchFn });
   assert.deepEqual(await client.task({ mode: 'summarize', text: LESSON }), { ok: true, text: '- الماء يغلي عند مئة درجة\n- ويتجمد عند الصفر' });
 });
+
+import { pickVisionModel } from '../src/main/chat.js';
+import { buildVisionMessages, LOOK_MODES } from '../src/core/chat-prompt.js';
+
+test('AI eyes: with a vision model, screen questions go to it; without, he reads text with OCR', () => {
+  const { brain } = makeBrain();
+  brain.setVisionAvailable(true);
+  const cases = [['اشرح اللي في الشاشة', 'explain'], ['حل التمرين اللي في الشاشة', 'solve'], ['شو في الصورة', 'describe'], ['شو تشوف', 'describe'], ['لخص اللي في الشاشة', 'summarize'], ['سو أسئلة من الشاشة', 'questions']];
+  for (const [text, mode] of cases) {
+    const r = brain.hear(text);
+    assert.equal(r.situation, 'look_thinking', text);
+    assert.deepEqual(r.look, { mode }, text);
+    assert.equal(r.action, null);
+  }
+  const done = brain.taskReply('solve', { ok: true, text: '٣ × ٤ = ١٢\nالجواب: ١٢' });
+  assert.equal(done.situation, 'task_answer');
+  assert.equal(brain.hear('اكتبها').action.params.text, '٣ × ٤ = ١٢\nالجواب: ١٢');
+  // selection questions still read the selection, not the screen
+  assert.equal(brain.hear('لخص هذا').action.type, 'read_selection');
+  const { brain: plain } = makeBrain();
+  const ocr = plain.hear('شو في الصورة');
+  assert.equal(ocr.action.type, 'read_screen');
+});
+
+test('AI eyes: vision model detection and the messages sent to it', async () => {
+  assert.equal(pickVisionModel(['qwen2.5:3b', 'gemma3:4b']), 'gemma3:4b');
+  assert.equal(pickVisionModel(['llava:7b']), 'llava:7b');
+  assert.equal(pickVisionModel(['qwen2.5vl:3b']), 'qwen2.5vl:3b');
+  assert.equal(pickVisionModel(['qwen2.5:3b', 'nomic-embed-text']), null);
+  assert.deepEqual(LOOK_MODES.sort(), ['describe', 'explain', 'questions', 'solve', 'summarize']);
+  const msgs = buildVisionMessages({ mode: 'solve', image: '/9j/AAAA' });
+  assert.equal(msgs[1].content[1].image_url.url, 'data:image/jpeg;base64,/9j/AAAA');
+  assert.ok(msgs[1].content[0].text.includes('الجواب'));
+  let sent = null;
+  const fetchFn = async (url, init) => { sent = JSON.parse(init.body); return new Response(JSON.stringify({ choices: [{ message: { content: 'في الشاشة ورقة عمل عن الكسور.' } }] }), { status: 200 }); };
+  const client = new ChatClient({ endpoint: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:3b', fetchFn });
+  assert.deepEqual(await client.vision({ mode: 'describe', image: 'iVBOR', model: 'gemma3:4b' }), { ok: true, text: 'في الشاشة ورقة عمل عن الكسور.' });
+  assert.equal(sent.model, 'gemma3:4b');
+  assert.deepEqual(await client.vision({ mode: 'describe', image: '', model: 'gemma3:4b' }), { ok: false, error: 'bad_image' });
+});

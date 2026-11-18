@@ -507,6 +507,25 @@ await check('eyes: «سو أسئلة من هذا» reads the selection, the mode
   assert(last.type === 'type_text' && last.params.text.startsWith('١. عند كم درجة'), JSON.stringify(last));
 });
 
+await check('AI eyes: «اشرح اللي في الشاشة» goes to the vision model and the answer is shown', async () => {
+  const vpage2 = await browser.newPage({ viewport: { width: 1280, height: 760 } });
+  vpage2.on('pageerror', (e) => problems.push(`vision page error: ${e.message}`));
+  await vpage2.goto(`${base}?fakechat=1&fakevision=1`);
+  await vpage2.evaluate(() => {
+    localStorage.setItem('khalfoun.settings', JSON.stringify({ onboarded: true, level: 3, kidsMode: false }));
+    localStorage.setItem('khalfoun.memory', JSON.stringify({ name: 'عبدالرحيم', humor: 1 }));
+  });
+  await vpage2.reload();
+  await vpage2.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 15000 });
+  await vpage2.waitForTimeout(800);
+  await vpage2.evaluate(() => { window.__fakeChat = ['في الشاشة رسم لدورة الماء: تبخر ثم تكاثف ثم هطول.']; window.__khalfoun.hear('اشرح اللي في الشاشة'); });
+  await untilOn(vpage2, () => window.__khalfoun.lastReply?.situation === 'task_answer', 5000);
+  const calls = await vpage2.evaluate(() => window.__khalfoun.bridge._chatCalls);
+  assert(calls.some((c) => c.look === 'explain'), JSON.stringify(calls));
+  await untilOn(vpage2, () => document.getElementById('bubble-text').textContent.includes('دورة الماء'), 4000);
+  await vpage2.close();
+});
+
 // ----- one-click setup from the settings panel (simulated downloads)
 const spage = await browser.newPage({ viewport: { width: 1280, height: 760 } });
 spage.on('pageerror', (e) => problems.push(`setup page error: ${e.message}`));

@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('khalfoun', {
   runAction: (action) => ipcRenderer.invoke('action:run', action),
   chat: (payload) => ipcRenderer.invoke('chat:reply', payload),
   chatTask: (payload) => ipcRenderer.invoke('chat:task', payload),
+  visionLook: (payload) => ipcRenderer.invoke('vision:look', payload),
   transcribe: (wav, purpose) => ipcRenderer.invoke('voice:transcribe', wav, purpose === 'wake' ? 'wake' : 'command'),
   setup: {
     status: () => ipcRenderer.invoke('setup:status'),

@@ -20,13 +20,13 @@ import { createPlatform } from './actions/platform.js';
 import { createExecutor } from './actions/index.js';
 import { findWhisper, transcribe } from './stt.js';
 import { WindowWatcher } from './windows-watcher.js';
-import { ChatClient, findLocalModel } from './chat.js';
+import { ChatClient, findLocalModel, pickVisionModel } from './chat.js';
 import { ReminderScheduler } from './reminders.js';
 import { writeIntoLatestPdf } from './actions/pdf.js';
 import { LEVEL_INFO } from '../core/permissions.js';
 import { DiagLog } from './diag.js';
 import { ocrImage } from './ocr.js';
-import { TASK_MODES } from '../core/chat-prompt.js';
+import { TASK_MODES, LOOK_MODES } from '../core/chat-prompt.js';
 import { PARTIAL_DOWNLOAD, downloadKind } from '../core/desktop.js';
 import {
   setupVoice, pullOllamaModel, ollamaStatus, setupErrorText, packSizeMB,
@@ -66,6 +66,7 @@ let whisper = { available: false, bin: null, model: null, wakeModel: null };
 let watcher = null;
 let chat = null; // ChatClient when a local model is found
 let chatInfo = null;
+let visionModel = null; // a local model that understands images (gemma3, qwen2.5vl, llava...)
 let voiceDirs = [];
 let diag = { write() {} }; // DiagLog once the profile folder is known
 let lookForModel = async () => {};
@@ -400,7 +401,7 @@ function setupIpc(stores, executor) {
   ipcMain.handle('state:load', async (event) => {
     if (!fromApp(event)) return null;
     const memory = await stores.memory.read();
-    return { memory: Object.keys(memory).length ? memory : null, settings, voice: { available: whisper.available }, chat: { available: Boolean(chat), model: chatInfo?.model || null }, platform: process.platform };
+    return { memory: Object.keys(memory).length ? memory : null, settings, voice: { available: whisper.available }, chat: { available: Boolean(chat), model: chatInfo?.model || null, vision: visionModel }, platform: process.platform };
   });
 
   ipcMain.handle('memory:save', async (event, data) => {
@@ -484,6 +485,32 @@ function setupIpc(stores, executor) {
     return res;
   });
 
+  ipcMain.handle('vision:look', async (event, payload) => {
+    if (!fromApp(event)) return { ok: false, error: 'forbidden' };
+    if (!chat || !visionModel || settings.chatEnabled === false) return { ok: false, error: 'vision_unavailable' };
+    if (!settings.level || settings.level < 2) return { ok: false, error: 'level_too_low' };
+    const mode = LOOK_MODES.includes(payload?.mode) ? payload.mode : 'describe';
+    let image;
+    try {
+      if (win && !win.isDestroyed()) win.setOpacity(0);
+      await new Promise((r) => setTimeout(r, 180));
+      const display = screen.getPrimaryDisplay();
+      const size = { width: Math.round(display.size.width * display.scaleFactor), height: Math.round(display.size.height * display.scaleFactor) };
+      const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size });
+      const source = sources.find((s) => s.display_id === String(display.id)) || sources[0];
+      if (!source) return { ok: false, error: 'no_screen' };
+      // Smaller pictures keep the local model fast; 1280 px wide is enough to read a worksheet.
+      const shot = source.thumbnail;
+      const small = shot.getSize().width > 1280 ? shot.resize({ width: 1280, quality: 'good' }) : shot;
+      image = small.toJPEG(82).toString('base64');
+    } finally {
+      if (win && !win.isDestroyed()) win.setOpacity(1);
+    }
+    const res = await chat.vision({ mode, image, model: visionModel, kidsMode: !!settings.kidsMode });
+    diag.write('vision', mode, visionModel, '→', res.ok ? `${res.text.length} chars` : `failed: ${res.error}`);
+    return res;
+  });
+
   ipcMain.handle('chat:reply', async (event, payload) => {
     if (!fromApp(event)) return { ok: false, error: 'forbidden' };
     if (!chat || settings.chatEnabled === false) return { ok: false, error: 'chat_unavailable' };
@@ -509,7 +536,7 @@ function setupIpc(stores, executor) {
     return {
       busy: setupJob?.kind || null,
       voice: { available: whisper.available, supported: process.platform === 'win32' || haveProgram, packs },
-      brain: { ollamaRunning: ollama.running, ollamaModels: ollama.models, chatAvailable: Boolean(chat), model: chatInfo?.model || null, choices: BRAIN_MODELS },
+      brain: { ollamaRunning: ollama.running, ollamaModels: ollama.models, chatAvailable: Boolean(chat), model: chatInfo?.model || null, vision: visionModel, choices: BRAIN_MODELS },
     };
   });
 
@@ -547,7 +574,7 @@ function setupIpc(stores, executor) {
       if (!status.models.includes(model)) await pullOllamaModel({ model, signal: controller.signal, onProgress: progress('brain') });
       chat = null;
       await lookForModel(model);
-      send('chat-ready', { available: Boolean(chat), model: chatInfo?.model || null });
+      send('chat-ready', { available: Boolean(chat), model: chatInfo?.model || null, vision: visionModel });
       return { ok: Boolean(chat), model: chatInfo?.model || null, text: chat ? undefined : 'نزل النموذج بس ما قدرت أكلمه. جرّب بعد شوي.' };
     } catch (err) {
       console.warn('brain setup failed:', err);
@@ -746,9 +773,17 @@ async function start() {
   createWindow();
   // Look for a local language model now and every five minutes until one appears.
   lookForModel = async (preferred) => {
-    if (chat) return;
-    chatInfo = await findLocalModel(preferred ? { preferred } : {});
-    if (chatInfo) chat = new ChatClient(chatInfo);
+    if (chat && visionModel) return;
+    const found = await findLocalModel(preferred ? { preferred } : {});
+    if (!found) return;
+    const hadChat = Boolean(chat);
+    const hadVision = visionModel;
+    if (!chat) { chatInfo = found; chat = new ChatClient(found); }
+    visionModel = pickVisionModel(found.models);
+    if (!hadChat || hadVision !== visionModel) {
+      diag.write('local model', { chat: chatInfo?.model, vision: visionModel });
+      send('chat-ready', { available: true, model: chatInfo?.model || null, vision: visionModel });
+    }
   };
   if (!SMOKE) {
     lookForModel().catch(() => {});

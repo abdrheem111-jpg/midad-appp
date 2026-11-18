@@ -2,7 +2,7 @@
 // OpenAI-style API that Ollama, llama.cpp's server and LM Studio all offer.
 // Nothing is sent to the internet: only local addresses are accepted.
 
-import { buildMessages, cleanReply, isSafe, isLocalEndpoint, extractCommand, buildTaskMessages, cleanTaskReply } from '../core/chat-prompt.js';
+import { buildMessages, cleanReply, isSafe, isLocalEndpoint, extractCommand, buildTaskMessages, cleanTaskReply, buildVisionMessages } from '../core/chat-prompt.js';
 
 export const DEFAULT_ENDPOINTS = [
   'http://127.0.0.1:11434/v1', // Ollama
@@ -43,6 +43,14 @@ export async function findLocalModel(opts = {}) {
   return null;
 }
 
+/** Models that can look at images (Ollama names). */
+export const VISION_RE = /(llava|bakllava|qwen2\.5vl|qwen2\.5-vl|qwen2-vl|qwen-vl|gemma3|minicpm-v|llama3\.2-vision|moondream|granite3\.2-vision|mistral-small3\.[12])/i;
+
+/** The first model in the list that understands images, or null. */
+export function pickVisionModel(models) {
+  return (models || []).find((m) => VISION_RE.test(m)) || null;
+}
+
 export class ChatClient {
   /**
    * @param {{endpoint: string, model: string, fetchFn?: typeof fetch, timeoutMs?: number}} opts
@@ -74,6 +82,30 @@ export class ChatClient {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: this.model, messages: buildTaskMessages(ctx), temperature: 0.4, max_tokens: 700, stream: false }),
       }, Math.max(this.timeoutMs, 90000));
+      const text = cleanTaskReply(data?.choices?.[0]?.message?.content);
+      if (!isSafe(text, !!ctx.kidsMode)) return { ok: false, error: 'unsafe_or_empty' };
+      return { ok: true, text };
+    } catch (err) {
+      return { ok: false, error: err?.name === 'AbortError' ? 'timeout' : String(err?.message || err) };
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /**
+   * Looks at a screenshot with a vision model: describe, explain, solve, questions or summarize.
+   * @param {{mode: string, image: string, model: string, kidsMode?: boolean}} ctx image = base64 JPEG/PNG
+   */
+  async vision(ctx) {
+    if (this.busy) return { ok: false, error: 'busy' };
+    if (!ctx?.image || !ctx.model) return { ok: false, error: 'bad_image' };
+    this.busy = true;
+    try {
+      const data = await getJSON(this.fetchFn, `${this.endpoint}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: ctx.model, messages: buildVisionMessages(ctx), temperature: 0.3, max_tokens: 700, stream: false }),
+      }, 150000);
       const text = cleanTaskReply(data?.choices?.[0]?.message?.content);
       if (!isSafe(text, !!ctx.kidsMode)) return { ok: false, error: 'unsafe_or_empty' };
       return { ok: true, text };
