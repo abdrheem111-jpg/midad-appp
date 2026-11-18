@@ -166,3 +166,25 @@ test('new file, scrolling, weather and prayer times', () => {
   assert.equal(recognize('دور على الطقس اليوم في صحار').slots.query, 'الطقس اليوم في صحار');
   assert.equal(validateAction({ type: 'press_key', params: { key: 'new_file' } }), null);
 });
+
+test('slideshow control for the classroom: start, next, previous, end', () => {
+  const keys = ['ابدأ العرض', 'الشريحة الجاية', 'ارجع الشريحة اللي قبل', 'وقف العرض'].map((s) => recognize(s).slots.key);
+  assert.deepEqual(keys, ['slideshow', 'next_slide', 'prev_slide', 'end_show']);
+  for (const key of keys) assert.equal(validateAction({ type: 'press_key', params: { key } }), null, key);
+  assert.equal(recognize('التالي').intent, 'next_question'); // the quiz word is unchanged
+});
+
+test('how many students, a random number, a dice roll', () => {
+  const { brain, advance } = makeBrain();
+  assert.equal(brain.hear('كم طالب عندي').situation, 'pick_need_names');
+  brain.hear('اسامي الطلاب: احمد، مريم، فاطمة');
+  advance(3000);
+  assert.match(brain.hear('كم طالب عندي').say, /٣ طلاب/);
+  const r = recognize('اعطني رقم عشوائي من ١ الى ٣٠');
+  assert.deepEqual([r.intent, r.slots.min, r.slots.max], ['random_number', 1, 30]);
+  for (let i = 0; i < 20; i += 1) {
+    advance(3000);
+    const n = Number(brain.hear('ارمي نرد').say.replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).match(/\d+/)[0]);
+    assert.ok(n >= 1 && n <= 6, String(n));
+  }
+});

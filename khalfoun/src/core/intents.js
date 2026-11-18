@@ -169,6 +169,8 @@ const GAME_CHASE = new Set(N(['طاردني', 'الحقني', 'امسك الما
 const GAME_HIDE = new Set(N(['غميضه', 'العب غميضه', 'نلعب غميضه', 'تخبا', 'اختبي', 'استغمايه', 'العب استغمايه', 'نلعب استغمايه', 'تخبى']));
 const PICK = new Set(N(['اختر طالب عشوائي', 'اختار طالب عشوائي', 'طالب عشوائي', 'اختار اسم', 'اختر اسم', 'اختار طالب عشوائيا', 'اختار طالب', 'اختر طالب', 'اختار طالبه', 'اختار واحد', 'اختار احد', 'منو يجاوب', 'مين يجاوب', 'منو الدور عليه', 'منو عليه الدور',
   'عطني اسم', 'اعطني اسم', 'قرعه', 'سو قرعه', 'اسحب اسم', 'اختار لي طالب', 'اختار لنا طالب', 'منو يطلع', 'منو يقرا']));
+const STUDENT_COUNT = new Set(N(['كم طالب عندي', 'كم عدد الطلاب', 'كم طالب في الصف', 'كم عدد طلابي', 'كم طالب', 'كم الطلاب', 'كم طالبه عندي', 'كم عدد الطالبات']));
+const DICE = new Set(N(['ارمي نرد', 'ارم نرد', 'ارمي النرد', 'ارم النرد', 'نرد', 'زهر', 'ارمي الزهر', 'دحرج النرد']));
 const BOARD = new Set(N(['النتائج', 'منو الاول', 'لوحه النقاط', 'النقاط', 'كم النقاط', 'ترتيب الطلاب', 'منو الفايز', 'الترتيب', 'ورني النقاط']));
 const RESET_POINTS = new Set(N(['صفر النقاط', 'امسح النقاط', 'ابدا النقاط من جديد', 'الغ النقاط', 'صفر الترتيب']));
 const TIMER_STOP = new Set(N(['وقف المؤقت', 'الغ المؤقت', 'الغي المؤقت', 'وقف العداد', 'الغ العداد', 'شيل المؤقت']));
@@ -577,6 +579,14 @@ function recognizeText(raw, fuzzy) {
   if (GAME_CHASE.has(text)) return out('game', { name: 'chase' }, 0.95);
   if (GAME_HIDE.has(text)) return out('game', { name: 'hide' }, 0.95);
   if (PICK.has(text)) return out('pick_student', {}, 0.95);
+  if (STUDENT_COUNT.has(text)) return out('students_count', {}, 0.95);
+  if (DICE.has(text)) return out('random_number', { min: 1, max: 6, dice: true }, 0.95);
+  const rnd = /^(?:اعطني |عطني |اختار |اختر |طلع |سو )?(?:لي )?(?:رقم|عدد) (?:عشوايي )?(?:من|بين) (\S+) (?:الى|الي|لين|الين|ل|و) ?(\S+)$/u.exec(text);
+  if (rnd) {
+    const a = parseNumberToken(rnd[1]);
+    const b = parseNumberToken(rnd[2]);
+    if (a !== null && b !== null && a !== b) return out('random_number', { min: Math.min(a, b), max: Math.max(a, b) }, 0.92);
+  }
   if (BOARD.has(text)) return out('points_board', {}, 0.9);
   if (RESET_POINTS.has(text)) return out('points_reset', {}, 0.9);
   if (TIMER_STOP.has(text)) return out('timer_stop', {}, 0.95);

@@ -41,6 +41,7 @@ const LINUX_PROCESSES = {
 const KEY_WIN = {
   enter: '{ENTER}', tab: '{TAB}', escape: '{ESC}', space: ' ', backspace: '{BACKSPACE}', delete_word: '^{BACKSPACE}',
   copy: '^c', paste: '^v', cut: '^x', select_all: '^a', save: '^s', print: '^p', undo: '^z', redo: '^y', find: '^f',
+  slideshow: '{F5}', next_slide: '{RIGHT}', prev_slide: '{LEFT}', end_show: '{ESC}',
   new_file: '^n', new_tab: '^t', close_tab: '^w', next_tab: '^{TAB}', prev_tab: '^+{TAB}', reopen_tab: '^+t',
   page_down: '{PGDN}', page_up: '{PGUP}', top: '^{HOME}', bottom: '^{END}',
   zoom_in: '^{ADD}', zoom_out: '^{SUBTRACT}', zoom_reset: '^0', switch_window: '%{TAB}', fullscreen: '{F11}', refresh: '{F5}',
@@ -50,7 +51,7 @@ const KEY_MAC = {
   delete_word: ['key code 51 using option down'], copy: ['keystroke "c" using command down'], paste: ['keystroke "v" using command down'],
   cut: ['keystroke "x" using command down'], select_all: ['keystroke "a" using command down'], save: ['keystroke "s" using command down'],
   print: ['keystroke "p" using command down'], undo: ['keystroke "z" using command down'], redo: ['keystroke "z" using {command down, shift down}'],
-  find: ['keystroke "f" using command down'], new_file: ['keystroke "n" using command down'], new_tab: ['keystroke "t" using command down'], close_tab: ['keystroke "w" using command down'],
+  find: ['keystroke "f" using command down'], new_file: ['keystroke "n" using command down'], slideshow: ['keystroke return using {command down, shift down}'], next_slide: ['key code 124'], prev_slide: ['key code 123'], end_show: ['key code 53'], new_tab: ['keystroke "t" using command down'], close_tab: ['keystroke "w" using command down'],
   next_tab: ['keystroke "]" using {command down, shift down}'], prev_tab: ['keystroke "[" using {command down, shift down}'],
   reopen_tab: ['keystroke "t" using {command down, shift down}'], page_down: ['key code 121'], page_up: ['key code 116'],
   top: ['key code 126 using command down'], bottom: ['key code 125 using command down'], zoom_in: ['keystroke "=" using command down'],
@@ -60,6 +61,7 @@ const KEY_MAC = {
 const KEY_LINUX = {
   enter: 'Return', tab: 'Tab', escape: 'Escape', space: 'space', backspace: 'BackSpace', delete_word: 'ctrl+BackSpace', copy: 'ctrl+c',
   paste: 'ctrl+v', cut: 'ctrl+x', select_all: 'ctrl+a', save: 'ctrl+s', print: 'ctrl+p', undo: 'ctrl+z', redo: 'ctrl+y', find: 'ctrl+f',
+  slideshow: 'F5', next_slide: 'Right', prev_slide: 'Left', end_show: 'Escape',
   new_file: 'ctrl+n', new_tab: 'ctrl+t', close_tab: 'ctrl+w', next_tab: 'ctrl+Tab', prev_tab: 'ctrl+shift+Tab', reopen_tab: 'ctrl+shift+t',
   page_down: 'Next', page_up: 'Prior', top: 'ctrl+Home', bottom: 'ctrl+End', zoom_in: 'ctrl+plus', zoom_out: 'ctrl+minus',
   zoom_reset: 'ctrl+0', switch_window: 'alt+Tab', show_desktop: 'super+d', fullscreen: 'F11', refresh: 'F5',

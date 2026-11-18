@@ -64,6 +64,7 @@ export const COUNTED = {
   group: ['مجموعة وحدة', 'مجموعتين', 'مجموعات', 'مجموعة'],
   sentence: ['جملة وحدة', 'جملتين', 'جمل', 'جملة'],
   reminder: ['تذكير واحد', 'تذكيرين', 'تذكيرات', 'تذكير'],
+  student: ['طالب واحد', 'طالبين', 'طلاب', 'طالب'],
 };
 
 export class Brain {
@@ -771,6 +772,18 @@ export class Brain {
         return this.reply(s.name === 'hide' ? 'game_hide_start' : 'game_chase_start', { behavior: `game:${s.name}` });
       case 'open_download':
         return this.plan({ type: 'open_download', params: { name: s.name } }, { situation: 'open_ok', sayOn: 'start', vars: { app: s.name }, summary: `فتح ${s.name}` }, now);
+      case 'students_count': {
+        const n = this.room().students.length;
+        if (!n) { this.emotions.feel('curious', now); return this.reply('pick_need_names'); }
+        return this.reply('students_count', { vars: { count: countPhrase(n, COUNTED.student) } });
+      }
+      case 'random_number': {
+        const span = Math.min(10000, s.max - s.min);
+        const n = s.min + Math.floor(this.rng() * (span + 1));
+        this.context.lastAnswer = { text: String(n), at: now };
+        this.emotions.feel('celebrate', now);
+        return this.reply(s.dice ? 'dice_result' : 'random_result', { vars: { number: toArabicDigits(n), from: toArabicDigits(s.min), to: toArabicDigits(s.min + span) }, behavior: 'drumroll' });
+      }
       case 'pick_student': {
         const room = this.room();
         const pick = room.pick(this.rng);
