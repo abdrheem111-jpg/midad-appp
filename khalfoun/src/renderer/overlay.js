@@ -13,6 +13,7 @@ import { findWakeWord } from '../core/wake.js';
 import { recognize } from '../core/intents.js';
 import { toArabicDigits } from '../core/arabic.js';
 import { DesktopWatcher } from '../core/desktop.js';
+import { VoiceOut } from './voice-out.js';
 import { getBridge } from './bridge.js';
 import { SoundPlayer, ANIMATION_SOUND } from './sounds.js';
 
@@ -72,7 +73,7 @@ function showBubble(text, mood, long = false) {
   reveal();
   typeTimer = setInterval(reveal, 30);
   setTimeout(() => { if (els.bubbleText.textContent !== full && !els.bubble.hidden && els.bubble.getAttribute('aria-label') === full) { clearInterval(typeTimer); els.bubbleText.textContent = full; } }, chars.length * 15 + 400);
-  sounds.babble(full, mood);
+  if (!voiceOut.enabled) sounds.babble(full, mood);
   // Long answers (summaries, questions) stay up longer; a click on the bubble closes it.
   const ms = Math.min(long ? 60000 : 10000, 2200 + chars.length * 65);
   bubbleUntil = performance.now() + ms;
@@ -103,7 +104,10 @@ function handle(reply) {
   if (recentSituations.length > 20) recentSituations.shift();
   if (reply.emotion) character.setEmotion(reply.emotion);
   if (reply.costume !== undefined) character.setCostume(reply.costume);
-  if (reply.say) showBubble(reply.say, reply.emotion?.emotion, reply.long);
+  if (reply.say) {
+    showBubble(reply.say, reply.emotion?.emotion, reply.long);
+    if (voiceOut.enabled && !recorder.active) voiceOut.speak(reply.say);
+  }
   const anim = reply.animation || EMOTION_ANIMATION[reply.emotion?.emotion];
   if (anim && anim !== 'sleep') animator.play(anim);
   if (reply.situation === 'sounds_on' || reply.situation === 'sounds_off') sounds.setEnabled(brain.memory.data.sounds !== false);
@@ -131,6 +135,12 @@ function handle(reply) {
     case 'look_window': lookAtWindow(reply.windowRect || lastNoticed?.rect); break;
     case 'game:chase': startChase(); break;
     case 'game:hide': startHide(); break;
+    case 'speak:on':
+      voiceOut.setEnabled(true);
+      if (!voiceOut.available) { voiceOut.setEnabled(false); brain.memory.set({ speak: false }); setTimeout(() => handle(brain.reply('speak_missing')), 1800); }
+      else voiceOut.speak(reply.say);
+      break;
+    case 'speak:off': voiceOut.setEnabled(false); break;
     case 'drumroll': sounds.effect('giggle'); setTimeout(() => sounds.effect('yay'), 500); break;
     case 'star': sounds.effect('sparkle'); break;
     case 'timer:stop': stopTimer(); break;
@@ -148,6 +158,13 @@ function handle(reply) {
   if (reply.more) setTimeout(() => handle(brain.continueQueue()), 1600);
 }
 
+// ------------------------------------------------------- speaking voice
+
+const voiceOut = new VoiceOut();
+// While he speaks, the always-on listener pauses so he does not hear himself.
+voiceOut.onStart = () => { if (wake.active) wake.pause(); };
+voiceOut.onEnd = () => { if (wake.active) wake.resume(); };
+
 // ------------------------------------------------- living Khalfoun: desktop
 
 const desktop = new DesktopWatcher();
@@ -158,6 +175,7 @@ function noticeWindows(list) {
   const events = desktop.update(list, Date.now());
   for (const ev of events) {
     if (panelsOpen() || recorder.active || game) continue;
+    if (ev.type === 'opened' && Date.now() - ownOpenAt < 8000) continue;
     lastNoticed = ev;
     handle(brain.event(ev.type === 'opened' ? 'window_opened' : 'window_closed', { kind: ev.kind, title: ev.title }));
   }
@@ -325,7 +343,10 @@ async function runLook(look) {
   handle(brain.taskReply(look.mode, res));
 }
 
+let ownOpenAt = 0; // when Khalfoun himself last opened something (no remark about that window)
+
 async function runAction(action) {
+  if (/^open_|^search$|^open_download$/.test(action.type)) ownOpenAt = Date.now();
   let result;
   try {
     result = await bridge.runAction(action);
@@ -637,6 +658,7 @@ function openSettings(focus = null) {
   $('st-chat').disabled = !chatInfo.available;
   $('st-windows').checked = d.walkOnWindows !== false;
   $('st-sounds').checked = d.sounds !== false;
+  $('st-speak').checked = !!d.speak;
   $('st-listen').disabled = !voiceAvailable;
   refreshSetup().then(() => { if (focus === 'setup') $('su-title').scrollIntoView({ block: 'start', behavior: 'smooth' }); });
   renderLog();
@@ -834,6 +856,10 @@ $('st-sounds').addEventListener('change', () => {
   sounds.setEnabled($('st-sounds').checked);
   if ($('st-sounds').checked) sounds.effect('ding');
 });
+$('st-speak').addEventListener('change', () => {
+  handle(brain.hear($('st-speak').checked ? 'تكلم' : 'لا تتكلم'));
+  $('st-speak').checked = !!brain.memory.data.speak;
+});
 $('st-windows').addEventListener('change', () => {
   brain.memory.set({ walkOnWindows: $('st-windows').checked });
   updateWindowWatch();
@@ -954,6 +980,7 @@ async function start() {
     },
   });
 
+  voiceOut.setEnabled(!!brain.memory.data.speak);
   brain.setChatAvailable(chatOn());
   brain.setVisionAvailable(Boolean(chatInfo.vision) && chatOn());
   bridge.onEvent((ev) => {
@@ -1011,7 +1038,7 @@ async function start() {
   else handle(brain.start());
 
   // Hooks for automated UI tests and debugging.
-  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop };
+  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut };
   document.documentElement.dataset.ready = '1';
 }
 

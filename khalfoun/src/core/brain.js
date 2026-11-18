@@ -14,6 +14,7 @@ import { occasionFor } from './occasions.js';
 import { calculate } from './calc.js';
 import { KEYS } from './keys.js';
 import { Classroom } from './classroom.js';
+import { classesOn, nextClass, dueClasses, classTime, DAY_NAMES } from './schedule.js';
 
 const FEELING_LABEL = { tired: 'تعبان', sad: 'متضايق', sick: 'مريض', stressed: 'مضغوط' };
 const HOUR = 60 * 60 * 1000;
@@ -563,6 +564,18 @@ export class Brain {
   /** Called every few seconds by the shell; may return an idle remark. */
   tick() {
     const now = this.clock();
+    const due = dueClasses(this.memory.data.schedule, now, 5);
+    if (due.length) {
+      const c = due[0];
+      const today = new Date(now).toDateString();
+      this.memory.set({ schedule: (this.memory.data.schedule || []).map((x) => (x.id === c.id ? { ...x, notified: today } : x)) });
+      const minutes = Math.max(0, c.hour * 60 + c.minute - (new Date(now).getHours() * 60 + new Date(now).getMinutes()));
+      this.emotions.feel('greet', now);
+      const rep = this.reply(minutes ? 'class_soon' : 'class_now', { vars: { subject: c.subject, duration: durationPhrase(Math.max(1, minutes)) }, behavior: 'come' });
+      // Run the class's command (e.g. open the slides) right after, through the usual permission check.
+      if (c.command && !this.pending) { this.queue = [c.command]; return { ...rep, more: true }; }
+      return rep;
+    }
     if (this.dictation && now - this.dictation.lastAt > 10 * 60000) {
       if (this.dictation.target === 'window') { this.dictation = null; return this.reply('dictation_timeout', { behavior: 'dictation_off' }); }
     }
@@ -676,6 +689,54 @@ export class Brain {
         this.saveRoom(room);
         return this.reply(gone ? 'student_removed' : 'student_unknown', { vars: { student: gone || s.name } });
       }
+      // ---- the teacher's timetable
+      case 'schedule_add': {
+        const schedule = [...(this.memory.data.schedule || [])];
+        const entry = { id: `c${Date.now().toString(36)}${schedule.length}`, days: s.days, hour: s.hour, minute: s.minute, subject: s.subject, command: s.command || null };
+        schedule.push(entry);
+        this.memory.set({ schedule: schedule.slice(-60) });
+        this.emotions.feel('celebrate', now);
+        return this.reply(entry.command ? 'schedule_added_cmd' : 'schedule_added', { vars: { subject: entry.subject, days: s.days.map((d) => DAY_NAMES[d]).join(' و'), time: classTime(entry), command: entry.command || '' } });
+      }
+      case 'schedule_today': {
+        const today = classesOn(this.memory.data.schedule, new Date(now));
+        if (!today.length) return this.reply('schedule_today_none');
+        const list = today.map((c) => `${classTime(c)}: ${c.subject}`).join('\n');
+        return { ...this.reply('schedule_today', { vars: { count: toArabicDigits(today.length) } }), say: `${this.reply('schedule_today', { vars: { count: toArabicDigits(today.length) } }).say}\n${list}`, long: true };
+      }
+      case 'schedule_next': {
+        const next = nextClass(this.memory.data.schedule, now);
+        if (!next) return this.reply('schedule_empty');
+        const when = next.dayOffset === 0 ? (next.minutes < 60 ? `بعد ${durationPhrase(next.minutes)}` : `اليوم ${classTime(next.entry)}`)
+          : next.dayOffset === 1 ? `بكرة ${classTime(next.entry)}` : `يوم ${DAY_NAMES[new Date(next.start).getDay()]} ${classTime(next.entry)}`;
+        return this.reply('schedule_next', { vars: { subject: next.entry.subject, when } });
+      }
+      case 'schedule_show': {
+        const schedule = this.memory.data.schedule || [];
+        if (!schedule.length) return this.reply('schedule_empty');
+        const lines = [];
+        for (let d = 0; d < 7; d += 1) {
+          const day = schedule.filter((c) => c.days.includes(d)).sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
+          if (day.length) lines.push(`${DAY_NAMES[d]}: ${day.map((c) => `${c.subject} (${classTime(c)})`).join('، ')}`);
+        }
+        this.context.lastAnswer = { text: lines.join('\n'), at: now };
+        return { ...this.reply('schedule_show'), say: `${this.reply('schedule_show').say}\n${lines.join('\n')}`, long: true };
+      }
+      case 'schedule_clear':
+        this.memory.set({ schedule: [] });
+        return this.reply('schedule_cleared');
+      case 'schedule_remove': {
+        const schedule = this.memory.data.schedule || [];
+        const key = normalize(s.subject);
+        const keep = schedule.filter((c) => !normalize(c.subject).includes(key) && !key.includes(normalize(c.subject)));
+        if (keep.length === schedule.length) return this.reply('schedule_not_found', { vars: { subject: s.subject } });
+        this.memory.set({ schedule: keep });
+        return this.reply('schedule_removed', { vars: { subject: s.subject } });
+      }
+      case 'speak':
+        this.memory.set({ speak: !!s.on });
+        this.emotions.feel(s.on ? 'joke' : 'focus_mode', now);
+        return this.reply(s.on ? 'speak_on' : 'speak_off', { behavior: s.on ? 'speak:on' : 'speak:off' });
       case 'game':
         this.focus = false;
         this.emotions.feel('joke', now);

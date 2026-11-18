@@ -122,7 +122,11 @@ export function parseClock(text) {
   else if (/ (الظهر|ظهر|الظهريه) /.test(t)) period = 'noon';
   else if (/ (العصر|عصر|المغرب|مغرب|المسا|المساء|مساء|مسا|م|العشا|العشاء) /.test(t)) period = 'pm';
   else if (/ (الليل|بالليل|ليل) /.test(t)) period = 'night';
-  return { hour, minute, period, dayOffset };
+  // «يوم الثلاثاء»: the next such weekday
+  const WD = { الاحد: 0, الاثنين: 1, الاتنين: 1, الثلاثاء: 2, الثلاثا: 2, الاربعاء: 3, الاربعا: 3, الخميس: 4, الجمعه: 5, السبت: 6 };
+  const wdWord = t.trim().split(' ').find((w) => w in WD);
+  const weekday = wdWord !== undefined ? WD[wdWord] : null;
+  return weekday === null ? { hour, minute, period, dayOffset } : { hour, minute, period, dayOffset, weekday };
 }
 
 /**
@@ -134,6 +138,20 @@ export function parseClock(text) {
  */
 export function clockToTime(c, now) {
   const base = new Date(now);
+  if (Number.isInteger(c.weekday)) {
+    // The coming «الثلاثاء»; today only if that time is still ahead.
+    let h = c.hour;
+    if (h <= 12) {
+      if (c.period === 'am') h = h === 12 ? 0 : h;
+      else if (c.period === 'pm' || c.period === 'noon') h = h === 12 ? 12 : h + 12;
+      else if (c.period === 'night') h = h === 12 ? 0 : h <= 4 ? h : h + 12;
+      else h = h >= 7 && h <= 11 ? h : h === 12 ? 12 : h + 12;
+    }
+    let add = (c.weekday - base.getDay() + 7) % 7;
+    const at = (n) => new Date(base.getFullYear(), base.getMonth(), base.getDate() + n, h, c.minute, 0, 0).getTime();
+    if (at(add) <= now + 30000) add += 7;
+    return at(add);
+  }
   const at = (h, extraDays = 0) => {
     const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + c.dayOffset + extraDays, h, c.minute, 0, 0);
     return d.getTime();

@@ -6,6 +6,7 @@ import { normalize, hasPhrase, parseMinutes, parseClock, parseNumberToken } from
 import { levenshtein } from './wake.js';
 import { calculate } from './calc.js';
 import { keyFor } from './keys.js';
+import { parseClassEntry } from './schedule.js';
 
 const N = (list) => list.map(normalize).sort((a, b) => b.length - a.length);
 
@@ -154,6 +155,12 @@ function parseMinutesNumber(token) {
 }
 
 // ------------------------------------------------------------- classroom
+const SCHEDULE_TODAY = new Set(N(['شو عندي اليوم', 'ايش عندي اليوم', 'وش عندي اليوم', 'جدول اليوم', 'حصص اليوم', 'حصصي اليوم', 'كم حصه عندي اليوم', 'شو حصصي اليوم']));
+const SCHEDULE_NEXT = new Set(N(['الحصه الجايه', 'شو الحصه الجايه', 'متى الحصه الجايه', 'الحصه اللي بعدها', 'ايش الحصه الجايه', 'الدرس الجاي', 'متى حصتي الجايه']));
+const SCHEDULE_SHOW = new Set(N(['جدولي', 'ورني الجدول', 'الجدول', 'جدول الحصص', 'ورني جدولي', 'شو جدولي']));
+const SCHEDULE_CLEAR = new Set(N(['امسح الجدول', 'الغ الجدول', 'صفر الجدول', 'امسح جدولي']));
+const SPEAK_ON = new Set(N(['تكلم', 'تكلم بصوت', 'تكلم بصوتك', 'اتكلم', 'خلك تتكلم', 'شغل الكلام', 'قول بصوتك', 'تكلم معي بصوت', 'ابغاك تتكلم', 'اقرا بصوتك', 'رد علي بصوت', 'كلمني بصوت']));
+const SPEAK_OFF = new Set(N(['لا تتكلم', 'بدون كلام', 'اسكت عن الكلام', 'وقف الكلام', 'طفي الكلام', 'بلا كلام', 'لا تتكلم بصوت', 'اكتب بس لا تتكلم', 'خلك ساكت']));
 const GAME_CHASE = new Set(N(['طاردني', 'الحقني', 'امسك الماوس', 'لعبه المطارده', 'العب مطارده', 'امسكني', 'نلعب مطارده', 'الحق الماوس', 'العب ويا الماوس']));
 const GAME_HIDE = new Set(N(['غميضه', 'العب غميضه', 'نلعب غميضه', 'تخبا', 'اختبي', 'استغمايه', 'العب استغمايه', 'نلعب استغمايه', 'تخبى']));
 const PICK = new Set(N(['اختار طالب', 'اختر طالب', 'اختار طالبه', 'اختار واحد', 'اختار احد', 'منو يجاوب', 'مين يجاوب', 'منو الدور عليه', 'منو عليه الدور',
@@ -450,7 +457,8 @@ export function rawRestAfter(raw, verbs, skip = []) {
 
 const DURATION_WORDS = new Set(['بعد', 'ربع', 'نص', 'نصف', 'ساعه', 'ساعات', 'ساعتين', 'الا', 'دقيقه', 'دقايق', 'دقائق', 'دقيقتين', 'ثانيه', 'ثواني',
   'الساعه', 'ونص', 'وربع', 'وثلث', 'ثلث', 'الصبح', 'الصباح', 'صباحا', 'الفجر', 'الظهر', 'العصر', 'المغرب', 'المسا', 'المساء', 'مساء', 'الليل', 'بالليل',
-  'العشا', 'العشاء', 'بكره', 'باكر', 'بكرا', 'غدا', 'اليوم', 'ص', 'م']);
+  'العشا', 'العشاء', 'بكره', 'باكر', 'بكرا', 'غدا', 'اليوم', 'ص', 'م', 'يوم', 'الاحد', 'الاثنين', 'الاتنين', 'الثلاثاء', 'الثلاثا', 'الاربعاء', 'الاربعا',
+  'الخميس', 'الجمعه', 'السبت']);
 
 function reminderNote(raw, verbs, repeat = false) {
   const rest = rawRestAfter(raw, verbs) || '';
@@ -525,6 +533,18 @@ function recognizeText(raw, fuzzy) {
   if (addM) return out('student_add', { name: rawTail(raw, 2) || addM[1] }, 0.9);
   const delM = /^(?:احذف|شيل|امسح) (?:الطالب|الطالبه|طالب|طالبه) (.+)$/u.exec(text);
   if (delM) return out('student_remove', { name: rawTail(raw, 2) || delM[1] }, 0.9);
+  if (SCHEDULE_TODAY.has(text)) return out('schedule_today', {}, 0.95);
+  if (SCHEDULE_NEXT.has(text)) return out('schedule_next', {}, 0.95);
+  if (SCHEDULE_SHOW.has(text)) return out('schedule_show', {}, 0.95);
+  if (SCHEDULE_CLEAR.has(text)) return out('schedule_clear', {}, 0.95);
+  const dropClass = /^(?:الغ|الغي|امسح|احذف|شيل) (?:حصه|حصة|درس) (.+)$/u.exec(text);
+  if (dropClass) return out('schedule_remove', { subject: rawTail(raw, 2) || dropClass[1] }, 0.9);
+  if (!startsWithPhrase(text, L.remind)) {
+    const entry = parseClassEntry(raw);
+    if (entry) return out('schedule_add', entry, 0.9);
+  }
+  if (SPEAK_ON.has(text)) return out('speak', { on: true }, 0.95);
+  if (SPEAK_OFF.has(text)) return out('speak', { on: false }, 0.95);
   if (GAME_CHASE.has(text)) return out('game', { name: 'chase' }, 0.95);
   if (GAME_HIDE.has(text)) return out('game', { name: 'hide' }, 0.95);
   if (PICK.has(text)) return out('pick_student', {}, 0.95);
