@@ -65,6 +65,23 @@ export async function findWhisper({ dirs, env = process.env }) {
   return { available: Boolean(bin && model), bin, model, wakeModel: model ? wakeModel : null };
 }
 
+/**
+ * Sentences whisper is known to invent from silence or background noise in Arabic
+ * (subtitle credits and channel outros it learned from videos). Heard alone, they
+ * are noise, not something the person said.
+ */
+const HALLUCINATIONS = [
+  /اشتركو?ا? (?:في|ب)\s*(?:ال)?قنا[ةه]/u, /لا تنسوا? (?:ال)?اشتراك/u, /نانسي\s*قنقر/u, /ترجم[ةه]\s*(?:نانسي|و?تدقيق)/u,
+  /^شكر[اًا]* (?:لكم )?(?:على|لل)\s*(?:ال)?مشاهد[ةه]/u, /^(?:ال)?مترجم\s*[:：]/u, /amara\.org/i, /subtitles? by/i,
+  /^(?:موسيقى|موسيقي)[\s.!،]*$/u, /^[\s.!،؟?…-]*$/u,
+];
+
+/** True when the whole transcript is one of whisper's made-up noise sentences. */
+export function isHallucination(text) {
+  const t = String(text || '').trim();
+  return HALLUCINATIONS.some((re) => re.test(t));
+}
+
 /** Removes whisper's bracketed noise tags like [موسيقى] or (applause). */
 export function cleanTranscript(text) {
   return String(text || '')
@@ -99,7 +116,7 @@ export async function transcribe(whisper, wav, opts = {}) {
       });
     });
     const clean = cleanTranscript(text);
-    return { ok: true, text: ECHO.test(clean) ? '' : clean };
+    return { ok: true, text: ECHO.test(clean) || isHallucination(clean) ? '' : clean };
   } catch (err) {
     return { ok: false, error: `stt_failed: ${err?.message || err}` };
   } finally {

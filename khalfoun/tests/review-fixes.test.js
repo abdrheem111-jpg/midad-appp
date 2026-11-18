@@ -120,3 +120,49 @@ test('stars and counts agree with the number', () => {
   assert.equal(countPhrase(5, COUNTED.group), '٥ مجموعات');
   assert.equal(countPhrase(25, COUNTED.name), '٢٥ اسم');
 });
+
+test('whisper noise sentences are dropped, real speech is kept', async () => {
+  const { isHallucination } = await import('../src/main/stt.js');
+  for (const s of ['اشتركوا في القناة', 'ترجمة نانسي قنقر', 'شكرا للمشاهدة', 'موسيقى', '...']) assert.equal(isHallucination(s), true, s);
+  for (const s of ['افتح الحاسبة', 'شكرا', 'شكرا يا خلفون', 'ذكرني بعد ساعة']) assert.equal(isHallucination(s), false, s);
+});
+
+test('the wake word survives whisper writing «حلفون», and Latin spelling works', async () => {
+  const { findWakeWord } = await import('../src/core/wake.js');
+  assert.deepEqual(findWakeWord('يا حلفون افتح الحاسبة'), { found: true, rest: 'افتح الحاسبة' });
+  assert.equal(findWakeWord('Khalfoun').found, true);
+  assert.equal(findWakeWord('حلفوا بالله').found, false);
+  assert.equal(findWakeWord('تلفون').found, false);
+  assert.equal(recognize('يا حلفون افتح الحاسبة').slots.app, 'calculator');
+});
+
+test('National Day is 20-21 November (Royal Decree 15/2025)', async () => {
+  const { occasionFor } = await import('../src/core/occasions.js');
+  assert.equal(occasionFor(new Date(2026, 10, 20, 10))?.id, 'national_day');
+  assert.equal(occasionFor(new Date(2026, 10, 21, 10))?.id, 'national_day');
+  assert.equal(occasionFor(new Date(2026, 10, 18, 10)), null);
+});
+
+test('«افتح الايميل» opens the mail program instead of asking «تقصد إكسل؟»', () => {
+  const { brain } = makeBrain();
+  const r = brain.hear('افتح الايميل');
+  assert.equal(r.action?.type, 'open_installed');
+  assert.equal(r.action.params.name, 'الايميل');
+});
+
+test('«اكتب التاريخ» types the date, «اكتب اسمي» types the name', () => {
+  const { brain } = makeBrain();
+  const d = brain.hear('اكتب التاريخ');
+  assert.match(d.action.params.text, /٢٠٢٦/);
+  assert.equal(brain.hear('اكتب اسمي').action.params.text, 'عبدالرحيم');
+  assert.equal(brain.hear('اكتب السلام عليكم').action.params.text, 'السلام عليكم');
+});
+
+test('new file, scrolling, weather and prayer times', () => {
+  assert.deepEqual([recognize('افتح ملف جديد').intent, recognize('افتح ملف جديد').slots.key], ['key', 'new_file']);
+  assert.equal(recognize('انزل تحت في الصفحة').slots.key, 'page_down');
+  assert.deepEqual(recognize('شو الجو اليوم').slots, { query: 'الطقس اليوم', engine: 'google' });
+  assert.equal(recognize('متى صلاة الظهر').slots.query, 'مواقيت الصلاة اليوم');
+  assert.equal(recognize('دور على الطقس اليوم في صحار').slots.query, 'الطقس اليوم في صحار');
+  assert.equal(validateAction({ type: 'press_key', params: { key: 'new_file' } }), null);
+});

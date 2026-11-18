@@ -1,5 +1,5 @@
 // Knows the days that matter in Oman so Khalfoun can greet, joke and dress
-// for them: National Day (18 November), the new Gregorian year, Ramadan, the
+// for them: National Day (20-21 November, Royal Decree 15/2025; it was 18 November before 2025), the new Gregorian year, Ramadan, the
 // two Eids, the Day of Arafah, the Hijri new year and Fridays. Hijri dates use
 // the Umm al-Qura calendar built into the JavaScript runtime; the actual
 // sighting in Oman can differ by a day.
@@ -37,7 +37,7 @@ export function occasionFor(date) {
   if (h.month === 12 && h.day >= 10 && h.day <= 13) return make('eid_adha', { day: h.day - 9 });
   if (h.month === 12 && h.day === 9) return make('arafah');
   if (h.month === 9) return make('ramadan', { day: h.day });
-  if (m === 11 && (d === 18 || d === 19)) return make('national_day');
+  if (m === 11 && (d === 20 || d === 21)) return make('national_day');
   if (h.month === 1 && h.day === 1) return make('hijri_new_year');
   if (m === 1 && d === 1) return make('new_year');
   if (date.getDay() === 5) return make('friday');

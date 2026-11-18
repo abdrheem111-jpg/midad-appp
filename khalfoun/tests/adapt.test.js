@@ -146,28 +146,29 @@ test('no follow-up too soon, and good news is celebrated with a dance', () => {
 
 test('Omani occasions on known dates', () => {
   const on = (s) => occasionFor(new Date(`${s}T10:00:00`))?.id ?? null;
-  assert.equal(on('2026-11-18'), 'national_day');
-  assert.equal(on('2026-11-19'), 'national_day');
+  assert.equal(on('2026-11-20'), 'national_day'); // Royal Decree 15/2025: 20 and 21 November
+  assert.equal(on('2026-11-21'), 'national_day');
+  assert.equal(on('2026-11-18'), null); // the old date is an ordinary day now
   assert.equal(on('2026-03-20'), 'eid_fitr'); // 1 Shawwal 1447
   assert.equal(on('2026-05-26'), 'arafah');
   assert.equal(on('2026-05-27'), 'eid_adha'); // 10 Dhu al-Hijjah 1447
   assert.equal(on('2026-03-01'), 'ramadan');
-  assert.equal(on('2026-11-20'), 'friday');
+  assert.equal(on('2026-11-27'), 'friday');
   assert.equal(on('2026-11-17'), null);
   assert.deepEqual(hijriDate(new Date('2026-03-20T10:00:00')), { day: 1, month: 10, year: 1447 });
 });
 
 test('an occasion greeting comes first; the follow-up waits for the next visit', () => {
-  const { brain, advance } = makeBrain();
+  const { brain, advance } = makeBrain({}, new Date(2026, 10, 19, 9, 0, 0).getTime());
   brain.hear('انا مريض');
-  advance(20 * HOUR); // 18 November: National Day
+  advance(20 * HOUR); // 20 November: National Day
   assert.equal(brain.start().situation, 'occasion_national_day');
   advance(HOUR);
   assert.equal(brain.start().situation, 'feel_followup');
 });
 
 test('on National Day he greets for it once, with the flag', () => {
-  const { brain, advance } = makeBrain({}, new Date(2026, 10, 18, 8, 0, 0).getTime());
+  const { brain, advance } = makeBrain({}, new Date(2026, 10, 20, 8, 0, 0).getTime());
   const r = brain.start();
   assert.equal(r.situation, 'occasion_national_day');
   assert.equal(r.costume, 'flag');

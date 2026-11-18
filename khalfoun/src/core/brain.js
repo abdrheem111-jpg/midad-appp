@@ -13,6 +13,7 @@ import { Quiz, parseArabicNumber } from './quiz.js';
 import { occasionFor } from './occasions.js';
 import { calculate } from './calc.js';
 import { KEYS } from './keys.js';
+import { isKnownProgramName } from './app-match.js';
 import { Classroom } from './classroom.js';
 import { classesOn, nextClass, dueClasses, classTime, DAY_NAMES } from './schedule.js';
 
@@ -902,7 +903,8 @@ export class Brain {
         return this.reply('learn_saved', { vars: { phrase: s.phrase, command: s.command } });
       }
       case 'open_unknown': {
-        const near = s.name ? nearestApp(s.name) : null;
+        // «افتح الايميل» is the Mail program, not «تقصد إكسل؟».
+        const near = s.name && !isKnownProgramName(s.name) ? nearestApp(s.name) : null;
         if (near) {
           // «افتح الحاسوب» → «تقصد الحاسبة؟»
           this.pending = { kind: 'suggest', raw, intent: { intent: 'open', slots: { app: near.id, kind: near.kind, url: near.url || null }, confidence: 0.8, text: raw } };
@@ -927,6 +929,9 @@ export class Brain {
         return this.plan({ type: 'screenshot', params: {} }, { situation: 'screenshot_ok', sayOn: 'result', summary: 'لقطة شاشة' }, now);
       case 'type_text': {
         if (!s.text) { this.emotions.feel('not_understood', now); return this.reply('type_empty'); }
+        // «اكتب التاريخ» / «اكتب الوقت» / «اكتب اسمي»: the value, not the word.
+        const filled = this.typedValue(s.text, now);
+        if (filled) s.text = filled;
         const preview = s.text.length > 40 ? `${s.text.slice(0, 40)}…` : s.text;
         return this.plan({ type: 'type_text', params: { text: s.text } },
           { situation: 'type_ok', sayOn: 'result', confirmWhat: `أكتب «${preview}» حيث المؤشر`, summary: `كتابة: ${preview}` }, now);
@@ -1262,6 +1267,16 @@ export class Brain {
     if (days === 1) return `بكرة الساعة ${t}`;
     if (days === 2) return `بعد بكرة الساعة ${t}`;
     return `يوم ${this.formatDay(at)} الساعة ${t}`;
+  }
+
+  /** What «اكتب التاريخ», «اكتب الساعة» or «اكتب اسمي» should type, or null for ordinary text. */
+  typedValue(text, now) {
+    const t = normalize(text);
+    if (['التاريخ', 'تاريخ اليوم', 'التاريخ اليوم', 'تاريخ اليوم الحين'].includes(t)) return this.formatDate(now);
+    if (['اليوم والتاريخ', 'اليوم و التاريخ', 'اليوم مع التاريخ'].includes(t)) return `${this.formatDay(now)} ${this.formatDate(now)}`;
+    if (['الوقت', 'الساعه', 'الوقت الحين', 'الساعه الحين'].includes(t)) return this.formatTime(now);
+    if (['اسمي', 'اسمي الكامل'].includes(t) && this.memory.data.name) return this.memory.data.name;
+    return null;
   }
 
   formatDate(now) {

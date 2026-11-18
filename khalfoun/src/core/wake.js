@@ -28,11 +28,15 @@ export function levenshtein(a, b) {
 // The consonants خ-ل-ف must be there: this keeps «خلفان» and «خلفوه» (common
 // mishearings) but rejects look-alikes such as «تلفون» (phone) or «كلفون».
 const close = (t) => t.length >= 4 && t.length <= 6 && (t.startsWith('خلف') || t.startsWith('خالف')) && levenshtein(t, WAKE) <= 1;
+// Whisper often writes خ as ح («حلفون»), and some people type the name in Latin letters.
+const closeH = (t) => t.length === 5 && t.startsWith('حلفو') && levenshtein(t, WAKE) <= 1;
+const LATIN = /^(?:ya)?(?:kh|k|h)al+f(?:o|ou|oo|u)+n$/;
 
 function isWake(token) {
-  if (close(token)) return true;
+  if (close(token) || closeH(token) || LATIN.test(token)) return true;
   for (const prefix of ['يا', 'و', 'ف']) {
-    if (token.startsWith(prefix) && close(token.slice(prefix.length))) return true;
+    const t = token.slice(prefix.length);
+    if (token.startsWith(prefix) && (close(t) || closeH(t))) return true;
   }
   return false;
 }

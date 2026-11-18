@@ -72,6 +72,12 @@ const EN_CLASS = {
 };
 
 /** Consonant skeleton of Arabic text («سبوتيفاي» → «SBTF»). */
+/** True when the name is one of the well-known programs above («الايميل», «التيمز»). */
+export function isKnownProgramName(spoken) {
+  const n = normalize(spoken);
+  return KNOWN_APP_WORDS.some(([ar]) => ar.includes(n));
+}
+
 export function arabicSkeleton(text) {
   return [...normalize(text).replace(/^ال/, '').replace(/\s+/g, '')].map((ch) => AR_CLASS[ch] ?? '').join('');
 }
