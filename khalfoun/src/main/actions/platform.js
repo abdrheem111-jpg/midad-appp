@@ -97,12 +97,17 @@ export function runCommand(cmd, args = [], opts = {}) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** PowerShell that brings a program (by process id) to the front before typing; empty when unknown. */
+function activate(pid) {
+  return Number.isInteger(pid) && pid > 0 ? `$null = $w.AppActivate(${pid}); Start-Sleep -Milliseconds 200; ` : '';
+}
+
 /**
  * @param {{platform?: string, launch?: typeof launchDetached, run?: typeof runCommand,
  *   shell: {openExternal: (u: string) => Promise<void>, openPath: (p: string) => Promise<string>},
  *   clipboard?: {readText: () => string, writeText: (t: string) => void},
  *   capture?: () => Promise<Buffer>, paths: Record<string, string>, home?: string,
- *   beforeType?: () => void, wait?: (ms: number) => Promise<void>}} deps
+ *   beforeType?: () => (number|null|void), wait?: (ms: number) => Promise<void>}} deps
  */
 export function createPlatform(deps) {
   const platform = deps.platform || process.platform;
@@ -252,10 +257,11 @@ export function createPlatform(deps) {
     if (!cb) return { ok: false, error: 'no_clipboard' };
     const previous = cb.readText();
     cb.writeText(text);
-    if (deps.beforeType) deps.beforeType(); // let the window the person was using get the focus back
+    // Give the focus back to the person's window; on Windows, bring that exact program forward.
+    const target = deps.beforeType ? deps.beforeType() : null;
     await wait(300);
     let r;
-    if (platform === 'win32') r = await powershell("$w = New-Object -ComObject WScript.Shell; $w.SendKeys('^v')");
+    if (platform === 'win32') r = await powershell(`$w = New-Object -ComObject WScript.Shell; ${activate(target)}$w.SendKeys('^v')`);
     else if (platform === 'darwin') r = await run('osascript', ['-e', 'tell application "System Events" to keystroke "v" using command down']);
     else r = await run('xdotool', ['key', '--clearmodifiers', 'ctrl+v']);
     await wait(500);
@@ -265,12 +271,12 @@ export function createPlatform(deps) {
 
   /** Presses one key or shortcut from the fixed list in the window the person was using. */
   async function pressKey(key) {
-    if (deps.beforeType) deps.beforeType(); // give the focus back to the person's window
+    const target = deps.beforeType ? deps.beforeType() : null; // give the focus back to the person's window
     await wait(250);
     let r;
     if (platform === 'win32') {
       if (key === 'show_desktop') r = await powershell('(New-Object -ComObject Shell.Application).ToggleDesktop()');
-      else if (KEY_WIN[key]) r = await powershell(`$w = New-Object -ComObject WScript.Shell; $w.SendKeys('${KEY_WIN[key]}')`);
+      else if (KEY_WIN[key]) r = await powershell(`$w = New-Object -ComObject WScript.Shell; ${activate(target)}$w.SendKeys('${KEY_WIN[key]}')`);
       else return { ok: false, error: 'bad_key' };
     } else if (platform === 'darwin') {
       const k = KEY_MAC[key];

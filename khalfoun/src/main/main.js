@@ -10,6 +10,7 @@ import {
   nativeImage, globalShortcut, dialog, Notification, session, net,
 } from 'electron';
 import { readFile, mkdtemp, writeFile, mkdir, stat } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import { join, extname, normalize, relative, sep } from 'node:path';
 import { tmpdir, cpus } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -230,18 +231,70 @@ async function writePdf(text, position, dirs, page = 1) {
 
 /** Hands keyboard focus back to the program the person was using before pasting. */
 let focusTimer = null;
+let returnPid = null; // the program that was in front when Khalfoun took the focus (Windows)
+
+/**
+ * Before typing or pressing keys: hands the focus back to the person's program.
+ * Returns that program's process id when Khalfoun had the focus, so the action
+ * can bring exactly that program forward (blur alone does not always do it).
+ */
 function releaseFocus() {
-  if (!win || !win.isFocused()) return;
+  if (!win || !win.isFocused()) return null;
   win.setFocusable(false);
   win.blur();
   clearTimeout(focusTimer);
   focusTimer = setTimeout(() => { if (win && !win.isDestroyed()) win.setFocusable(true); }, 1500);
+  return returnPid;
+}
+
+/**
+ * Process id of the program in front right now (Windows), or null. A small
+ * PowerShell helper stays running so the answer comes back in milliseconds.
+ */
+let fgHelper = null;
+function foregroundPid() {
+  if (process.platform !== 'win32') return Promise.resolve(null);
+  if (!fgHelper) {
+    const script = [
+      "Add-Type -Name F -Namespace K -MemberDefinition '[DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow(); [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);'",
+      'while ($null -ne ($line = [Console]::In.ReadLine())) { $p = 0; [void][K.F]::GetWindowThreadProcessId([K.F]::GetForegroundWindow(), [ref]$p); [Console]::Out.WriteLine($p); [Console]::Out.Flush() }',
+    ].join('; ');
+    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+    fgHelper = { child, waiting: [], buf: '' };
+    child.stdout.on('data', (d) => {
+      fgHelper.buf += d;
+      let nl;
+      while ((nl = fgHelper.buf.indexOf('\n')) >= 0) {
+        const pid = Number(fgHelper.buf.slice(0, nl).trim());
+        fgHelper.buf = fgHelper.buf.slice(nl + 1);
+        const next = fgHelper.waiting.shift();
+        if (next) next(Number.isInteger(pid) && pid > 0 ? pid : null);
+      }
+    });
+    const reset = () => { if (fgHelper) for (const w of fgHelper.waiting) w(null); fgHelper = null; };
+    child.on('exit', reset);
+    child.on('error', reset);
+  }
+  const helper = fgHelper;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { const k = helper.waiting.indexOf(done); if (k >= 0) helper.waiting.splice(k, 1); resolve(null); }, 1500);
+    function done(pid) { clearTimeout(timer); resolve(pid); }
+    helper.waiting.push(done);
+    try { helper.child.stdin.write('fg\n'); } catch { done(null); }
+  });
 }
 
 /** Brings Khalfoun's window forward for typing, even right after he gave the focus away. */
-function focusOverlay() {
+async function focusOverlay() {
   if (!win || win.isDestroyed()) return;
   clearTimeout(focusTimer);
+  if (!win.isFocused()) {
+    // Remember who had the focus, so typing later goes back to that program.
+    const pid = await foregroundPid();
+    const own = new Set([process.pid, ...app.getAppMetrics().map((m) => m.pid)]);
+    if (pid && !own.has(pid)) returnPid = pid;
+    diag.write('focus taken from program', pid ?? 'unknown');
+  }
   win.setFocusable(true);
   win.show();
   win.focus();
@@ -613,6 +666,7 @@ async function start() {
   if (!SMOKE) {
     buildTray();
     registerShortcuts();
+    foregroundPid().catch(() => {}); // warm up the helper so the first Ctrl+Shift+K is instant
   } else {
     win.webContents.once('did-finish-load', () => runSmokeTest(stores));
   }
@@ -632,6 +686,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
+    if (fgHelper) { try { fgHelper.child.kill(); } catch { /* gone */ } }
     if (watcher) watcher.stop();
     if (reminderScheduler) reminderScheduler.stop();
   });

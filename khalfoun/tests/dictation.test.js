@@ -164,3 +164,19 @@ test('motion: steps, edges, climbing onto a window and down, staying put', () =>
   m.turn();
   assert.equal(m.facing, -f);
 });
+
+test('typing and keys bring the person\'s program forward first when Khalfoun had the focus', async () => {
+  const calls = [];
+  const run = async (cmd, args) => { calls.push(args.join(' ')); return { ok: true, code: 0, stdout: '' }; };
+  const clipboard = { text: 'old', readText() { return this.text; }, writeText(t) { this.text = t; } };
+  let target = 4242;
+  const p = createPlatform({ platform: 'win32', run, wait: async () => {}, clipboard, beforeType: () => target, shell: { openExternal: async () => {}, openPath: async () => '' }, paths: {} });
+  await p.typeText('مرحبا');
+  assert.ok(calls.at(-1).includes('AppActivate(4242)') && calls.at(-1).includes("SendKeys('^v')"), calls.at(-1));
+  await p.pressKey('copy');
+  assert.ok(calls.at(-1).includes('AppActivate(4242)'));
+  target = null; // Khalfoun did not have the focus: leave the window in front alone
+  await p.pressKey('copy');
+  assert.ok(!calls.at(-1).includes('AppActivate'), calls.at(-1));
+  assert.equal(clipboard.text, 'old', 'clipboard restored');
+});
