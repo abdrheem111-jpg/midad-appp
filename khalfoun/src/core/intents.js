@@ -2,7 +2,7 @@
 // Input is whatever the speech recognizer (or keyboard) produced; output is an
 // intent name plus slots. The rules run offline and in well under a millisecond.
 
-import { normalize, hasPhrase, parseMinutes, parseClock } from './arabic.js';
+import { normalize, hasPhrase, parseMinutes, parseClock, parseNumberToken } from './arabic.js';
 import { levenshtein } from './wake.js';
 import { calculate } from './calc.js';
 import { keyFor } from './keys.js';
@@ -151,6 +151,45 @@ function parseMinutesNumber(token) {
   if (/^\d+$/.test(token)) return Number(token);
   const map = { واحد: 1, اثنين: 2, ثلاث: 3, ثلاثه: 3, اربع: 4, اربعه: 4, خمس: 5, خمسه: 5, ست: 6, سته: 6, سبع: 7, سبعه: 7, ثمان: 8, ثمانيه: 8, تسع: 9, تسعه: 9, عشر: 10, عشره: 10 };
   return map[token] || null;
+}
+
+// ------------------------------------------------------------- classroom
+const PICK = new Set(N(['اختار طالب', 'اختر طالب', 'اختار طالبه', 'اختار واحد', 'اختار احد', 'منو يجاوب', 'مين يجاوب', 'منو الدور عليه', 'منو عليه الدور',
+  'عطني اسم', 'اعطني اسم', 'قرعه', 'سو قرعه', 'اسحب اسم', 'اختار لي طالب', 'اختار لنا طالب', 'منو يطلع', 'منو يقرا']));
+const BOARD = new Set(N(['النتائج', 'منو الاول', 'لوحه النقاط', 'النقاط', 'كم النقاط', 'ترتيب الطلاب', 'منو الفايز', 'الترتيب', 'ورني النقاط']));
+const RESET_POINTS = new Set(N(['صفر النقاط', 'امسح النقاط', 'ابدا النقاط من جديد', 'الغ النقاط', 'صفر الترتيب']));
+const TIMER_STOP = new Set(N(['وقف المؤقت', 'الغ المؤقت', 'الغي المؤقت', 'وقف العداد', 'الغ العداد', 'شيل المؤقت']));
+const GROUPS_RE = /^(?:قسم|وزع|قسمهم|وزعهم|قسم الصف|وزع الصف|قسم الطلاب|وزع الطلاب|سو)(?: الصف| الطلاب)?(?: الي| علي| ل)? ?(\S+) (مجموعات|مجموعه|فرق|فريق|قروبات|قروب)$/;
+const GROUPS_SIZE_RE = /^(?:قسمهم|قسم الصف|قسم الطلاب|وزعهم|سو)? ?(?:مجموعات|فرق|قروبات) (?:من|كل وحده|كل مجموعه) (\S+)(?: طلاب| طالب)?$/;
+const AWARD_RE = /^(?:اعط|اعطي|عط|عطي|ادي|حط|زيد|سجل)?\s*(?:(\S+) )?(نجمه|نقطه|نجمتين|نقطتين|(\S+) (?:نجوم|نقاط|نجمات))(?: (?:ل|لـ|الى|حق))? ?(\S+(?: \S+)?)?$/;
+
+function parseNamesLoose(raw) {
+  return String(raw || '').split(/[،,;؛\n\-–]+|\s+و\s+|\s+/u).map((w) => w.replace(/^و(?=\S{2,})/u, '').replace(/[.!؟?«»"]/g, '').trim())
+    .filter((w) => w && w.length <= 30).filter((w, i, all) => all.findIndex((x) => normalize(x) === normalize(w)) === i).slice(0, 60);
+}
+/** The person's own words after the first `skip` words. */
+function rawTail(raw, skip) {
+  return String(raw).trim().split(/\s+/).slice(skip).join(' ').replace(/[.!؟?]+$/u, '').trim();
+}
+
+/** «نجمة لأحمد», «نقطتين لمريم», «اعط سعيد نجمة», «زيد فاطمة ثلاث نقاط» → {name, delta}. */
+export function parseAward(raw, text) {
+  const neg = /^(نقص|انقص|شيل من|اخصم)\s/.test(text);
+  const t = neg ? text.replace(/^(نقص|انقص|شيل من|اخصم)\s+/, 'زيد ') : text;
+  const m = AWARD_RE.exec(t);
+  if (!m) return null;
+  // «اعط سعيد نجمة» needs a giving verb before the name; «اكتب نقطة» is not an award.
+  const verb = /^(?:اعط|اعطي|عط|عطي|ادي|حط|زيد|سجل)\s/.test(t);
+  if (m[1] && !verb) return null;
+  let delta = /^(نجمتين|نقطتين)$/.test(m[2]) ? 2 : m[3] ? parseNumberToken(m[3]) : 1;
+  if (!delta || delta > 20) return null;
+  let name = (m[4] || m[1] || '').replace(/^(ل|لـ)(?=\S{2,})/, '');
+  if (!name || /^(ال)?(طالب|طالبه|واحد|هو|هي)$/.test(name)) return null;
+  // keep the person's spelling from the raw sentence
+  const rawWords = String(raw).trim().split(/\s+/);
+  const hit = rawWords.find((w) => normalize(w).replace(/^(ل|لـ)(?=\S{2,})/, '') === name.split(' ')[0]);
+  if (hit) name = hit.replace(/^(ل|لـ)(?=\S{2,})/u, '').replace(/[.!؟?]/g, '');
+  return { name, delta: neg ? -delta : delta };
 }
 
 // ------------------------------------------------------------- eyes
@@ -469,6 +508,38 @@ function recognizeText(raw, fuzzy) {
   if (L.repeat.includes(text)) return out('repeat', {}, 0.85);
   if (L.closeIt.includes(text)) return out('close', { app: null, it: true }, 0.85);
   if (L.openIt.includes(text)) return out('open_again', {}, 0.85);
+  // ---- classroom tools
+  const namesM = /^(?:اسماء|اسامي) (?:الطلاب|الصف|طلابي|الطالبات|طالباتي)\s*(?:هم|هي)?\s*[:：]?\s*(.+)$/u.exec(normalize(String(raw).split(/[:：]/)[0]) === normalize(String(raw)) ? text : `${normalize(String(raw).split(/[:：]/)[0])} ${String(raw).split(/[:：]/).slice(1).join(':')}`);
+  if (namesM) {
+    const listRaw = String(raw).includes(':') || String(raw).includes('：') ? String(raw).split(/[:：]/).slice(1).join(':') : String(raw).replace(/^\s*\S+\s+\S+\s*(هم|هي)?\s*/u, '');
+    return out('students_set', { names: parseNamesLoose(listRaw) }, 0.92);
+  }
+  const addM = /^(?:اضف|ضيف|زيد|سجل) (?:الطالب|الطالبه|طالب|طالبه) (.+)$/u.exec(text);
+  if (addM) return out('student_add', { name: rawTail(raw, 2) || addM[1] }, 0.9);
+  const delM = /^(?:احذف|شيل|امسح) (?:الطالب|الطالبه|طالب|طالبه) (.+)$/u.exec(text);
+  if (delM) return out('student_remove', { name: rawTail(raw, 2) || delM[1] }, 0.9);
+  if (PICK.has(text)) return out('pick_student', {}, 0.95);
+  if (BOARD.has(text)) return out('points_board', {}, 0.9);
+  if (RESET_POINTS.has(text)) return out('points_reset', {}, 0.9);
+  if (TIMER_STOP.has(text)) return out('timer_stop', {}, 0.95);
+  const timerM = /^(?:شغل |حط |سو |ابدا |ابدأ )?(?:مؤقت|موقت|عداد|عد تنازلي|تايمر)(?: (?:ل|لـ|مده|لمده))? ?(.*)$/.exec(text);
+  if (timerM) {
+    const minutes = parseMinutes(timerM[1] ? `بعد ${timerM[1]}` : '');
+    return out('timer', { minutes }, minutes ? 0.95 : 0.6);
+  }
+  const groupsM = GROUPS_RE.exec(text);
+  if (groupsM) {
+    const count = parseNumberToken(groupsM[1]);
+    if (count) return out('groups', { count }, 0.92);
+  }
+  const groupsS = GROUPS_SIZE_RE.exec(text);
+  if (groupsS) {
+    const size = parseNumberToken(groupsS[1]);
+    if (size) return out('groups', { size }, 0.92);
+  }
+  const award = parseAward(raw, text);
+  if (award) return out('award', award, 0.9);
+
   const see = parseSee(text);
   if (see) return out('see', see, 0.9);
   if (L.typeLast.includes(text)) return out('type_last', {}, 0.9);

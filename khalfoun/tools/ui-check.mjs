@@ -131,6 +131,20 @@ await check('movement on command: right, stay, free', async () => {
   assert(!(await page.evaluate(() => window.__khalfoun.motion.focus)), 'still focused');
 });
 
+await check('classroom: class list, random student, timer on screen, stars', async () => {
+  await page.evaluate(() => window.__khalfoun.hear('أسماء الطلاب: أحمد، سعيد، مريم، فاطمة'));
+  await page.waitForTimeout(400);
+  await page.evaluate(() => window.__khalfoun.hear('اختار طالب'));
+  await untilOn(page, () => /أحمد|سعيد|مريم|فاطمة/.test(document.getElementById('bubble-text').textContent), 4000);
+  await page.evaluate(() => window.__khalfoun.hear('مؤقت دقيقة'));
+  await untilOn(page, () => !document.getElementById('timer').hidden && /٠٠:٥٩|٠١:٠٠/.test(document.getElementById('timer').textContent), 3000);
+  await page.screenshot({ path: `${outDir}/15-classroom-timer.png` });
+  await page.evaluate(() => window.__khalfoun.hear('وقف المؤقت'));
+  await untilOn(page, () => document.getElementById('timer').hidden, 2000);
+  await page.evaluate(() => window.__khalfoun.hear('نجمة لمريم'));
+  await untilOn(page, () => /مريم/.test(document.getElementById('bubble-text').textContent), 3000);
+});
+
 await check('search and typing at full trust', async () => {
   await hear('دور لي عن مطاعم في مسقط');
   let last = await page.evaluate(() => window.__khalfoun.bridge._actions.at(-1));

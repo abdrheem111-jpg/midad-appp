@@ -13,6 +13,7 @@ import { Quiz, parseArabicNumber } from './quiz.js';
 import { occasionFor } from './occasions.js';
 import { calculate } from './calc.js';
 import { KEYS } from './keys.js';
+import { Classroom } from './classroom.js';
 
 const FEELING_LABEL = { tired: 'تعبان', sad: 'متضايق', sick: 'مريض', stressed: 'مضغوط' };
 const HOUR = 60 * 60 * 1000;
@@ -283,6 +284,12 @@ export class Brain {
     return this.reply(d.typed ? 'dictation_done' : 'dictation_empty', { vars: { count: toArabicDigits(d.typed) }, behavior: 'dictation_off' });
   }
 
+  // ------------------------------------------------------------ classroom
+
+  room() { return new Classroom(this.memory.data.classroom || {}); }
+
+  saveRoom(room) { this.memory.set({ classroom: room.toJSON() }); }
+
   // ------------------------------------------------------------ eyes
 
   setChatAvailable(on) { this.chatAvailable = !!on; }
@@ -424,6 +431,9 @@ export class Brain {
         this.emotions.feel('greet', now);
         return this.reply('reminder_fire', { vars: { noteSuffix: noteSuffix(data.note) } });
       }
+      case 'timer_done':
+        this.emotions.feel('celebrate', now);
+        return this.reply('timer_done');
       case 'setup_start':
         this.emotions.feel('focus_mode', now);
         return this.reply(data.kind === 'brain' ? 'setup_brain_start' : 'setup_voice_start');
@@ -611,6 +621,73 @@ export class Brain {
         }
         return start();
       }
+      // ---- classroom tools
+      case 'students_set': {
+        const room = this.room();
+        const count = room.setStudents(s.names || []);
+        this.saveRoom(room);
+        if (!count) { this.emotions.feel('not_understood', now); return this.reply('students_none'); }
+        this.emotions.feel('celebrate', now);
+        return this.reply('students_saved', { vars: { count: toArabicDigits(count), names: s.names.slice(0, 6).join('، ') } });
+      }
+      case 'student_add': {
+        const room = this.room();
+        const added = room.add(String(s.name).trim());
+        this.saveRoom(room);
+        return this.reply(added ? 'student_added' : 'student_exists', { vars: { student: s.name, count: toArabicDigits(room.students.length) } });
+      }
+      case 'student_remove': {
+        const room = this.room();
+        const gone = room.remove(s.name);
+        this.saveRoom(room);
+        return this.reply(gone ? 'student_removed' : 'student_unknown', { vars: { student: gone || s.name } });
+      }
+      case 'pick_student': {
+        const room = this.room();
+        const pick = room.pick(this.rng);
+        this.saveRoom(room);
+        if (!pick) { this.emotions.feel('curious', now); return this.reply('pick_need_names'); }
+        this.emotions.feel('celebrate', now);
+        return this.reply(pick.newRound ? 'pick_new_round' : 'pick_result', { vars: { student: pick.name, left: toArabicDigits(pick.left) }, behavior: 'drumroll' });
+      }
+      case 'groups': {
+        const room = this.room();
+        const groups = room.groups({ count: s.count, size: s.size }, this.rng);
+        if (!groups.length) { this.emotions.feel('curious', now); return this.reply('pick_need_names'); }
+        const list = groups.map((g, i) => `المجموعة ${toArabicDigits(i + 1)}: ${g.join('، ')}`).join('\n');
+        this.context.lastAnswer = { text: list, at: now };
+        this.emotions.feel('celebrate', now);
+        return { ...this.reply('groups_result', { vars: { count: toArabicDigits(groups.length) } }), say: `${this.reply('groups_result', { vars: { count: toArabicDigits(groups.length) } }).say}\n${list}`, long: true };
+      }
+      case 'award': {
+        const room = this.room();
+        const res = room.award(s.name, s.delta);
+        this.saveRoom(room);
+        if (!res) return this.reply('not_understood');
+        this.emotions.feel(s.delta > 0 ? 'celebrate' : 'care', now);
+        return this.reply(s.delta > 0 ? 'award_ok' : 'award_minus', { vars: { student: res.name, points: toArabicDigits(res.points) }, behavior: s.delta > 0 ? 'star' : null });
+      }
+      case 'points_board': {
+        const board = this.room().board(10);
+        if (!board.length) return this.reply('board_empty');
+        const medals = ['🥇', '🥈', '🥉'];
+        const list = board.map((b, i) => `${medals[i] || `${toArabicDigits(i + 1)}.`} ${b.name}: ${toArabicDigits(b.points)}`).join('\n');
+        this.context.lastAnswer = { text: list.replace(/[🥇🥈🥉]/gu, '').trim(), at: now };
+        this.emotions.feel('celebrate', now);
+        return { ...this.reply('board_result', { vars: { first: board[0].name } }), say: `${this.reply('board_result', { vars: { first: board[0].name } }).say}\n${list}`, long: true };
+      }
+      case 'points_reset': {
+        const room = this.room();
+        room.resetPoints();
+        this.saveRoom(room);
+        return this.reply('points_cleared');
+      }
+      case 'timer': {
+        if (!s.minutes || s.minutes > 180) { this.emotions.feel('not_understood', now); return this.reply('timer_no_time'); }
+        this.emotions.feel('focus_mode', now);
+        return this.reply('timer_started', { vars: { duration: durationPhrase(s.minutes) }, behavior: `timer:${Math.round(s.minutes * 60)}` });
+      }
+      case 'timer_stop': return this.reply('timer_stopped', { behavior: 'timer:stop' });
       case 'see': {
         const read = s.source === 'screen' ? { type: 'read_screen', params: {} } : { type: 'read_selection', params: {} };
         return this.plan(read, { situation: s.source === 'screen' ? 'screen_looking' : 'see_looking', sayOn: 'start', see: s,

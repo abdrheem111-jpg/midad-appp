@@ -27,7 +27,7 @@ if (isPreview) document.documentElement.classList.add('preview');
 
 const els = {
   stage: $('stage'), bubble: $('bubble'), bubbleText: $('bubble-text'), command: $('command'), input: $('command-input'),
-  mic: $('mic'), micLevel: $('mic-level'), onboarding: $('onboarding'), settings: $('settings'), ear: $('ear'), dictation: $('dictation'),
+  mic: $('mic'), micLevel: $('mic-level'), onboarding: $('onboarding'), settings: $('settings'), ear: $('ear'), dictation: $('dictation'), timer: $('timer'),
 };
 
 const workArea = () => ({ width: window.innerWidth, height: window.innerHeight - (isPreview ? PREVIEW_TASKBAR : 0) });
@@ -127,15 +127,56 @@ function handle(reply) {
     case 'move:stay': motion.stay(); break;
     case 'move:free': motion.free(); break;
     case 'move:turn': motion.turn(); character.setFacing(motion.facing); break;
+    case 'drumroll': sounds.effect('giggle'); setTimeout(() => sounds.effect('yay'), 500); break;
+    case 'star': sounds.effect('sparkle'); break;
+    case 'timer:stop': stopTimer(); break;
     case 'dictation_on': els.dictation.hidden = false; updateWake(); break;
     case 'dictation_off': els.dictation.hidden = true; updateWake(); break;
     case 'open_settings': openSettings(String(reply.situation || '').startsWith('setup_hint') ? 'setup' : null); break;
-    default: break;
+    default:
+      if (String(reply.behavior || '').startsWith('timer:')) startTimer(Number(reply.behavior.slice(6)));
+      break;
   }
   if (reply.action) runAction(reply.action);
   if (reply.ask) runTask(reply.ask);
   // «افتح الحاسبة وبعدين المفكرة»: the next command follows after a short pause.
   if (reply.more) setTimeout(() => handle(brain.continueQueue()), 1600);
+}
+
+// ------------------------------------------------------------- class timer
+
+let timerEnd = 0;
+let timerTick = null;
+const fmtClock = (sec) => toArabicDigits(`${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`);
+
+/** A big countdown at the top of the screen; Khalfoun celebrates when it ends. */
+function startTimer(seconds) {
+  if (!(seconds > 0)) return;
+  stopTimer();
+  timerEnd = Date.now() + seconds * 1000;
+  els.timer.hidden = false;
+  const tick = () => {
+    const left = Math.max(0, Math.round((timerEnd - Date.now()) / 1000));
+    els.timer.textContent = `⏱ ${fmtClock(left)}`;
+    els.timer.classList.toggle('ending', left <= 10);
+    if (left <= 0) {
+      stopTimer();
+      sounds.effect('chime');
+      setTimeout(() => sounds.effect('chime'), 600);
+      motion.come();
+      handle(brain.event('timer_done'));
+    }
+  };
+  tick();
+  timerTick = setInterval(tick, 250);
+}
+
+function stopTimer() {
+  clearInterval(timerTick);
+  timerTick = null;
+  timerEnd = 0;
+  els.timer.hidden = true;
+  els.timer.classList.remove('ending');
 }
 
 /** Summaries, explanations, questions and solutions from the local model. */
