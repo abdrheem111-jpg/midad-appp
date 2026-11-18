@@ -431,6 +431,37 @@ export class Brain {
         this.emotions.feel('greet', now);
         return this.reply('reminder_fire', { vars: { noteSuffix: noteSuffix(data.note) } });
       }
+      // ---- living Khalfoun: what happens on the desktop
+      case 'window_opened': {
+        if (this.focus || this.emotions.asleep || this.dictation) return null;
+        const situation = `win_${data.kind}`;
+        if (data.kind === 'other' && this.rng() > 0.25) return null;
+        this.emotions.feel('curious', now);
+        return this.reply(TEMPLATES.some((t) => t.s === situation) ? situation : 'win_other', { vars: { title: data.title || '' }, behavior: 'look_window' });
+      }
+      case 'window_closed':
+        if (this.focus || this.emotions.asleep || this.dictation || this.rng() > 0.35) return null;
+        return this.reply('win_closed', { vars: { title: data.title || '' } });
+      case 'download_new': {
+        if (this.emotions.asleep || this.dictation) return null;
+        this.emotions.feel('curious', now);
+        const file = String(data.name || '');
+        this.pending = { kind: 'suggest', raw: file, intent: { intent: 'open_download', slots: { name: file }, confidence: 0.9, text: file } };
+        return this.reply(data.kind === 'pdf' ? 'dl_pdf' : 'dl_file', { vars: { file: file.length > 40 ? `${file.slice(0, 37)}…` : file }, awaitingConfirm: true });
+      }
+      case 'resume':
+        this.emotions.feel('greet', now);
+        return this.reply('welcome_back');
+      case 'game_catch':
+        this.emotions.feel('tickle', now);
+        return this.reply('game_caught', { event: null });
+      case 'game_over':
+        this.emotions.feel('celebrate', now);
+        if (data.game === 'chase') return this.reply('game_chase_over', { vars: { score: toArabicDigits(data.score || 0) } });
+        return this.reply(data.found ? 'game_found' : 'game_not_found', { vars: { seconds: toArabicDigits(Math.max(1, Math.round(data.seconds || 0))) } });
+      case 'dizzy':
+        this.emotions.feel('dropped', now);
+        return this.reply('dizzy');
       case 'timer_done':
         this.emotions.feel('celebrate', now);
         return this.reply('timer_done');
@@ -642,6 +673,12 @@ export class Brain {
         this.saveRoom(room);
         return this.reply(gone ? 'student_removed' : 'student_unknown', { vars: { student: gone || s.name } });
       }
+      case 'game':
+        this.focus = false;
+        this.emotions.feel('joke', now);
+        return this.reply(s.name === 'hide' ? 'game_hide_start' : 'game_chase_start', { behavior: `game:${s.name}` });
+      case 'open_download':
+        return this.plan({ type: 'open_download', params: { name: s.name } }, { situation: 'open_ok', sayOn: 'start', vars: { app: s.name }, summary: `فتح ${s.name}` }, now);
       case 'pick_student': {
         const room = this.room();
         const pick = room.pick(this.rng);

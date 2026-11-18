@@ -11,6 +11,7 @@ import { join } from 'node:path';
 
 export const PS_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -28,6 +29,16 @@ public static class KhalfounWindows {
   [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int a, out RECT r, int s);
   [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int s);
   [DllImport("user32.dll")] public static extern IntPtr SetProcessDpiAwarenessContext(IntPtr v);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  static string Esc(string s) {
+    StringBuilder o = new StringBuilder();
+    foreach (char c in s) {
+      if (c == '"' || c == '\\') o.Append('\\').Append(c);
+      else if (c < ' ') o.Append(' ');
+      else o.Append(c);
+    }
+    return o.ToString();
+  }
   public static string List(uint skipPid) {
     StringBuilder sb = new StringBuilder("[");
     bool first = true;
@@ -47,7 +58,10 @@ public static class KhalfounWindows {
       if (!first) sb.Append(',');
       first = false;
       sb.Append("{\"id\":").Append(h.ToInt64()).Append(",\"x\":").Append(r.L).Append(",\"y\":").Append(r.T)
-        .Append(",\"w\":").Append(r.R - r.L).Append(",\"h\":").Append(r.B - r.T).Append('}');
+        .Append(",\"w\":").Append(r.R - r.L).Append(",\"h\":").Append(r.B - r.T);
+      StringBuilder title = new StringBuilder(256);
+      GetWindowText(h, title, 256);
+      sb.Append(",\"t\":\"").Append(Esc(title.ToString())).Append("\"}");
       return true;
     }, IntPtr.Zero);
     return sb.Append(']').ToString();
@@ -72,7 +86,7 @@ export function parseWindowList(line) {
   try { data = JSON.parse(line); } catch { return null; }
   if (!Array.isArray(data)) return null;
   return data.filter((w) => w && ['id', 'x', 'y', 'w', 'h'].every((k) => Number.isFinite(w[k])) && w.w > 0 && w.h > 0)
-    .map((w) => ({ id: w.id, x: w.x, y: w.y, w: w.w, h: w.h }));
+    .map((w) => ({ id: w.id, x: w.x, y: w.y, w: w.w, h: w.h, t: typeof w.t === 'string' ? w.t.slice(0, 200) : '' }));
 }
 
 /**
@@ -84,7 +98,7 @@ export function parseWindowList(line) {
 export function toOverlay(list, toDip, workArea) {
   return list.map((w) => {
     const r = toDip({ x: w.x, y: w.y, width: w.w, height: w.h });
-    return { id: w.id, x: Math.round(r.x - workArea.x), y: Math.round(r.y - workArea.y), w: Math.round(r.width), h: Math.round(r.height) };
+    return { id: w.id, x: Math.round(r.x - workArea.x), y: Math.round(r.y - workArea.y), w: Math.round(r.width), h: Math.round(r.height), t: w.t || '' };
   });
 }
 

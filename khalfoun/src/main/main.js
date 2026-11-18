@@ -7,9 +7,10 @@
 
 import {
   app, BrowserWindow, ipcMain, protocol, screen, shell, clipboard, desktopCapturer, Tray, Menu,
-  nativeImage, globalShortcut, dialog, Notification, session, net,
+  nativeImage, globalShortcut, dialog, Notification, session, net, powerMonitor,
 } from 'electron';
 import { readFile, mkdtemp, writeFile, mkdir, stat, rm } from 'node:fs/promises';
+import { watch as watchFolder } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join, extname, normalize, relative, sep } from 'node:path';
 import { tmpdir, cpus } from 'node:os';
@@ -26,6 +27,7 @@ import { LEVEL_INFO } from '../core/permissions.js';
 import { DiagLog } from './diag.js';
 import { ocrImage } from './ocr.js';
 import { TASK_MODES } from '../core/chat-prompt.js';
+import { PARTIAL_DOWNLOAD, downloadKind } from '../core/desktop.js';
 import {
   setupVoice, pullOllamaModel, ollamaStatus, setupErrorText, packSizeMB,
   VOICE_PACKS, WHISPER_PROGRAM, WHISPER_MODELS, BRAIN_MODELS, OLLAMA_DOWNLOAD_PAGE,
@@ -181,6 +183,34 @@ function registerShortcuts() {
   const ok2 = globalShortcut.register('CommandOrControl+Shift+K', () => { if (win) { focusOverlay(); send('open-command'); } });
   if (!ok1 || !ok2) console.warn('Some keyboard shortcuts are taken by another program.');
   diag.write('shortcuts', { 'Ctrl+Shift+Space': ok1, 'Ctrl+Shift+K': ok2 });
+}
+
+/**
+ * Tells the page when a new file lands in Downloads (once it has finished
+ * downloading and its size stops changing), so Khalfoun can offer to open it.
+ */
+function watchDownloads(dir) {
+  const seen = new Map();
+  try {
+    watchFolder(dir, { persistent: false }, (type, name) => {
+      if (!name || PARTIAL_DOWNLOAD.test(name) || seen.has(name)) return;
+      seen.set(name, Date.now());
+      setTimeout(async () => {
+        try {
+          const a = await stat(join(dir, name));
+          await new Promise((r) => setTimeout(r, 1500));
+          const b = await stat(join(dir, name));
+          if (!b.isFile() || a.size !== b.size || b.size === 0) { seen.delete(name); return; }
+          if (Date.now() - b.birthtimeMs > 5 * 60000 && Date.now() - b.mtimeMs > 5 * 60000) return; // an old file, just renamed
+          diag.write('download arrived', name);
+          send('download', { name, kind: downloadKind(name) });
+        } catch { seen.delete(name); }
+      }, 800);
+      if (seen.size > 200) seen.clear();
+    });
+  } catch (err) {
+    diag.write('cannot watch downloads:', String(err?.message || err));
+  }
 }
 
 let reminderScheduler = null;
@@ -725,6 +755,8 @@ async function start() {
     setInterval(() => lookForModel().catch(() => {}), 5 * 60 * 1000);
   }
   if (!SMOKE) {
+    watchDownloads(downloadsDir);
+    powerMonitor.on('resume', () => send('resume'));
     buildTray();
     registerShortcuts();
     foregroundPid().catch(() => {}); // warm up the helper so the first Ctrl+Shift+K is instant

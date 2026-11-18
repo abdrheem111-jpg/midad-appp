@@ -16,7 +16,7 @@ export function createPreviewDesktop(parent, onChange) {
 
   const report = () => {
     if (!enabled) return;
-    onChange(order.map((id) => wins.find((w) => w.id === id)).map(({ id, x, y, w, h }) => ({ id, x, y, w, h })));
+    onChange(order.map((id) => wins.find((w) => w.id === id)).map(({ id, x, y, w, h, title }) => ({ id, x, y, w, h, t: title })));
   };
 
   const restack = () => {

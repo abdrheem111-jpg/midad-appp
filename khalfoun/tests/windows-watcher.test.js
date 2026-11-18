@@ -8,18 +8,19 @@ import { join } from 'node:path';
 import { WindowWatcher, parseWindowList, toOverlay, PS_SCRIPT } from '../src/main/windows-watcher.js';
 
 test('parses the helper output and drops malformed entries', () => {
-  assert.deepEqual(parseWindowList('[{"id":1,"x":10,"y":20,"w":300,"h":200},{"id":2,"x":"a"},{"id":3,"x":0,"y":0,"w":0,"h":5}]'), [{ id: 1, x: 10, y: 20, w: 300, h: 200 }]);
+  assert.deepEqual(parseWindowList('[{"id":1,"x":10,"y":20,"w":300,"h":200},{"id":2,"x":"a"},{"id":3,"x":0,"y":0,"w":0,"h":5}]'), [{ id: 1, x: 10, y: 20, w: 300, h: 200, t: '' }]);
+  assert.deepEqual(parseWindowList('[{"id":1,"x":0,"y":0,"w":9,"h":9,"t":"ورقة.pdf - Adobe Acrobat"}]')[0].t, 'ورقة.pdf - Adobe Acrobat');
   assert.equal(parseWindowList('not json'), null);
   assert.equal(parseWindowList('{"id":1}'), null);
 });
 
 test('converts physical pixels to overlay coordinates', () => {
   const half = (r) => ({ x: r.x / 2, y: r.y / 2, width: r.width / 2, height: r.height / 2 }); // 200% scaling
-  assert.deepEqual(toOverlay([{ id: 1, x: 400, y: 600, w: 800, h: 400 }], half, { x: 0, y: 10 }), [{ id: 1, x: 200, y: 290, w: 400, h: 200 }]);
+  assert.deepEqual(toOverlay([{ id: 1, x: 400, y: 600, w: 800, h: 400 }], half, { x: 0, y: 10 }), [{ id: 1, x: 200, y: 290, w: 400, h: 200, t: '' }]);
 });
 
 test('the PowerShell helper uses the Win32 calls it needs and skips its own windows', () => {
-  for (const s of ['EnumWindows', 'DwmGetWindowAttribute', 'IsIconic', 'GetWindowThreadProcessId', 'SetProcessDpiAwarenessContext', 'pid == skipPid']) assert.ok(PS_SCRIPT.includes(s), s);
+  for (const s of ['GetWindowText', 'OutputEncoding', 'EnumWindows', 'DwmGetWindowAttribute', 'IsIconic', 'GetWindowThreadProcessId', 'SetProcessDpiAwarenessContext', 'pid == skipPid']) assert.ok(PS_SCRIPT.includes(s), s);
   assert.ok(!PS_SCRIPT.includes('${'), 'no JavaScript interpolation leaked into the script');
   assert.ok(PS_SCRIPT.includes('"{\\"id\\":"'), 'JSON quotes are escaped for C#');
 });
@@ -52,7 +53,7 @@ test('the watcher asks, parses and reports only changes; failure means no window
   assert.deepEqual(asked, ['4242\n']);
   child.stdout.write('Some PowerShell banner\n[{"id":5,"x":1,"y":2,"w":300,"h":200}]\n');
   await new Promise((r) => setImmediate(r));
-  assert.deepEqual(changes, [[{ id: 5, x: 1, y: 2, w: 300, h: 200 }]]);
+  assert.deepEqual(changes, [[{ id: 5, x: 1, y: 2, w: 300, h: 200, t: '' }]]);
   w.ask();
   child.stdout.write('[{"id":5,"x":1,"y":2,"w":300,"h":200}]\n');
   await new Promise((r) => setImmediate(r));

@@ -154,6 +154,8 @@ function parseMinutesNumber(token) {
 }
 
 // ------------------------------------------------------------- classroom
+const GAME_CHASE = new Set(N(['طاردني', 'الحقني', 'امسك الماوس', 'لعبه المطارده', 'العب مطارده', 'امسكني', 'نلعب مطارده', 'الحق الماوس', 'العب ويا الماوس']));
+const GAME_HIDE = new Set(N(['غميضه', 'العب غميضه', 'نلعب غميضه', 'تخبا', 'اختبي', 'استغمايه', 'العب استغمايه', 'نلعب استغمايه', 'تخبى']));
 const PICK = new Set(N(['اختار طالب', 'اختر طالب', 'اختار طالبه', 'اختار واحد', 'اختار احد', 'منو يجاوب', 'مين يجاوب', 'منو الدور عليه', 'منو عليه الدور',
   'عطني اسم', 'اعطني اسم', 'قرعه', 'سو قرعه', 'اسحب اسم', 'اختار لي طالب', 'اختار لنا طالب', 'منو يطلع', 'منو يقرا']));
 const BOARD = new Set(N(['النتائج', 'منو الاول', 'لوحه النقاط', 'النقاط', 'كم النقاط', 'ترتيب الطلاب', 'منو الفايز', 'الترتيب', 'ورني النقاط']));
@@ -518,6 +520,8 @@ function recognizeText(raw, fuzzy) {
   if (addM) return out('student_add', { name: rawTail(raw, 2) || addM[1] }, 0.9);
   const delM = /^(?:احذف|شيل|امسح) (?:الطالب|الطالبه|طالب|طالبه) (.+)$/u.exec(text);
   if (delM) return out('student_remove', { name: rawTail(raw, 2) || delM[1] }, 0.9);
+  if (GAME_CHASE.has(text)) return out('game', { name: 'chase' }, 0.95);
+  if (GAME_HIDE.has(text)) return out('game', { name: 'hide' }, 0.95);
   if (PICK.has(text)) return out('pick_student', {}, 0.95);
   if (BOARD.has(text)) return out('points_board', {}, 0.9);
   if (RESET_POINTS.has(text)) return out('points_reset', {}, 0.9);

@@ -217,6 +217,11 @@ export function createPlatform(deps) {
     return { ok: false, error: 'not_installed' };
   }
 
+  /** Opens a file with its usual program (callers check the path first). */
+  async function openPath(file) {
+    return shell.openPath(file);
+  }
+
   async function openUrl(url) {
     await shell.openExternal(url);
     return { ok: true };
@@ -325,5 +330,5 @@ export function createPlatform(deps) {
     return { ok: true, data: { file } };
   }
 
-  return { platform, openApp, closeApp, openInstalled, listInstalled, pressKey, readSelection, openUrl, openFolder, search, volume, typeText, screenshot };
+  return { platform, openApp, closeApp, openInstalled, listInstalled, pressKey, readSelection, openPath, openUrl, openFolder, search, volume, typeText, screenshot };
 }

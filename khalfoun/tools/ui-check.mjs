@@ -145,6 +145,34 @@ await check('classroom: class list, random student, timer on screen, stars', asy
   await untilOn(page, () => /مريم/.test(document.getElementById('bubble-text').textContent), 3000);
 });
 
+await check('living: a newly opened PDF gets a remark; chase and hide-and-seek games', async () => {
+  await page.evaluate(() => window.__khalfoun.hear('تعال'));
+  await page.waitForTimeout(500);
+  await page.evaluate(() => {
+    const k = window.__khalfoun;
+    k.desktop.lastAny = -Infinity;
+    k.desktop.lastByKind.clear();
+    k.desktop.known = null;
+    k.noticeWindows([{ id: 'n', x: 140, y: 250, w: 460, h: 300, t: 'المفكرة' }]);
+    k.noticeWindows([{ id: 'n', x: 140, y: 250, w: 460, h: 300, t: 'المفكرة' }, { id: 'p', x: 700, y: 120, w: 500, h: 400, t: 'ورقة عمل.pdf - Adobe Acrobat' }]);
+  });
+  await untilOn(page, () => window.__khalfoun.lastReply?.situation === 'win_pdf', 3000);
+  await page.evaluate(() => window.__khalfoun.hear('طاردني'));
+  await untilOn(page, () => window.__khalfoun.game?.name === 'chase', 2000);
+  const box = await page.locator('#stage').boundingBox();
+  await page.mouse.move(box.x - 300, box.y + 50);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 });
+  await untilOn(page, () => window.__khalfoun.game?.score >= 1, 3000);
+  await page.mouse.move(10, 10);
+  await page.evaluate(() => window.__khalfoun.hear('غميضة'));
+  await untilOn(page, () => document.getElementById('stage').classList.contains('hiding'), 8000);
+  await page.screenshot({ path: `${outDir}/16-hide-and-seek.png` });
+  const hid = await page.locator('#stage').boundingBox();
+  await page.mouse.click(hid.x + hid.width / 2, hid.y + hid.height / 2);
+  await untilOn(page, () => window.__khalfoun.lastReply?.situation === 'game_found', 3000);
+  assert(!(await page.evaluate(() => document.getElementById('stage').classList.contains('hiding'))), 'still hiding');
+});
+
 await check('search and typing at full trust', async () => {
   await hear('دور لي عن مطاعم في مسقط');
   let last = await page.evaluate(() => window.__khalfoun.bridge._actions.at(-1));

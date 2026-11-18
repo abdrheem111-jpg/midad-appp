@@ -25,6 +25,7 @@ export const ACTION_RISK = {
   open_url: 'open',
   open_folder: 'open',
   open_installed: 'open', // only programs already on the Start menu
+  open_download: 'open', // a file that just arrived in the Downloads folder
   read_selection: 'system', // copies the selected text; the clipboard is put back
   read_screen: 'system', // a screenshot read on this computer, never sent anywhere
   active_window: 'none',

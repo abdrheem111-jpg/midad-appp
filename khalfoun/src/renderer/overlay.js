@@ -12,6 +12,7 @@ import { WakeListener } from './wake-listener.js';
 import { findWakeWord } from '../core/wake.js';
 import { recognize } from '../core/intents.js';
 import { toArabicDigits } from '../core/arabic.js';
+import { DesktopWatcher } from '../core/desktop.js';
 import { getBridge } from './bridge.js';
 import { SoundPlayer, ANIMATION_SOUND } from './sounds.js';
 
@@ -127,6 +128,9 @@ function handle(reply) {
     case 'move:stay': motion.stay(); break;
     case 'move:free': motion.free(); break;
     case 'move:turn': motion.turn(); character.setFacing(motion.facing); break;
+    case 'look_window': lookAtWindow(reply.windowRect || lastNoticed?.rect); break;
+    case 'game:chase': startChase(); break;
+    case 'game:hide': startHide(); break;
     case 'drumroll': sounds.effect('giggle'); setTimeout(() => sounds.effect('yay'), 500); break;
     case 'star': sounds.effect('sparkle'); break;
     case 'timer:stop': stopTimer(); break;
@@ -142,6 +146,123 @@ function handle(reply) {
   // «افتح الحاسبة وبعدين المفكرة»: the next command follows after a short pause.
   if (reply.more) setTimeout(() => handle(brain.continueQueue()), 1600);
 }
+
+// ------------------------------------------------- living Khalfoun: desktop
+
+const desktop = new DesktopWatcher();
+let lastNoticed = null;
+
+/** New and closed windows become remarks (with cool-downs, never while busy). */
+function noticeWindows(list) {
+  const events = desktop.update(list, Date.now());
+  for (const ev of events) {
+    if (panelsOpen() || recorder.active || game) continue;
+    lastNoticed = ev;
+    handle(brain.event(ev.type === 'opened' ? 'window_opened' : 'window_closed', { kind: ev.kind, title: ev.title }));
+  }
+}
+
+/** Walks toward a window that just opened, looks at it, and sometimes hops onto it. */
+function lookAtWindow(rect) {
+  if (!rect || motion.focus) return;
+  const cx = rect.x + rect.w / 2;
+  motion.goToX(Math.min(Math.max(cx, CHAR_W), window.innerWidth - CHAR_W));
+  setTimeout(() => {
+    character.lookAt((cx - (motion.x + CHAR_W / 2)) / 350, (rect.y - motion.y) / 300, 2);
+    if (Math.random() < 0.4) motion.climbUp();
+  }, 1600);
+}
+
+// ----------------------------------------------------------- desktop games
+
+let game = null;
+
+/** «طاردني»: he runs after the mouse for 25 seconds; touching the cursor is a catch. */
+function startChase() {
+  stopGame();
+  game = { name: 'chase', score: 0, lastCatch: 0, until: performance.now() + 25000 };
+  motion.free();
+  game.timer = setInterval(() => {
+    if (!game || game.name !== 'chase') return;
+    if (performance.now() > game.until) { const score = game.score; stopGame(); handle(brain.event('game_over', { game: 'chase', score })); return; }
+    if (lastMouseX !== null && motion.mode !== 'hop' && motion.mode !== 'fall') motion.walkTo(lastMouseX - CHAR_W / 2, true);
+  }, 250);
+}
+
+/** «غميضة»: he hides faded somewhere on the floor; a click on him finds him. */
+function startHide() {
+  stopGame();
+  const x = Math.random() * Math.max(1, window.innerWidth - CHAR_W);
+  game = { name: 'hide', started: performance.now(), hiding: false };
+  setTimeout(() => {
+    if (!game || game.name !== 'hide') return;
+    motion.goToX(x + CHAR_W / 2);
+    setTimeout(() => {
+      if (!game || game.name !== 'hide') return;
+      motion.stay();
+      game.hiding = true;
+      game.started = performance.now();
+      els.stage.classList.add('hiding');
+      hideBubble();
+      game.timer = setTimeout(() => { stopGame(); handle(brain.event('game_over', { game: 'hide', found: false })); }, 30000);
+    }, 2200);
+  }, 1500);
+}
+
+function stopGame() {
+  if (!game) return;
+  clearInterval(game.timer);
+  clearTimeout(game.timer);
+  els.stage.classList.remove('hiding');
+  if (game.name === 'hide') motion.free();
+  game = null;
+}
+
+// Cursor touching him during the chase is a catch; a click while hiding finds him.
+els.stage.addEventListener('pointerenter', () => {
+  if (game?.name === 'chase' && performance.now() - game.lastCatch > 1200) {
+    game.lastCatch = performance.now();
+    game.score += 1;
+    sounds.effect('giggle');
+    animator.play('laugh');
+    if (game.score % 2 === 1) handle(brain.event('game_catch'));
+  }
+});
+els.stage.addEventListener('pointerdown', () => {
+  if (game?.name === 'hide' && game.hiding) {
+    const seconds = (performance.now() - game.started) / 1000;
+    stopGame();
+    sounds.effect('yay');
+    handle(brain.event('game_over', { game: 'hide', found: true, seconds }));
+  }
+}, true);
+
+// Spinning the mouse round and round near him makes him dizzy.
+const spin = { turns: 0, lastAngle: null, since: 0, lastDizzy: 0 };
+document.addEventListener('mousemove', (e) => {
+  const cx = motion.x + CHAR_W / 2;
+  const cy = motion.y + CHAR_H / 2;
+  const dx = e.clientX - cx;
+  const dy = e.clientY - cy;
+  if (Math.hypot(dx, dy) > 260 || game) { spin.turns = 0; spin.lastAngle = null; return; }
+  const a = Math.atan2(dy, dx);
+  const now = performance.now();
+  if (spin.lastAngle !== null) {
+    let d = a - spin.lastAngle;
+    if (d > Math.PI) d -= 2 * Math.PI;
+    if (d < -Math.PI) d += 2 * Math.PI;
+    if (now - spin.since > 2500) { spin.turns = 0; spin.since = now; }
+    spin.turns += d / (2 * Math.PI);
+    if (Math.abs(spin.turns) >= 3 && now - spin.lastDizzy > 20000) {
+      spin.lastDizzy = now;
+      spin.turns = 0;
+      handle(brain.event('dizzy'));
+    }
+  } else {
+    spin.since = now;
+  }
+  spin.lastAngle = a;
+});
 
 // ------------------------------------------------------------- class timer
 
@@ -828,7 +949,9 @@ async function start() {
       case 'ptt': listen(); break;
       case 'open-settings': openSettings(); break;
       case 'come': handle(brain.hear('تعال')); break;
-      case 'windows': lastWindows = Array.isArray(ev.list) ? ev.list : []; applyWindows(); break;
+      case 'windows': lastWindows = Array.isArray(ev.list) ? ev.list : []; applyWindows(); noticeWindows(lastWindows); break;
+      case 'download': if (!panelsOpen()) handle(brain.event('download_new', { name: ev.name, kind: ev.kind })); break;
+      case 'resume': handle(brain.event('resume')); motion.come(); break;
       case 'setup-progress': showSetupProgress(ev); break;
       case 'voice-ready':
         voiceAvailable = !!ev.available;
@@ -864,7 +987,7 @@ async function start() {
 
   if (isPreview) {
     const { createPreviewDesktop } = await import('./preview-desktop.js');
-    preview = createPreviewDesktop(document.body, (list) => { lastWindows = list; applyWindows(); });
+    preview = createPreviewDesktop(document.body, (list) => { lastWindows = list; applyWindows(); noticeWindows(list); });
   }
   sounds.setEnabled(brain.memory.data.sounds !== false);
   updateWake();
@@ -873,7 +996,7 @@ async function start() {
   else handle(brain.start());
 
   // Hooks for automated UI tests and debugging.
-  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations };
+  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop };
   document.documentElement.dataset.ready = '1';
 }
 
