@@ -94,17 +94,13 @@ try {
   typeCommand('سكرها');
   step('«سكرها» closes Notepad', await until(async () => Number(notepadCount()) <= before, 10000), `notepad processes: ${notepadCount()}`);
 
-  // Any installed program by its Arabic name, found in the Start menu.
-  typeCommand('افتح باورشيل');
-  step('«افتح باورشيل» finds and opens an installed program', await until(async () => /action open_installed .*→ ok/.test(await readLog()), 15000));
-  // Close the PowerShell window it opened (politely) so it does not take the typing focus.
-  await sleep(1500);
-  try { execFileSync('taskkill', ['/IM', 'powershell.exe'], { stdio: 'ignore' }); } catch { /* fine */ }
-
   // Dictation into a fresh Notepad, then «حدد الكل» + «انسخ» to read back what landed there.
   typeCommand('افتح المفكرة');
   await until(async () => Number(notepadCount()) > before, 10000);
   await sleep(2500);
+  // Make sure Notepad is the window in front, as when a person clicks into it.
+  try { execFileSync('powershell', ['-NoProfile', '-Command', '$p = Get-Process notepad | Sort-Object StartTime -Descending | Select-Object -First 1; (New-Object -ComObject WScript.Shell).AppActivate($p.Id) | Out-Null'], { stdio: 'ignore' }); } catch { /* best effort */ }
+  await sleep(500);
   typeCommand('ابدأ الإملاء');
   step('dictation starts', await until(async () => /heard «ابدأ الإملاء» → dictation_start/.test(await readLog()), 8000));
   typeCommand('مرحبا فاصلة هذا اختبار');
@@ -119,6 +115,11 @@ try {
   let clip = '';
   try { clip = execFileSync('powershell', ['-NoProfile', '-Command', '[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Clipboard -Raw'], { encoding: 'utf8' }); } catch { /* empty */ }
   step('the dictated words really reached Notepad (copied back by voice)', clip.includes('مرحبا، هذا اختبار'), `clipboard: ${JSON.stringify(clip.slice(0, 80))}`);
+
+  // Any installed program by its Arabic name, found in the Start menu.
+  typeCommand('افتح باورشيل');
+  step('«افتح باورشيل» finds and opens an installed program', await until(async () => /action open_installed .*→ ok/.test(await readLog()), 15000));
+
 } finally {
   console.log('\n----- khalfoun-log.txt -----');
   console.log(await readLog());
