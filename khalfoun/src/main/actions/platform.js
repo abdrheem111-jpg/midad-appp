@@ -37,6 +37,34 @@ const LINUX_PROCESSES = {
   calculator: ['gnome-calculator', 'kcalc', 'galculator', 'mate-calc'], notepad: ['gnome-text-editor', 'gedit', 'kate', 'mousepad', 'xed'],
   paint: ['pinta', 'kolourpaint', 'gimp'], browser: ['firefox', 'chrome', 'chromium'], word: ['soffice.bin'], excel: ['soffice.bin'], powerpoint: ['soffice.bin'],
 };
+/** How each key id is pressed: SendKeys on Windows, System Events on macOS, xdotool on Linux. */
+const KEY_WIN = {
+  enter: '{ENTER}', tab: '{TAB}', escape: '{ESC}', space: ' ', backspace: '{BACKSPACE}', delete_word: '^{BACKSPACE}',
+  copy: '^c', paste: '^v', cut: '^x', select_all: '^a', save: '^s', print: '^p', undo: '^z', redo: '^y', find: '^f',
+  new_tab: '^t', close_tab: '^w', next_tab: '^{TAB}', prev_tab: '^+{TAB}', reopen_tab: '^+t',
+  page_down: '{PGDN}', page_up: '{PGUP}', top: '^{HOME}', bottom: '^{END}',
+  zoom_in: '^{ADD}', zoom_out: '^{SUBTRACT}', zoom_reset: '^0', switch_window: '%{TAB}', fullscreen: '{F11}', refresh: '{F5}',
+};
+const KEY_MAC = {
+  enter: ['key code 36'], tab: ['key code 48'], escape: ['key code 53'], space: ['key code 49'], backspace: ['key code 51'],
+  delete_word: ['key code 51 using option down'], copy: ['keystroke "c" using command down'], paste: ['keystroke "v" using command down'],
+  cut: ['keystroke "x" using command down'], select_all: ['keystroke "a" using command down'], save: ['keystroke "s" using command down'],
+  print: ['keystroke "p" using command down'], undo: ['keystroke "z" using command down'], redo: ['keystroke "z" using {command down, shift down}'],
+  find: ['keystroke "f" using command down'], new_tab: ['keystroke "t" using command down'], close_tab: ['keystroke "w" using command down'],
+  next_tab: ['keystroke "]" using {command down, shift down}'], prev_tab: ['keystroke "[" using {command down, shift down}'],
+  reopen_tab: ['keystroke "t" using {command down, shift down}'], page_down: ['key code 121'], page_up: ['key code 116'],
+  top: ['key code 126 using command down'], bottom: ['key code 125 using command down'], zoom_in: ['keystroke "=" using command down'],
+  zoom_out: ['keystroke "-" using command down'], zoom_reset: ['keystroke "0" using command down'], switch_window: ['key code 48 using command down'],
+  show_desktop: ['key code 103'], fullscreen: ['keystroke "f" using {command down, control down}'], refresh: ['keystroke "r" using command down'],
+};
+const KEY_LINUX = {
+  enter: 'Return', tab: 'Tab', escape: 'Escape', space: 'space', backspace: 'BackSpace', delete_word: 'ctrl+BackSpace', copy: 'ctrl+c',
+  paste: 'ctrl+v', cut: 'ctrl+x', select_all: 'ctrl+a', save: 'ctrl+s', print: 'ctrl+p', undo: 'ctrl+z', redo: 'ctrl+y', find: 'ctrl+f',
+  new_tab: 'ctrl+t', close_tab: 'ctrl+w', next_tab: 'ctrl+Tab', prev_tab: 'ctrl+shift+Tab', reopen_tab: 'ctrl+shift+t',
+  page_down: 'Next', page_up: 'Prior', top: 'ctrl+Home', bottom: 'ctrl+End', zoom_in: 'ctrl+plus', zoom_out: 'ctrl+minus',
+  zoom_reset: 'ctrl+0', switch_window: 'alt+Tab', show_desktop: 'super+d', fullscreen: 'F11', refresh: 'F5',
+};
+
 /** Folder windows («سكر الملفات») close through the shell, never by stopping explorer.exe itself. */
 const FOLDER_IDS = new Set(['explorer', 'downloads', 'documents', 'pictures']);
 
@@ -235,6 +263,26 @@ export function createPlatform(deps) {
     return r.ok ? { ok: true } : { ok: false, error: 'paste_failed' };
   }
 
+  /** Presses one key or shortcut from the fixed list in the window the person was using. */
+  async function pressKey(key) {
+    if (deps.beforeType) deps.beforeType(); // give the focus back to the person's window
+    await wait(250);
+    let r;
+    if (platform === 'win32') {
+      if (key === 'show_desktop') r = await powershell('(New-Object -ComObject Shell.Application).ToggleDesktop()');
+      else if (KEY_WIN[key]) r = await powershell(`$w = New-Object -ComObject WScript.Shell; $w.SendKeys('${KEY_WIN[key]}')`);
+      else return { ok: false, error: 'bad_key' };
+    } else if (platform === 'darwin') {
+      const k = KEY_MAC[key];
+      if (!k) return { ok: false, error: 'bad_key' };
+      r = await run('osascript', ['-e', `tell application "System Events" to ${k[0]}`]);
+    } else {
+      if (!KEY_LINUX[key]) return { ok: false, error: 'bad_key' };
+      r = await run('xdotool', ['key', '--clearmodifiers', KEY_LINUX[key]]);
+    }
+    return r.ok ? { ok: true } : { ok: false, error: 'key_failed' };
+  }
+
   async function screenshot(now = new Date()) {
     if (!deps.capture) return { ok: false, error: 'no_capture' };
     const png = await deps.capture();
@@ -247,5 +295,5 @@ export function createPlatform(deps) {
     return { ok: true, data: { file } };
   }
 
-  return { platform, openApp, closeApp, openInstalled, listInstalled, openUrl, openFolder, search, volume, typeText, screenshot };
+  return { platform, openApp, closeApp, openInstalled, listInstalled, pressKey, openUrl, openFolder, search, volume, typeText, screenshot };
 }

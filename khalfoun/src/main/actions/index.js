@@ -5,6 +5,7 @@
 import { decide } from '../../core/permissions.js';
 import { APPS } from '../../core/intents.js';
 import { organizeFolder, undoMoves } from './organize.js';
+import { KEY_IDS } from '../../core/keys.js';
 
 const APP_IDS = new Set(APPS.filter((a) => a.kind === 'app').map((a) => a.id));
 const URLS = new Set(APPS.filter((a) => a.kind === 'url').map((a) => a.url));
@@ -24,6 +25,7 @@ export function validateAction(action) {
     case 'open_app': return APP_IDS.has(p.app) ? null : 'bad_app';
     case 'close_app': return CLOSABLE.has(p.app) ? null : 'bad_app';
     case 'open_installed': return str(p.name, 60) ? null : 'bad_app';
+    case 'press_key': return KEY_IDS.has(p.key) ? null : 'bad_key';
     case 'open_url': return URLS.has(p.url) ? null : 'bad_url';
     case 'open_folder': return FOLDERS.has(p.folder) ? null : 'bad_folder';
     case 'search': return str(p.query, 300) && ['google', 'youtube'].includes(p.engine) ? null : 'bad_search';
@@ -36,7 +38,9 @@ export function validateAction(action) {
       if (p.repeat && p.minutes < 5) return 'bad_reminder';
       return p.note === undefined || (typeof p.note === 'string' && p.note.length <= 200) ? null : 'bad_reminder';
     case 'cancel_reminders': return null;
-    case 'pdf_write': return str(p.text, 600) && ['top', 'bottom'].includes(p.position) ? null : 'bad_pdf';
+    case 'pdf_write':
+      if (p.page !== undefined && !(Number.isInteger(p.page) && p.page >= 1 && p.page <= 2000)) return 'bad_pdf';
+      return str(p.text, 3000) && ['top', 'middle', 'bottom'].includes(p.position) ? null : 'bad_pdf';
     case 'organize_downloads': case 'undo_organize': return null;
     default: return 'unknown_action';
   }
@@ -60,6 +64,7 @@ export function createExecutor(deps) {
         case 'open_app': return await platform.openApp(p.app);
         case 'close_app': return await platform.closeApp(p.app);
         case 'open_installed': return await platform.openInstalled(p.name.trim());
+        case 'press_key': return await platform.pressKey(p.key);
         case 'open_url': return await platform.openUrl(p.url);
         case 'open_folder': return await platform.openFolder(p.folder);
         case 'search': return await platform.search(p.query.trim(), p.engine);
@@ -71,7 +76,7 @@ export function createExecutor(deps) {
           return { ok: true };
         case 'pdf_write': {
           if (!deps.writePdf) return { ok: false, error: 'unsupported' };
-          return await deps.writePdf(p.text, p.position);
+          return await deps.writePdf(p.text, p.position, p.page || 1);
         }
         case 'cancel_reminders':
           return { ok: true, data: { cancelled: deps.cancelReminders ? deps.cancelReminders() : 0 } };

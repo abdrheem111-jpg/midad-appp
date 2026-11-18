@@ -222,8 +222,8 @@ async function renderOverlayPdf(html, size) {
   }
 }
 
-async function writePdf(text, position, dirs) {
-  const res = await writeIntoLatestPdf({ dirs, text, position, render: renderOverlayPdf, fontCss: pdfFontCss });
+async function writePdf(text, position, dirs, page = 1) {
+  const res = await writeIntoLatestPdf({ dirs, text, position, page, render: renderOverlayPdf, fontCss: pdfFontCss });
   if (res.ok && !SMOKE) shell.openPath(res.data.file);
   return res;
 }
@@ -481,6 +481,14 @@ async function runSmokeTest(stores) {
     const pdfDone = await waitFor("(window.__khalfoun.brain.memory.data.log.at(-1) || {}).summary?.startsWith('كتابة في PDF')", 20000);
     const pdfLog = await js('window.__khalfoun.brain.memory.data.log.at(-1)');
     step('write Arabic text into a PDF copy', pdfDone && pdfLog.ok, pdfLog);
+    // Dictation into the PDF, page 2, bottom: lines collected, written at «خلاص».
+    for (const line of ['املي عليك في البي دي اف الصفحة الثانية تحت', 'الاسم أحمد', 'الدرجة ١٨ من ٢٠ نقطة', 'خلاص']) {
+      await hear(line);
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    const dictDone = await waitFor("(window.__khalfoun.brain.memory.data.log.at(-1) || {}).summary?.startsWith('إملاء في PDF')", 20000);
+    const dictLog = await js('window.__khalfoun.brain.memory.data.log.at(-1)');
+    step('dictate lines into page 2 of a PDF', dictDone && dictLog.ok, dictLog);
     // Main refuses an action the page should never send.
     const bad = await js("window.khalfoun.runAction({ id: 99, type: 'open_url', params: { url: 'https://evil.example' } })");
     step('main rejects unknown url', bad && bad.ok === false && bad.error === 'bad_url', bad);
@@ -548,6 +556,7 @@ async function start() {
     const { default: lib } = await import('pdf-lib');
     const sample = await lib.PDFDocument.create();
     sample.addPage([595, 842]);
+    sample.addPage([595, 842]);
     await writeFile(join(downloadsDir, 'نموذج.pdf'), await sample.save());
   }
 
@@ -564,7 +573,7 @@ async function start() {
   const executor = createExecutor({
     platform, getSettings: () => settings, downloadsDir, journal: stores.journal, scheduleReminder,
     cancelReminders: () => reminderScheduler.cancelAll(),
-    writePdf: (text, position) => writePdf(text, position, [downloadsDir, app.getPath('documents')]),
+    writePdf: (text, position, page) => writePdf(text, position, [downloadsDir, app.getPath('documents')], page),
   });
   try {
     const font = await readFile(join(ROOT, 'assets', 'fonts', 'Tajawal-700-arabic.woff2'));

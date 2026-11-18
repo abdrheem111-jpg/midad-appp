@@ -106,7 +106,11 @@ for (const [text, intent, slots] of [
 test('main validates PDF actions', () => {
   assert.equal(validateAction({ type: 'pdf_write', params: { text: 'x', position: 'top' } }), null);
   assert.equal(validateAction({ type: 'pdf_write', params: { text: '', position: 'top' } }), 'bad_pdf');
-  assert.equal(validateAction({ type: 'pdf_write', params: { text: 'x', position: 'middle' } }), 'bad_pdf');
+  assert.equal(validateAction({ type: 'pdf_write', params: { text: 'x', position: 'middle' } }), null);
+  assert.equal(validateAction({ type: 'pdf_write', params: { text: 'x', position: 'side' } }), 'bad_pdf');
+  assert.equal(validateAction({ type: 'pdf_write', params: { text: 'x', position: 'top', page: 2 } }), null);
+  assert.equal(validateAction({ type: 'pdf_write', params: { text: 'x', position: 'top', page: 0 } }), 'bad_pdf');
+  assert.equal(validateAction({ type: 'pdf_write', params: { text: 'x'.repeat(3001), position: 'top' } }), 'bad_pdf');
 });
 
 test('brain: writing asks first at level 2, signing needs a name and uses today', () => {
@@ -116,7 +120,7 @@ test('brain: writing asks first at level 2, signing needs a name and uses today'
   assert.equal(ask.awaitingConfirm, true);
   assert.match(ask.say, /نسخة جديدة/);
   const go = b.hear('ايوه');
-  assert.deepEqual(go.action.params, { text: 'موافق', position: 'top' });
+  assert.deepEqual(go.action.params, { text: 'موافق', position: 'top', page: 1 });
   assert.equal(b.actionResult(go.action.id, { ok: false, error: 'no_pdf' }).situation, 'pdf_none');
   assert.equal(b.hear('وقع الملف').situation, 'pdf_need_name');
   b.hear('اسمي سعيد');

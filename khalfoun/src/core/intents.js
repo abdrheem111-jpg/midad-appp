@@ -5,6 +5,7 @@
 import { normalize, hasPhrase, parseMinutes, parseClock } from './arabic.js';
 import { levenshtein } from './wake.js';
 import { calculate } from './calc.js';
+import { keyFor } from './keys.js';
 
 const N = (list) => list.map(normalize).sort((a, b) => b.length - a.length);
 
@@ -66,6 +67,18 @@ const L = {
   sleep: N(['نام', 'روح نام', 'نوم', 'تصبح على خير', 'وقت النوم']),
   wake: N(['اصحى', 'قوم', 'صح النوم', 'اصح', 'قم']),
   come: N(['تعال', 'تعال هني', 'تعال هنا', 'وينك', 'تعال عندي', 'اظهر']),
+  moveRight: N(['روح يمين', 'امش يمين', 'يمين', 'على اليمين', 'روح اليمين', 'روح على اليمين', 'شوي يمين', 'زح يمين', 'تحرك يمين']),
+  moveLeft: N(['روح يسار', 'امش يسار', 'يسار', 'على اليسار', 'روح اليسار', 'روح على اليسار', 'شوي يسار', 'زح يسار', 'تحرك يسار', 'روح شمال', 'شمال']),
+  edgeRight: N(['روح اقصى اليمين', 'روح اخر اليمين', 'اخر اليمين', 'اقصى اليمين']),
+  edgeLeft: N(['روح اقصى اليسار', 'روح اخر اليسار', 'اخر اليسار', 'اقصى اليسار']),
+  center: N(['تعال الوسط', 'روح الوسط', 'روح النص', 'تعال النص', 'الوسط', 'روح نص الشاشه', 'روح وسط الشاشه']),
+  climbUp: N(['اطلع فوق', 'نط فوق', 'اطلع فوق النافذه', 'اطلع على النافذه', 'اقفز فوق النافذه', 'اطلع على البرنامج', 'اطلع فوق البرنامج', 'اطلع']),
+  climbDown: N(['انزل تحت', 'انزل', 'نزل تحت', 'انزل من النافذه', 'انزل من فوق', 'نط تحت', 'انزل الارض']),
+  stay: N(['اثبت', 'اثبت مكانك', 'لا تتحرك', 'قف هنا', 'قف هني', 'خلك هني', 'خلك هنا', 'خلك مكانك', 'وقف مكانك', 'لا تتحرك من مكانك', 'ثبت']),
+  free: N(['تحرك براحتك', 'امش براحتك', 'تمشى', 'تمشي', 'تحرك', 'روح العب', 'خذ راحتك', 'تحرك على راحتك', 'تجول']),
+  run: N(['اركض', 'اركض شوي', 'روح اركض']),
+  turn: N(['التفت', 'التفت ورا', 'لف وجهك', 'دور وجهك', 'التفت الجهه الثانيه']),
+  toMouse: N(['تعال عند الماوس', 'روح عند الماوس', 'روح عند المؤشر', 'تعال عند المؤشر', 'تعال هني عند الماوس']),
   away: N(['روح الزاويه', 'ابعد', 'روح بعيد', 'خلني اركز', 'وضع التركيز', 'لا تزعجني', 'اختفي', 'روح ورا']),
   dance: N(['ارقص', 'رقصه', 'رقص', 'سو رقصه']),
   jump: N(['اقفز', 'نط', 'قفز']),
@@ -108,6 +121,46 @@ export const FEELINGS = [
 function APP_NAME_ONLY(text, app) {
   const rest = WANT.reduce((t, w) => (t.startsWith(`${w} `) ? t.slice(w.length + 1) : t), text).replace(/^(برنامج|مجلد|موقع) /, '');
   return app.names.includes(rest);
+}
+
+// ------------------------------------------------------------- PDF pages
+const ORDINALS = new Map([
+  ['الاولى', 1], ['الاولي', 1], ['الاول', 1], ['الثانيه', 2], ['الثاني', 2], ['الثالثه', 3], ['الثالث', 3], ['الرابعه', 4], ['الرابع', 4],
+  ['الخامسه', 5], ['الخامس', 5], ['السادسه', 6], ['السابعه', 7], ['الثامنه', 8], ['التاسعه', 9], ['العاشره', 10], ['الاخيره', 2000], ['الاخير', 2000],
+].map(([w, n]) => [normalize(w), n]));
+
+/** «في الصفحة الثانية» / «صفحة ٣» inside a sentence → {page, rest without it}. */
+export function takePage(rawText) {
+  const words = String(rawText).split(/\s+/).filter(Boolean);
+  for (let i = 0; i < words.length; i += 1) {
+    if (!/^(ال)?صفح(ه|ة)$/u.test(normalize(words[i]).replace('ة', 'ه'))) continue;
+    const nxt = normalize(words[i + 1] || '');
+    const page = ORDINALS.get(nxt) ?? (parseMinutesNumber(nxt));
+    if (!page) continue;
+    let from = i;
+    if (from > 0 && /^(في|ف|على|بـ?)$/u.test(normalize(words[from - 1]))) from -= 1;
+    const rest = [...words.slice(0, from), ...words.slice(i + 2)];
+    // «من البي دي اف» after the page words
+    return { page, rest: rest.join(' ').replace(/\s*(من|في)\s*(ال)?(ملف\s*)?(pdf|بي\s*دي\s*اف)\s*$/iu, '').trim() };
+  }
+  return { page: null, rest: String(rawText).trim() };
+}
+function parseMinutesNumber(token) {
+  if (/^\d+$/.test(token)) return Number(token);
+  const map = { واحد: 1, اثنين: 2, ثلاث: 3, ثلاثه: 3, اربع: 4, اربعه: 4, خمس: 5, خمسه: 5, ست: 6, سته: 6, سبع: 7, سبعه: 7, ثمان: 8, ثمانيه: 8, تسع: 9, تسعه: 9, عشر: 10, عشره: 10 };
+  return map[token] || null;
+}
+
+// ------------------------------------------------------------- dictation
+const DICTATE_START = /^(?:(?:ابدا|نبدا|خلنا نبدا|شغل|فعل)\s+)?(?:(?:ال)?املاء|وضع الاملاء|خلني املي عليك|بملي عليك|املي عليك|بملي|نملي|املي|اكتب اللي (?:اقوله|بقوله|اقول|بقول)|اكتب (?:ورايا|وراي)|اكتب كل (?:شي|اللي) (?:اقوله|بقوله|اقول))(?:\s|$)/;
+
+/** «ابدأ الإملاء», «املي عليك في البي دي اف الصفحة الثانية تحت» → {target, page, position}. */
+export function parseDictationStart(text) {
+  if (!DICTATE_START.test(text)) return null;
+  const pdf = / (البي دي اف|بي دي اف|بيدي اف|pdf|الملف|ملف) /.test(` ${text} `);
+  const { page } = takePage(text);
+  const position = / (تحت|الاسفل|اسفل) /.test(` ${text} `) ? 'bottom' : / (الوسط|النص|المنتصف|وسط) /.test(` ${text} `) ? 'middle' : 'top';
+  return { target: pdf ? 'pdf' : 'window', page: page || 1, position };
 }
 
 // ------------------------------------------------------------- teaching
@@ -353,7 +406,7 @@ export function recognize(raw) {
 }
 
 /** Intents a typo-corrected reading may produce. */
-const FUZZY_OK = new Set(['open', 'close', 'search', 'type_text', 'pdf_write', 'pdf_sign', 'volume', 'reminder', 'cancel_reminders',
+const FUZZY_OK = new Set(['key', 'open', 'close', 'search', 'type_text', 'pdf_write', 'pdf_sign', 'volume', 'reminder', 'cancel_reminders',
   'screenshot', 'time', 'date', 'joke', 'organize_downloads', 'quiz', 'help', 'dance', 'come', 'away', 'sounds', 'setup', 'open_settings']);
 let fuzzyPass = false;
 
@@ -379,11 +432,16 @@ function recognizeText(raw, fuzzy) {
   if (L.yesExact.includes(text)) return out('yes', {}, 0.95);
   if (L.noExact.includes(text)) return out('no', {}, 0.95);
 
+  // Keyboard by voice («انسخ», «الصق», «احفظ», «سكر التبويب»): whole sentences only.
+  const key = keyFor(text) || (text.startsWith('اضغط ') ? keyFor(text.slice(5)) : null);
+  if (key) return out('key', { key }, 0.9);
   // «كم ٢٥ ضرب ٤», «احسب ١٥٪ من ٢٠٠»: only when every word belongs to the calculation.
   if (calculate(raw)) return out('calc', { expr: String(raw).trim() }, 0.95);
   if (L.repeat.includes(text)) return out('repeat', {}, 0.85);
   if (L.closeIt.includes(text)) return out('close', { app: null, it: true }, 0.85);
   if (L.openIt.includes(text)) return out('open_again', {}, 0.85);
+  const dictate = parseDictationStart(text);
+  if (dictate) return out('dictate', dictate, 0.92);
   const teach = parseTeach(raw);
   if (teach) return out('teach', teach, 0.9);
   const forget = /^(?:انس|انسى|امسح|شيل|الغ|الغي)\s+(?:كلمه|كلمة|عباره|عبارة|جمله|جملة|الكلمه|العباره)\s+(.+)$/u.exec(normalize(raw).replace(/^(يا )?خلفون /, ''));
@@ -407,19 +465,23 @@ function recognizeText(raw, fuzzy) {
   if (typeVerb) {
     let content = rawRestAfter(raw, L.type, N(['هذا', 'هذي', 'هالكلام', 'الكلام', 'التالي'])) || '';
     // «اكتب ... في ملف الـPDF» writes into the newest PDF instead of the active window
-    const pdfTail = /\s*(فوق|تحت|في الأعلى|في الاعلى|في الأسفل|في الاسفل)?\s*(في|ف|على|بـ?)\s*(ملف\s*)?(ال)?(pdf|بي\s*دي\s*اف|بيدي\s*اف|بي\s*دي\s*إف|الـ\s*pdf)\s*(فوق|تحت|في الأعلى|في الاعلى|في الأسفل|في الاسفل)?\s*$/iu;
+    const pdfTail = /\s*(فوق|تحت|في الأعلى|في الاعلى|في الأسفل|في الاسفل|في الوسط|في النص)?\s*(في|ف|على|بـ?|من)\s*(ملف\s*)?(ال)?(pdf|بي\s*دي\s*اف|بيدي\s*اف|بي\s*دي\s*إف|الـ\s*pdf)\s*(فوق|تحت|في الأعلى|في الاعلى|في الأسفل|في الاسفل|في الوسط|في النص)?\s*$/iu;
     // «اكتب في البي دي اف ...» names the PDF first
     const pdfHead = /^\s*(في|ف|على)\s*(ملف\s*)?(ال)?(pdf|بي\s*دي\s*اف|بيدي\s*اف|بي\s*دي\s*إف)\s*[:،,]?\s*/iu;
+    const paged = takePage(content);
+    const pageWords = paged.page ? ` ${content} ` : '';
+    if (paged.page) content = paged.rest;
+    const where = (w) => (/(تحت|الأسفل|الاسفل)/.test(w) ? 'bottom' : /(الوسط|النص|المنتصف)/.test(w) ? 'middle' : 'top');
     const h = content.match(pdfHead);
     if (h) {
       const rest = content.slice(h[0].length).trim();
-      return out('pdf_write', { text: rest, position: 'top' }, rest ? 0.9 : 0.6);
+      return out('pdf_write', { text: rest, position: 'top', page: paged.page || 1 }, rest ? 0.9 : 0.6);
     }
     const m = content.match(pdfTail);
-    if (m) {
-      const where = `${m[1] || ''} ${m[6] || ''}`;
-      content = content.slice(0, m.index).trim();
-      return out('pdf_write', { text: content, position: /(تحت|الأسفل|الاسفل)/.test(where) ? 'bottom' : 'top' }, content ? 0.92 : 0.6);
+    if (m || (paged.page && / (pdf|بي دي اف|البي دي اف) /iu.test(pageWords))) {
+      const at = m ? `${m[1] || ''} ${m[6] || ''}` : '';
+      if (m) content = content.slice(0, m.index).trim();
+      return out('pdf_write', { text: content, position: where(at), page: paged.page || 1 }, content ? 0.92 : 0.6);
     }
     return out('type_text', { text: content }, content ? 0.93 : 0.6);
   }
@@ -446,7 +508,7 @@ function recognizeText(raw, fuzzy) {
   }
 
   if (startsWithPhrase(text, L.organize) && findApp(text)?.id === 'downloads') return out('organize_downloads');
-  if (startsWithPhrase(text, L.undo) && /(ترتيب|رتبت|تنزيلات|التنزيلات|رجع|تراجع)/.test(text)) return out('undo_organize', {}, 0.85);
+  if (startsWithPhrase(text, L.undo) && /(ترتيب|رتبت|تنزيلات|التنزيلات)/.test(text)) return out('undo_organize', {}, 0.85);
 
   // «جهّز الاستماع» / «نزّل عقلك»: shows the one-click setup in the settings panel.
   const setupMatch = /^(جهز|ركب|نزل|ثبت|حمل)( لي| لك)? (ال)?(استماع|سماعه|سماعتك|اذانك|اذنك|عقل|عقلك|مخ|مخك|ذكاء|ذكاءك)( |$)/.exec(text);
@@ -487,6 +549,10 @@ function recognizeText(raw, fuzzy) {
   if (startsWithPhrase(text, L.jump)) return out('jump');
   if (startsWithPhrase(text, L.sleep) || findPhrase(padded, N(['تصبح على خير']))) return out('sleep');
   if (startsWithPhrase(text, L.wake)) return out('wake');
+  for (const [list, dir] of [[L.edgeRight, 'edge_right'], [L.edgeLeft, 'edge_left'], [L.moveRight, 'right'], [L.moveLeft, 'left'], [L.center, 'center'],
+    [L.climbUp, 'up'], [L.climbDown, 'down'], [L.stay, 'stay'], [L.free, 'free'], [L.run, 'run'], [L.turn, 'turn'], [L.toMouse, 'mouse']]) {
+    if (list.includes(text)) return out('move', { dir }, 0.9);
+  }
   if (startsWithPhrase(text, L.come)) return out('come');
 
   const nameVerb = startsWithPhrase(text, L.setName);

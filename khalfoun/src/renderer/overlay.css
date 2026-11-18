@@ -96,6 +96,21 @@ html.preview body {
   animation: ear-pulse 2.2s ease-out infinite;
 }
 .ear.heard { background: var(--gold); }
+.dictation {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 6;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: #2a1a10;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(42, 26, 16, 0.3);
+  pointer-events: none;
+}
 @keyframes ear-pulse {
   from { transform: scale(0.8); opacity: 0.8; }
   to { transform: scale(1.5); opacity: 0; }

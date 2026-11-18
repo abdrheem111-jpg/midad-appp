@@ -27,7 +27,7 @@ if (isPreview) document.documentElement.classList.add('preview');
 
 const els = {
   stage: $('stage'), bubble: $('bubble'), bubbleText: $('bubble-text'), command: $('command'), input: $('command-input'),
-  mic: $('mic'), micLevel: $('mic-level'), onboarding: $('onboarding'), settings: $('settings'), ear: $('ear'),
+  mic: $('mic'), micLevel: $('mic-level'), onboarding: $('onboarding'), settings: $('settings'), ear: $('ear'), dictation: $('dictation'),
 };
 
 const workArea = () => ({ width: window.innerWidth, height: window.innerHeight - (isPreview ? PREVIEW_TASKBAR : 0) });
@@ -114,6 +114,20 @@ function handle(reply) {
     case 'dance': if (!reply.animation || reply.animation === 'dance') animator.play(Math.random() < 0.5 ? 'cane_dance' : 'dance', 4.8); else animator.play(reply.animation, 4.8); break;
     case 'jump': animator.play('jump'); break;
     case 'stop': motion.stop(); animator.stop(); break;
+    case 'move:right': motion.free(); motion.step(260); break;
+    case 'move:left': motion.free(); motion.step(-260); break;
+    case 'move:edge_right': motion.free(); motion.toEdge(1); break;
+    case 'move:edge_left': motion.free(); motion.toEdge(-1); break;
+    case 'move:center': motion.free(); motion.goToX(window.innerWidth / 2); break;
+    case 'move:run': motion.free(); motion.toEdge(motion.center < window.innerWidth / 2 ? 1 : -1); break;
+    case 'move:mouse': motion.free(); motion.goToX(lastMouseX ?? window.innerWidth / 2); break;
+    case 'move:up': if (!motion.climbUp()) handle(brain.reply('move_up_none')); break;
+    case 'move:down': if (!motion.climbDown()) handle(brain.reply('move_down_none')); break;
+    case 'move:stay': motion.stay(); break;
+    case 'move:free': motion.free(); break;
+    case 'move:turn': motion.turn(); character.setFacing(motion.facing); break;
+    case 'dictation_on': els.dictation.hidden = false; updateWake(); break;
+    case 'dictation_off': els.dictation.hidden = true; updateWake(); break;
     case 'open_settings': openSettings(String(reply.situation || '').startsWith('setup_hint') ? 'setup' : null); break;
     default: break;
   }
@@ -246,7 +260,8 @@ const wake = new WakeListener({
 
 /** Starts or stops always-on listening to match the setting. */
 function updateWake() {
-  const want = Boolean(brain?.memory.data.alwaysListen && voiceAvailable);
+  // While dictating, listen all the time (no «يا خلفون» needed) if voice is installed.
+  const want = Boolean((brain?.memory.data.alwaysListen || brain?.dictation) && voiceAvailable);
   if (want && !wake.active) wake.start().then(() => { els.ear.hidden = !wake.active; });
   if (!want && wake.active) wake.stop();
   els.ear.hidden = !want;
@@ -256,6 +271,16 @@ async function onWakeSentence(wav) {
   if (wakeBusy || recorder.active || panelsOpen()) return;
   wakeBusy = true;
   try {
+    if (brain.dictation) {
+      // Dictation: every sentence counts, read with the accurate model.
+      const res = await bridge.transcribe(wav, 'command');
+      if (res?.ok && res.text) {
+        const hit = findWakeWord(res.text);
+        const said = hit.found ? hit.rest : res.text;
+        if (said) hear(said);
+      }
+      return;
+    }
     const res = await bridge.transcribe(wav, 'wake');
     if (!res?.ok || !res.text) return;
     const hit = findWakeWord(res.text);
@@ -308,7 +333,9 @@ function setInteractive(on) {
 
 const panelsOpen = () => !els.onboarding.hidden || !els.settings.hidden;
 
+let lastMouseX = null;
 document.addEventListener('mousemove', (e) => {
+  lastMouseX = e.clientX;
   const over = e.target instanceof Element && e.target.closest('.stage, .bubble, .command, .panel');
   setInteractive(Boolean(over) || panelsOpen() || !els.command.hidden && document.activeElement === els.input);
   if (motion.mode !== 'drag') {
@@ -641,6 +668,10 @@ function layout() {
   els.stage.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
   const cx = x + CHAR_W / 2;
   if (!els.ear.hidden) els.ear.style.transform = `translate(${(x + 6).toFixed(1)}px, ${(y + 100).toFixed(1)}px)`;
+  if (!els.dictation.hidden) {
+    const w = els.dictation.offsetWidth;
+    els.dictation.style.transform = `translate(${Math.min(Math.max(4, x + CHAR_W / 2 - w / 2), window.innerWidth - w - 4).toFixed(1)}px, ${(y + CHAR_H - 28).toFixed(1)}px)`;
+  }
   let top = y + 4;
   if (!els.command.hidden) {
     const w = els.command.offsetWidth;

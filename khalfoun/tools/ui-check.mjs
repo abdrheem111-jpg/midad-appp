@@ -101,6 +101,36 @@ await check('two commands in one sentence run one after the other, and «سكر�
   assert(last.type === 'close_app' && last.params.app === 'paint', JSON.stringify(last));
 });
 
+await check('dictation: badge, every sentence typed with punctuation, «خلاص» ends it', async () => {
+  await page.evaluate(() => window.__khalfoun.hear('ابدأ الإملاء'));
+  await page.waitForTimeout(400);
+  assert(!(await page.evaluate(() => document.getElementById('dictation').hidden)), 'badge hidden');
+  await page.screenshot({ path: `${outDir}/13-dictation.png` });
+  const before = await page.evaluate(() => window.__khalfoun.bridge._actions.length);
+  await page.evaluate(() => window.__khalfoun.hear('السلام عليكم فاصلة كيف حالك علامة استفهام'));
+  await page.evaluate(() => window.__khalfoun.hear('افتح الحاسبة'));
+  await page.waitForTimeout(800);
+  const acts = await page.evaluate((n) => window.__khalfoun.bridge._actions.slice(n), before);
+  assert(acts.length === 2 && acts[0].params.text === 'السلام عليكم، كيف حالك؟ ' && acts[1].type === 'type_text', JSON.stringify(acts));
+  await page.evaluate(() => window.__khalfoun.hear('خلاص'));
+  await page.waitForTimeout(400);
+  assert(await page.evaluate(() => document.getElementById('dictation').hidden), 'badge still shown');
+});
+
+await check('movement on command: right, stay, free', async () => {
+  const x0 = await page.evaluate(() => { window.__khalfoun.motion.paused = false; return window.__khalfoun.motion.x; });
+  await page.evaluate(() => window.__khalfoun.hear('روح يسار'));
+  await page.waitForTimeout(3500);
+  const x1 = await page.evaluate(() => window.__khalfoun.motion.x);
+  assert(x1 < x0 - 150, `x ${x0} → ${x1}`);
+  await page.evaluate(() => window.__khalfoun.hear('اثبت مكانك'));
+  await page.waitForTimeout(300);
+  assert((await page.evaluate(() => window.__khalfoun.motion.mode)) === 'focus', 'not staying');
+  await page.evaluate(() => window.__khalfoun.hear('تحرك براحتك'));
+  await page.waitForTimeout(300);
+  assert(!(await page.evaluate(() => window.__khalfoun.motion.focus)), 'still focused');
+});
+
 await check('search and typing at full trust', async () => {
   await hear('دور لي عن مطاعم في مسقط');
   let last = await page.evaluate(() => window.__khalfoun.bridge._actions.at(-1));

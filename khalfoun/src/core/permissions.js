@@ -1,3 +1,5 @@
+import { isEditingKey } from './keys.js';
+
 // Permission levels chosen by the user at first run, and the rule that decides
 // whether an action may run, needs a spoken "yes", or is refused.
 // The same rule runs in the renderer (to talk about it) and again in the main
@@ -45,7 +47,8 @@ export const KIDS_SAFE_HOSTS = ['www.google.com', 'www.youtube.com', 'youtube.co
  * @returns {{allowed: boolean, confirm: boolean, reason: string}}
  */
 export function decide(action, settings) {
-  const risk = ACTION_RISK[action?.type];
+  // Keys that change content (paste, delete, enter...) are edits; the rest are like volume.
+  const risk = action?.type === 'press_key' ? (isEditingKey(action.params?.key) ? 'modify' : 'system') : ACTION_RISK[action?.type];
   const level = Number(settings?.level) || 0;
   if (!risk) return { allowed: false, confirm: false, reason: 'unknown_action' };
   if (risk === 'none') return { allowed: true, confirm: false, reason: 'ok' };

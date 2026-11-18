@@ -44,13 +44,13 @@ export async function copyName(file) {
 /** HTML for the transparent overlay page; sizes in PDF points (1/72 inch). */
 export function overlayHtml({ width, height, text, position, fontCss = '' }) {
   const esc = String(text).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-  const vertical = position === 'bottom' ? 'bottom: 48pt;' : 'top: 44pt;';
+  const vertical = position === 'bottom' ? 'bottom: 48pt;' : position === 'middle' ? 'top: 50%; transform: translateY(-50%);' : 'top: 44pt;';
   return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
 ${fontCss}
 @page { size: ${width}pt ${height}pt; margin: 0; }
 html, body { margin: 0; width: ${width}pt; height: ${height}pt; background: transparent; }
 .ink { position: absolute; ${vertical} right: 44pt; max-width: ${Math.round(width * 0.8)}pt;
-  font-family: 'Tajawal', 'Segoe UI', Tahoma, sans-serif; font-weight: 700; font-size: 16pt; line-height: 1.5;
+  font-family: 'Tajawal', 'Segoe UI', Tahoma, sans-serif; font-weight: 700; font-size: ${String(text).length > 400 ? 12 : 16}pt; line-height: 1.5;
   color: #1B2F7A; unicode-bidi: plaintext; text-align: right; white-space: pre-wrap; }
 </style></head><body><div class="ink">${esc}</div></body></html>`;
 }
@@ -81,15 +81,22 @@ export async function pageSize(file, pageIndex = 0) {
 
 /**
  * Whole action: newest PDF -> overlay with the text -> stamped copy.
- * @param {{dirs: string[], text: string, position: 'top'|'bottom', render: (html: string, size: {width: number, height: number}) => Promise<Uint8Array>, fontCss?: string}} opts
+ * @param {{dirs: string[], text: string, position: 'top'|'middle'|'bottom', page?: number, render: (html: string, size: {width: number, height: number}) => Promise<Uint8Array>, fontCss?: string}} opts
  */
 export async function writeIntoLatestPdf(opts) {
   const file = await findLatestPdf(opts.dirs);
   if (!file) return { ok: false, error: 'no_pdf' };
   let size;
-  try { size = await pageSize(file); } catch { return { ok: false, error: 'pdf_unreadable' }; }
+  let pages = 1;
+  try {
+    const doc = await PDFDocument.load(await readFile(file), { updateMetadata: false });
+    pages = doc.getPageCount();
+  } catch { return { ok: false, error: 'pdf_unreadable' }; }
+  // «في الصفحة الثانية»: pages count from 1; past the end means the last page.
+  const pageIndex = Math.min(Math.max(1, Number(opts.page) || 1), pages) - 1;
+  try { size = await pageSize(file, pageIndex); } catch { return { ok: false, error: 'pdf_unreadable' }; }
   const html = overlayHtml({ ...size, text: opts.text, position: opts.position, fontCss: opts.fontCss });
   const overlay = await opts.render(html, size);
-  const out = await stampPdf(file, overlay);
-  return { ok: true, data: { file: out, source: file } };
+  const out = await stampPdf(file, overlay, pageIndex);
+  return { ok: true, data: { file: out, source: file, page: pageIndex + 1, pages } };
 }

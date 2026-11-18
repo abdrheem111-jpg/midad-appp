@@ -12,6 +12,7 @@ import { TEMPLATES, APP_NAMES } from './templates/ar-om.js';
 import { Quiz, parseArabicNumber } from './quiz.js';
 import { occasionFor } from './occasions.js';
 import { calculate } from './calc.js';
+import { KEYS } from './keys.js';
 
 const FEELING_LABEL = { tired: 'تعبان', sad: 'متضايق', sick: 'مريض', stressed: 'مضغوط' };
 const HOUR = 60 * 60 * 1000;
@@ -65,6 +66,7 @@ export class Brain {
     // and commands still waiting from a sentence that held several.
     this.context = { lastOpen: null, lastCommand: null, lastUnknown: null };
     this.queue = [];
+    this.dictation = null; // {target: 'window'|'pdf', lines, page, position, lastAt}
   }
 
   get settings() {
@@ -139,7 +141,7 @@ export class Brain {
     this.memory.touch(now);
     this.learnFromReaction(raw, now);
     // A sentence with several commands runs them one after another.
-    if (!this.pending && !this.quiz) {
+    if (!this.pending && !this.quiz && !this.dictation) {
       const parts = splitCommands(raw);
       if (parts.length > 1) {
         this.queue = parts.slice(1);
@@ -164,6 +166,7 @@ export class Brain {
   }
 
   hearOne(raw, now) {
+    if (this.dictation && !this.pending) return this.dictate(raw, now);
     // Phrases the person taught («لما أقول صباحو يعني افتح المتصفح»).
     const taught = (this.memory.data.aliases || {})[phraseKey(raw)];
     const heard = taught ? taught : raw;
@@ -186,6 +189,11 @@ export class Brain {
           this.memory.set({ routineAsked: { ...(this.memory.data.routineAsked || {}), [pending.key]: true } });
           return this.reply('cancelled', { event: null });
         }
+      }
+      if (pending.kind === 'dictate') {
+        this.pending = null;
+        if (r.intent === 'yes') return pending.start();
+        if (r.intent === 'no' || r.intent === 'stop') return this.reply('cancelled', { event: null });
       }
       if (pending.kind === 'suggest' || pending.kind === 'learn') {
         if (r.intent === 'yes') {
@@ -221,9 +229,62 @@ export class Brain {
     return out;
   }
 
+  /**
+   * One sentence while dictating: typed where the cursor is (or collected for
+   * the PDF), with spoken punctuation, until «خلاص».
+   */
+  dictate(raw, now) {
+    const d = this.dictation;
+    d.lastAt = now;
+    const n = phraseKey(raw);
+    if (DICTATION_END.has(n)) return this.finishDictation(now);
+    if (DICTATION_CANCEL.has(n)) {
+      this.dictation = null;
+      this.emotions.feel('focus_mode', now);
+      return this.reply('dictation_cancelled', { behavior: 'dictation_off' });
+    }
+    if (DICTATION_UNDO.has(n)) {
+      if (d.target === 'pdf') {
+        const removed = d.lines.pop();
+        return this.reply(removed ? 'dictation_removed' : 'dictation_nothing');
+      }
+      return this.launch({ type: 'press_key', params: { key: 'undo' } }, { situation: 'dictation_removed', sayOn: 'start', summary: 'إملاء: مسح آخر جملة', dictation: true }, now, null);
+    }
+    const text = spokenPunctuation(raw);
+    if (!text.trim() && text !== '\n') return this.silent();
+    if (d.target === 'pdf') {
+      d.lines.push(text);
+      const preview = text.length > 50 ? `${text.slice(0, 50)}…` : text;
+      return { ...this.reply('dictation_line', { vars: { text: preview }, event: null }), animation: 'nod' };
+    }
+    d.typed += 1;
+    // Each sentence is followed by a space, so the next one does not stick to it.
+    const typed = /[\n]$/.test(text) ? text : `${text} `;
+    const id = this.nextId;
+    this.nextId += 1;
+    const action = { id, type: 'type_text', params: { text: typed } };
+    this.inflight.set(id, { situation: 'dictation_typed', sayOn: 'none', summary: `إملاء: ${text.slice(0, 30)}`, action, dictation: true });
+    return { ...this.silent(), animation: 'nod', situation: 'dictation_typed', action };
+  }
+
+  finishDictation(now) {
+    const d = this.dictation;
+    this.dictation = null;
+    if (d.target === 'pdf') {
+      const text = d.lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+      if (!text) { this.emotions.feel('confused', now); return this.reply('dictation_empty', { behavior: 'dictation_off' }); }
+      const preview = text.length > 40 ? `${text.slice(0, 40)}…` : text;
+      const out = this.launch({ type: 'pdf_write', params: { text: text.slice(0, 3000), position: d.position, page: d.page } },
+        { situation: 'pdf_ok', sayOn: 'result', summary: `إملاء في PDF: ${preview}` }, now, 'dictation_writing');
+      return { ...out, behavior: 'dictation_off' };
+    }
+    this.emotions.feel('success', now);
+    return this.reply(d.typed ? 'dictation_done' : 'dictation_empty', { vars: { count: toArabicDigits(d.typed) }, behavior: 'dictation_off' });
+  }
+
   /** Keeps the context used by follow-ups and by learning the person's words. */
   remember(r, raw, out, now) {
-    const REPEATABLE = ['volume', 'joke', 'calc', 'dance', 'jump', 'open', 'search', 'time', 'quiz', 'screenshot'];
+    const REPEATABLE = ['move', 'key', 'volume', 'joke', 'calc', 'dance', 'jump', 'open', 'search', 'time', 'quiz', 'screenshot'];
     if (REPEATABLE.includes(r.intent)) this.context.lastCommand = { raw, at: now };
     if (out?.situation === 'not_understood') this.context.lastUnknown = { raw, at: now };
     else if (r.intent !== 'repeat' && out?.action && this.context.lastUnknown) {
@@ -297,6 +358,7 @@ export class Brain {
     this.memory.log({ action: spec.action.type, ok: !!result?.ok, error: result?.error || null, summary: spec.summary || '' }, now);
     if (!result || !result.ok) {
       this.emotions.feel('error', now);
+      if (spec.dictation && this.dictation) { this.dictation = null; return this.reply('dictation_failed', { behavior: 'dictation_off' }); }
       if (result?.error === 'not_running') return this.reply('close_not_running', { vars: spec.vars || {} });
       if (result?.error === 'not_installed') {
         const target = spec.vars?.target || '';
@@ -315,6 +377,7 @@ export class Brain {
       if (result?.error === 'no_pdf') return this.reply('pdf_none');
       return this.reply('failed');
     }
+    if (spec.dictation) return spec.sayOn === 'result' ? this.reply(spec.situation) : null;
     this.markSuccess(now);
     if (spec.learnFrom && !this.pending) {
       this.pending = { kind: 'learn', ...spec.learnFrom };
@@ -352,6 +415,9 @@ export class Brain {
   /** Called every few seconds by the shell; may return an idle remark. */
   tick() {
     const now = this.clock();
+    if (this.dictation && now - this.dictation.lastAt > 10 * 60000) {
+      if (this.dictation.target === 'window') { this.dictation = null; return this.reply('dictation_timeout', { behavior: 'dictation_off' }); }
+    }
     const before = this.emotions.current.emotion;
     const snap = this.emotions.tick(now);
     if (this.focus || snap.asleep) {
@@ -396,6 +462,11 @@ export class Brain {
       case 'date': this.emotions.feel('success', now); return this.reply('date', { vars: { date: this.formatDate(now), day: this.formatDay(now) } });
       case 'sleep': this.emotions.sleep(now); return this.reply('sleep', { behavior: 'sleep', event: null });
       case 'wake': this.emotions.feel('wake', now); return this.reply('wake', { behavior: 'wake' });
+      case 'move':
+        if (s.dir === 'stay') this.focus = true;
+        if (s.dir === 'free') this.focus = false;
+        this.emotions.feel(s.dir === 'stay' ? 'focus_mode' : 'curious', now);
+        return this.reply(`move_${s.dir}`, { behavior: `move:${s.dir}` });
       case 'come': this.focus = false; this.emotions.feel('curious', now); return this.reply('come', { behavior: 'come' });
       case 'away': this.focus = true; this.emotions.feel('focus_mode', now); return this.reply('away', { behavior: 'away' });
       case 'dance': this.emotions.feel('dance', now); return this.reply('dance', { behavior: 'dance' });
@@ -419,6 +490,28 @@ export class Brain {
         this.memory.set({ name: s.name });
         this.emotions.feel('greet', now);
         return this.reply('set_name');
+      case 'dictate': {
+        // Typing is an edit: check the permission once for the whole session.
+        const probe = s.target === 'pdf' ? { type: 'pdf_write', params: { text: 'x', position: 'top' } } : { type: 'type_text', params: { text: 'x' } };
+        const verdict = decide(probe, this.memory.data);
+        if (!verdict.allowed) { this.emotions.feel('error', now); return this.reply(verdict.reason === 'kids_mode' ? 'kids_blocked' : 'need_level'); }
+        const start = () => {
+          this.dictation = { target: s.target, lines: [], page: s.page || 1, position: s.position || 'top', lastAt: now, typed: 0 };
+          this.emotions.feel('listening', now);
+          return this.reply(s.target === 'pdf' ? 'dictation_start_pdf' : 'dictation_start', { behavior: 'dictation_on' });
+        };
+        if (verdict.confirm) {
+          this.pending = { kind: 'dictate', start };
+          this.emotions.feel('curious', now);
+          return this.reply('confirm_ask', { vars: { what: s.target === 'pdf' ? 'أكتب كل اللي تمليه علي في آخر ملف PDF' : 'أكتب كل اللي تقوله حيث المؤشر لين تقول «خلاص»' }, awaitingConfirm: true });
+        }
+        return start();
+      }
+      case 'key': {
+        const name = KEYS[s.key]?.ar || s.key;
+        return this.plan({ type: 'press_key', params: { key: s.key } },
+          { situation: 'key_ok', sayOn: 'start', vars: { key: name }, confirmWhat: `أضغط «${name}»`, summary: `زر: ${name}` }, now);
+      }
       case 'calc': {
         const res = calculate(s.expr);
         if (!res?.ok) {
@@ -512,7 +605,7 @@ export class Brain {
         }
         if (!text) { this.emotions.feel('not_understood', now); return this.reply('pdf_empty'); }
         const preview = text.length > 40 ? `${text.slice(0, 40)}…` : text;
-        return this.plan({ type: 'pdf_write', params: { text, position: s.position || 'top' } },
+        return this.plan({ type: 'pdf_write', params: { text, position: s.position || 'top', page: s.page || 1 } },
           { situation: 'pdf_ok', sayOn: 'result', confirmWhat: `أكتب «${preview}» في آخر ملف PDF (في نسخة جديدة، والأصل يبقى مثل ما هو)`, summary: `كتابة في PDF: ${preview}` }, now);
       }
       case 'reminder': {
@@ -874,6 +967,21 @@ export class Brain {
       action: null,
     };
   }
+}
+
+const DICTATION_END = new Set(['خلاص', 'خلصت', 'انتهيت', 'تم', 'بس خلاص', 'خلاص بس', 'وقف الاملاء', 'خلاص الاملاء', 'انهي الاملاء', 'وقف', 'بس', 'خلصنا', 'كفايه'].map(normalize));
+const DICTATION_CANCEL = new Set(['الغ الاملاء', 'الغي الاملاء', 'كنسل الاملاء', 'لا تكتب شي', 'انس اللي قلته'].map(normalize));
+const DICTATION_UNDO = new Set(['امسح اخر جمله', 'امسح الجمله', 'امسح اللي قلته', 'امسح الجمله الاخيره', 'شيل اخر جمله', 'امسحها', 'غلط امسحها'].map(normalize));
+const PUNCT = [
+  [/(^|\s)(سطر جديد|سطر ثاني|نزل سطر)(?=\s|$)/gu, '\n'], [/(^|\s)(علامه|علامة) (استفهام)(?=\s|$)/gu, '؟'], [/(^|\s)(علامه|علامة) (تعجب)(?=\s|$)/gu, '!'],
+  [/(^|\s)(نقطتين)(?=\s|$)/gu, ':'], [/(^|\s)(فاصله|فاصلة)(?=\s|$)/gu, '،'], [/(^|\s)(نقطه|نقطة)(?=\s|$)/gu, '.'],
+];
+
+/** «السلام عليكم فاصلة كيف حالك علامة استفهام» → «السلام عليكم، كيف حالك؟». */
+export function spokenPunctuation(raw) {
+  let t = ` ${String(raw || '').trim()} `;
+  for (const [re, mark] of PUNCT) t = t.replace(re, mark === '\n' ? '\n' : mark);
+  return t.replace(/[ \t]*\n[ \t]*/g, '\n').replace(/[ \t]+([.،؟!:])/g, '$1').replace(/[ \t]{2,}/g, ' ').replace(/^[ \t]+|[ \t]+$/g, '');
 }
 
 function noteSuffix(note) {

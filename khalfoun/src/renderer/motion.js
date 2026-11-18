@@ -161,6 +161,65 @@ export class Motion {
     else this.walkTo(this.maxX, false);
   }
 
+  // ----- moving on command («روح يمين», «اطلع فوق», «اثبت مكانك»)
+
+  /** Walks a distance to the right (dx > 0) or left on whatever he stands on. */
+  step(dx, run = false) {
+    this.walkTo(this.x + dx, run);
+    return this.mode === 'walk' || this.mode === 'run';
+  }
+
+  /** Runs to the far right (side > 0) or far left. */
+  toEdge(side) {
+    if (this.support) { this.hopTo(side > 0 ? this.maxX : 0, this.floor, null); return true; }
+    this.walkTo(side > 0 ? this.maxX : 0, true);
+    return true;
+  }
+
+  /** Goes to a screen x (e.g. under the mouse), jumping down first if needed. */
+  goToX(cx) {
+    const x = cx - this.size.width / 2;
+    if (this.support) this.hopTo(x, this.floor, null);
+    else this.walkTo(x, true);
+    return true;
+  }
+
+  /** Jumps up onto the nearest window he can reach. Returns false when none is in reach. */
+  climbUp() {
+    const options = this.reachable().filter((p) => p.y < this.y + this.size.height - 20);
+    if (!options.length) return false;
+    const cx = this.center;
+    const dist = (p) => (cx < p.x1 ? p.x1 - cx : cx > p.x2 ? cx - p.x2 : 0) + (this.y - p.y) * 0.2;
+    const p = options.sort((a, b) => dist(a) - dist(b))[0];
+    const half = this.size.width / 2;
+    const landX = clamp(cx, p.x1 + half * 0.6, p.x2 - half * 0.6) - half;
+    this.hopTo(landX, p.y - this.size.height, { id: p.id, y: p.y });
+    return true;
+  }
+
+  /** Jumps down to the floor. Returns false when he is already on it. */
+  climbDown() {
+    if (!this.support) return false;
+    this.hopTo(this.x, this.floor, null);
+    return true;
+  }
+
+  /** «اثبت مكانك»: stays put (no wandering) until told to move freely again. */
+  stay() {
+    this.stop();
+    this.focus = true;
+    if (this.mode === 'idle') this.mode = 'focus';
+  }
+
+  /** «تحرك براحتك»: wanders again. */
+  free() {
+    this.focus = false;
+    if (this.mode === 'focus') this.mode = 'idle';
+    this.idleFor = 0;
+  }
+
+  turn() { this.facing = -this.facing; }
+
   sleep() { if (this.mode !== 'drag' && this.mode !== 'fall' && this.mode !== 'hop') this.mode = 'sleep'; }
 
   wake() { if (this.mode === 'sleep') this.mode = this.focus ? 'focus' : 'idle'; this.idleFor = 0; }
