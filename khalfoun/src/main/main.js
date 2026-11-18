@@ -12,7 +12,7 @@ import {
 import { readFile, mkdtemp, writeFile, mkdir, stat, rm } from 'node:fs/promises';
 import { watch as watchFolder } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { join, extname, normalize, relative, sep } from 'node:path';
+import { join, extname, normalize, relative, sep, basename } from 'node:path';
 import { tmpdir, cpus } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { JsonStore } from './storage.js';
@@ -445,12 +445,21 @@ function setupIpc(stores, executor) {
   });
 
   let sttBusy = false;
+  let sttQueue = Promise.resolve();
+  // Learned on this computer: when the accurate model is too slow, commands use the quick one.
+  let sttFast = false;
   ipcMain.handle('voice:transcribe', async (event, wav, purpose) => {
     if (!fromApp(event)) return { ok: false, error: 'forbidden' };
     const bytes = wav instanceof Uint8Array ? wav : new Uint8Array(wav || []);
     const isWake = purpose === 'wake';
     // Wake-word checks are skipped while another recognition runs, so they never pile up.
     if (isWake && sttBusy) return { ok: false, error: 'busy' };
+    // One whisper at a time: several at once (seen when the mic was pressed again and again)
+    // made each of them so slow that all were stopped.
+    const turn = sttQueue;
+    let release;
+    sttQueue = new Promise((r) => { release = r; });
+    await turn;
     sttBusy = true;
     try {
       // Use most cores for a command (faster answer), fewer for wake-word checks running in the background.
@@ -460,11 +469,19 @@ function setupIpc(stores, executor) {
       if (!isWake) {
         try { words = Object.keys((await stores.memory.read()).aliases || {}); } catch { words = []; }
       }
-      const res = await transcribe(whisper, bytes, { purpose: isWake ? 'wake' : 'command', threads, words });
-      if (!isWake || !res.ok) diag.write(`voice (${isWake ? 'wake' : 'command'}, ${bytes.length} bytes) →`, res.ok ? `«${res.text}»` : `failed: ${res.error}`);
+      const res = await transcribe(whisper, bytes, { purpose: isWake ? 'wake' : 'command', threads, words, fast: sttFast });
+      if (!isWake && res.ok) {
+        if (res.model !== whisper.model || res.ms > 15000) sttFast = Boolean(whisper.wakeModel && whisper.wakeModel !== whisper.model);
+        else if (res.ms < 5000) sttFast = false;
+      }
+      if (!isWake || !res.ok) {
+        const how = res.ok ? ` (${(res.ms / 1000).toFixed(1)} s, ${basename(res.model || '')}${sttFast ? ', quick mode' : ''})` : '';
+        diag.write(`voice (${isWake ? 'wake' : 'command'}, ${bytes.length} bytes) →`, res.ok ? `«${res.text}»${how}` : `failed: ${res.error}`);
+      }
       return res;
     } finally {
       sttBusy = false;
+      release();
     }
   });
 
@@ -517,7 +534,7 @@ function setupIpc(stores, executor) {
     const p = payload && typeof payload === 'object' ? payload : {};
     const history = Array.isArray(p.history) ? p.history.slice(-4).map((h) => ({ user: String(h?.user || ''), khalfoun: String(h?.khalfoun || '') })) : [];
     // Kids mode comes from the main process settings, not from the page.
-    return chat.reply({ text: String(p.text || '').slice(0, 500), name: String(p.name || '').slice(0, 40), humor: Number(p.humor) || 1, history, kidsMode: !!settings.kidsMode });
+    return chat.reply({ text: String(p.text || '').slice(0, 500), name: String(p.name || '').slice(0, 40), humor: Number(p.humor) || 1, history, context: String(p.context || '').slice(0, 600), kidsMode: !!settings.kidsMode });
   });
 
   // ----- one-click setup (voice and local brain), started from the settings panel

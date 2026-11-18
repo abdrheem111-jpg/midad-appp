@@ -90,11 +90,17 @@ export function cleanTranscript(text) {
     .trim();
 }
 
+/** Seconds of audio in a 16 kHz mono 16-bit WAV. */
+export function wavSeconds(wav) {
+  return Math.max(0, (wav.length - 44) / 32000);
+}
+
 /**
  * @param {{bin: string, model: string, wakeModel?: string}} whisper
  * @param {Uint8Array} wav 16 kHz mono WAV
- * @param {{run?: typeof execFile, threads?: number, purpose?: 'command'|'wake', words?: string[]}} [opts]
- * @returns {Promise<{ok: true, text: string} | {ok: false, error: string}>}
+ * @param {{run?: typeof execFile, threads?: number, purpose?: 'command'|'wake', words?: string[],
+ *   fast?: boolean, now?: () => number}} [opts] fast: use the small, quick model and greedy decoding
+ * @returns {Promise<{ok: true, text: string, ms: number, model: string} | {ok: false, error: string}>}
  */
 export async function transcribe(whisper, wav, opts = {}) {
   if (!whisper?.bin || !whisper?.model) return { ok: false, error: 'stt_unavailable' };
@@ -104,34 +110,49 @@ export async function transcribe(whisper, wav, opts = {}) {
   const file = join(dir, 'speech.wav');
   try {
     await writeFile(file, wav);
-    const model = opts.purpose === 'wake' && whisper.wakeModel ? whisper.wakeModel : whisper.model;
+    const now = opts.now || (() => Date.now());
+    const started = now();
+    const quick = whisper.wakeModel || whisper.model;
+    const fast = opts.purpose === 'wake' || opts.fast;
+    const model = fast ? quick : whisper.model;
+    // Short sentences finish in seconds; the limit only stops a stuck process. A longer
+    // clip on a slow computer gets more time.
+    const limit = Math.round(Math.min(120000, 30000 + wavSeconds(wav) * 6000));
     // The person's own words (taught phrases) help whisper spell them the same way.
     const extra = (opts.words || []).filter((w) => typeof w === 'string' && w.trim()).slice(0, 12).join('، ');
     const prompt = extra ? `${PROMPT} ${extra}.`.slice(0, 400) : PROMPT;
-    const base = ['-m', model, '-l', 'ar', '-f', file, '-nt', '-np'];
-    const once = (args) => new Promise((resolve, reject) => {
-      run(whisper.bin, args, { windowsHide: true, timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+    const args = (m) => ['-m', m, '-l', 'ar', '-f', file, '-nt', '-np'];
+    // Greedy decoding (one candidate instead of five) is several times faster on a CPU.
+    const greedy = ['-bs', '1', '-bo', '1'];
+    const once = (a, ms) => new Promise((resolve, reject) => {
+      const t0 = now();
+      run(whisper.bin, a, { windowsHide: true, timeout: ms, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
         if (err) {
-          // Keep what whisper said about the failure: «Command failed» alone does not say why.
+          // Keep why it failed: «Command failed» alone does not say.
           const tail = String(stderr || '').replace(/\s+/g, ' ').trim().slice(-300);
-          reject(new Error(`exit ${err.code ?? '?'}${err.killed ? ' (killed)' : ''}${tail ? `: ${tail}` : ''}`));
+          const secs = ((now() - t0) / 1000).toFixed(1);
+          const why = err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'output too long'
+            : err.killed ? `too slow, stopped after ${secs} s` : `exit ${err.code ?? '?'} after ${secs} s`;
+          reject(new Error(`${why}${tail ? `: ${tail}` : ''}`));
         } else resolve(String(stdout || ''));
       });
     });
     let text;
+    let used = model;
     try {
-      text = await once([...base, '-t', String(opts.threads || 4), '--prompt', prompt]);
+      text = await once([...args(model), ...(fast ? greedy : []), '-t', String(opts.threads || 4), '--prompt', prompt], limit);
     } catch (first) {
-      // Seen on a teacher's PC: whisper failed once and the sentence was lost. Try again
-      // the plainest way (no prompt, fewer threads) before giving up.
+      // Seen on a teacher's PC: the accurate model was too slow and every sentence was lost.
+      // Try again with the quick model, greedy and without the prompt before giving up.
+      used = quick;
       try {
-        text = await once([...base, '-t', '2']);
+        text = await once([...args(quick), ...greedy, '-t', String(opts.threads || 4)], limit);
       } catch (second) {
         throw new Error(`${first.message} | retry: ${second.message}`);
       }
     }
     const clean = cleanTranscript(text);
-    return { ok: true, text: ECHO.test(clean) || isHallucination(clean) ? '' : clean };
+    return { ok: true, text: ECHO.test(clean) || isHallucination(clean) ? '' : clean, ms: now() - started, model: used };
   } catch (err) {
     return { ok: false, error: `stt_failed: ${err?.message || err}` };
   } finally {

@@ -457,6 +457,7 @@ export class Brain {
       case 'listening': this.emotions.feel('listening', now); return this.reply('listening');
       case 'stt_unavailable': this.emotions.feel('not_understood', now); return this.reply('stt_unavailable');
       case 'stt_empty': this.emotions.feel('not_understood', now); return this.reply('stt_empty');
+      case 'stt_failed': this.emotions.feel('confused', now); return this.reply('stt_failed');
       case 'mic_error': this.emotions.feel('error', now); return this.reply('mic_error');
       case 'reminder_fire': {
         this.emotions.feel('greet', now);
@@ -1295,6 +1296,29 @@ export class Brain {
 
   formatDate(now) {
     return new Intl.DateTimeFormat(this.locale, { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(now));
+  }
+
+  /**
+   * What the local model should know right now so its answer fits this person and this
+   * moment: the date and time, today's classes, how they said they feel, what they like.
+   * Short plain lines; nothing leaves the computer.
+   */
+  chatContext(now = this.clock()) {
+    const d = this.memory.data;
+    const lines = [`اليوم ${this.formatDay(now)} ${this.formatDate(now)}، والساعة ${this.formatTime(now)}.`];
+    const today = classesOn(d.schedule, new Date(now));
+    if (today.length) lines.push(`حصص الشخص اليوم: ${today.map((c) => `${c.subject} ${classTime(c)}`).join('، ')}.`);
+    const next = nextClass(d.schedule, now);
+    if (next && next.minutes <= 180) lines.push(`حصته الجاية: ${next.entry.subject} بعد ${durationPhrase(Math.max(1, next.minutes))}.`);
+    const f = d.lastFeeling;
+    if (f && FEELING_LABEL[f.kind] && now - f.at < 12 * HOUR) lines.push(`قال قبل شوي إنه ${FEELING_LABEL[f.kind]}؛ كن لطيفاً معه.`);
+    const students = (d.classroom?.students || []).length;
+    if (students) lines.push(`عنده قائمة فيها ${students} طالب.`);
+    const em = this.emotions.current?.emotion;
+    const EM_AR = { happy: 'فرحان', proud: 'فخور', excited: 'متحمس', amazed: 'مندهش', curious: 'فضولي', focused: 'مركز', confused: 'محتار', shy: 'مستحي',
+      grateful: 'ممتن', longing: 'مشتاق', sad: 'زعلان', sulky: 'زعلان شوي', jealous: 'غيران', scared: 'خايف', bored: 'طفشان', sleepy: 'نعسان' };
+    if (EM_AR[em]) lines.push(`مزاجك أنت الحين: ${EM_AR[em]}.`);
+    return lines.join('\n').slice(0, 600);
   }
 
   formatDay(now) {

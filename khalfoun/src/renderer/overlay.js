@@ -379,7 +379,7 @@ async function askModel(text, fallback) {
   const slow = setTimeout(() => { if (chatting) handle(brain.reply('thinking_long')); }, 9000);
   try {
     const d = brain.memory.data;
-    const res = await bridge.chat({ text, history: brain.chatHistory, name: d.name, humor: d.humor });
+    const res = await bridge.chat({ text, history: brain.chatHistory, name: d.name, humor: d.humor, context: brain.chatContext() });
     const asCommand = res?.ok && res.command ? brain.modelCommand(text, res.command) : null;
     bridge.note?.(`model for «${text}» → ${res?.command ? `command «${res.command}»` : res?.text ? 'chat' : `failed: ${res?.error}`}`);
     handle(asCommand || (res?.ok && res.text ? brain.chatReply(text, res.text) : fallback));
@@ -444,7 +444,7 @@ async function listen() {
     if (!spoke) { bridge.note?.(`mic: no speech detected (${wav?.length || 0} bytes recorded)`); handle(brain.event('stt_empty')); return; }
     showBubble('…', 'focused');
     const res = await bridge.transcribe(wav, 'command');
-    if (!res?.ok) { handle(brain.event(res?.error === 'stt_unavailable' ? 'stt_unavailable' : 'stt_empty')); return; }
+    if (!res?.ok) { handle(brain.event(res?.error === 'stt_unavailable' ? 'stt_unavailable' : /^stt_failed/.test(res?.error || '') ? 'stt_failed' : 'stt_empty')); return; }
     if (!res.text) { bridge.note?.('mic: speech recorded but whisper heard no words'); handle(brain.event('stt_empty')); return; }
     els.input.value = res.text;
     setTimeout(() => { if (els.input.value === res.text) els.input.value = ''; }, 2500);

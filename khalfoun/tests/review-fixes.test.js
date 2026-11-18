@@ -236,7 +236,8 @@ test('log: whisper failing once is retried without the prompt, and the reason is
     else cb(null, 'افتح الحاسبة\n', '');
   };
   const w = { bin: 'whisper-cli.exe', model: 'ggml-small.bin' };
-  assert.deepEqual(await transcribe(w, encodeWav(new Float32Array(1600), 16000), { run: flaky }), { ok: true, text: 'افتح الحاسبة' });
+  const ok = await transcribe(w, encodeWav(new Float32Array(1600), 16000), { run: flaky });
+  assert.deepEqual([ok.ok, ok.text], [true, 'افتح الحاسبة']);
   assert.ok(calls[0].includes('--prompt'));
   assert.ok(!calls[1].includes('--prompt'));
   const broken = (bin, args, opts, cb) => cb(Object.assign(new Error('Command failed'), { code: 1 }), '', 'error: failed to open model');

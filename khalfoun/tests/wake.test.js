@@ -106,5 +106,5 @@ test('a small model is used for the wake word, the best one for commands', async
 test('an echoed prompt is thrown away', async () => {
   const run = (bin, args, opts, cb) => cb(null, PROMPT);
   const r = await transcribe({ bin: 'x', model: 'y' }, encodeWav(new Float32Array(1600), 16000), { run });
-  assert.deepEqual(r, { ok: true, text: '' });
+  assert.deepEqual([r.ok, r.text], [true, '']);
 });

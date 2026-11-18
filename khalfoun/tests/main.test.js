@@ -163,7 +163,7 @@ test('whisper is found in a voice folder and transcripts are cleaned', async () 
   assert.ok(w.model.endsWith('ggml-small.bin'), 'prefers the better model');
   assert.equal(cleanTranscript(' [موسيقى] افتح  الحاسبة (تصفيق) '), 'افتح الحاسبة');
   const fakeRun = (bin, args, opts, cb) => { assert.ok(args.includes('ar')); cb(null, ' افتح المتصفح\n'); };
-  assert.deepEqual(await transcribe(w, encodeWav(new Float32Array(1600), 16000), { run: fakeRun }), { ok: true, text: 'افتح المتصفح' });
+  assert.deepEqual((({ ok, text }) => ({ ok, text }))(await transcribe(w, encodeWav(new Float32Array(1600), 16000), { run: fakeRun })), { ok: true, text: 'افتح المتصفح' });
   assert.equal((await transcribe({ bin: null, model: null }, new Uint8Array(100))).error, 'stt_unavailable');
   assert.equal((await transcribe(w, new Uint8Array(10), { run: fakeRun })).error, 'bad_audio');
   await rm(dir, { recursive: true, force: true });
