@@ -151,7 +151,7 @@ test('OCR: the PowerShell script and how its output is read', async () => {
 });
 
 test('model tasks: clear instructions, clean answers, ChatClient.task', async () => {
-  assert.deepEqual(TASK_MODES.sort(), ['explain', 'questions', 'solve', 'summarize']);
+  assert.deepEqual(TASK_MODES.sort(), ['cards', 'explain', 'questions', 'simplify', 'solve', 'summarize']);
   const msgs = buildTaskMessages({ mode: 'questions', text: LESSON, kidsMode: true });
   assert.ok(msgs[1].content.includes('خمسة أسئلة') && msgs[1].content.includes(LESSON));
   assert.ok(msgs[0].content.includes('طفل'));

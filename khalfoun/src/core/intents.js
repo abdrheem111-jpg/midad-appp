@@ -125,6 +125,19 @@ export const FEELINGS = [
   ['happy', N(['فرحان', 'فرحانه', 'مستانس', 'مستانسه', 'مبسوط', 'مبسوطه', 'وناسه', 'سعيد اليوم', 'مرتاح', 'مرتاحه', 'يومي حلو', 'يومي زين'])],
 ];
 
+/** Khalfoun's own windows: the maths whiteboard «مِداد» and the AI notebook. */
+export const TOOLS = [
+  { id: 'board', names: N(['السبوره', 'سبوره', 'السبوره الذكيه', 'سبوره الرياضيات', 'سبوره رياضيات', 'مداد', 'سبوره مداد', 'اللوح', 'لوح الرياضيات', 'الوايت بورد', 'وايت بورد', 'السبوره حقتك', 'سبورتك']) },
+  { id: 'notebook', names: N(['الدفتر', 'دفتري', 'الدفتر الذكي', 'دفتر خلفون', 'دفتر الملاحظات', 'النوت بوك', 'نوت بوك', 'دفترك', 'مذكرتي', 'البطاقات', 'بطاقات المراجعه', 'راجع البطاقات', 'المراجعه']) },
+];
+
+export function findTool(normalizedText) {
+  const padded = ` ${normalizedText} `;
+  let best = null;
+  for (const tool of TOOLS) for (const name of tool.names) if (hasPhrase(padded, name) && (!best || name.length > best.name.length)) best = { tool, name };
+  return best;
+}
+
 /** True when the text is just an app's name, maybe with «برنامج/مجلد» or a want-word. */
 function APP_NAME_ONLY(text, app) {
   const rest = WANT.reduce((t, w) => (t.startsWith(`${w} `) ? t.slice(w.length + 1) : t), text).replace(/^(برنامج|مجلد|موقع) /, '');
@@ -642,6 +655,8 @@ function recognizeText(raw, fuzzy) {
     const pdfTail = /\s*(فوق|تحت|في الأعلى|في الاعلى|في الأسفل|في الاسفل|في الوسط|في النص)?\s*(في|ف|على|بـ?|من)\s*(ملف\s*)?(ال)?(pdf|بي\s*دي\s*اف|بيدي\s*اف|بي\s*دي\s*إف|الـ\s*pdf)\s*(فوق|تحت|في الأعلى|في الاعلى|في الأسفل|في الاسفل|في الوسط|في النص)?\s*$/iu;
     // «اكتب في البي دي اف ...» names the PDF first
     const pdfHead = /^\s*(في|ف|على)\s*(ملف\s*)?(ال)?(pdf|بي\s*دي\s*اف|بيدي\s*اف|بي\s*دي\s*إف)\s*[:،,]?\s*/iu;
+    // «اكتب في الدفتر» means the notebook, not typing the words «في الدفتر».
+    if (/^(?:في|ف|بال|على) ?(?:ال)?(?:دفتر|دفتري|الدفتر)$/u.test(normalize(content))) return out('open_tool', { tool: 'notebook' }, 0.9);
     const paged = takePage(content);
     const pageWords = paged.page ? ` ${content} ` : '';
     if (paged.page) content = paged.rest;
@@ -692,6 +707,17 @@ function recognizeText(raw, fuzzy) {
   if (setupMatch) return out('setup', { part: /عقل|مخ|ذكاء/.test(setupMatch[4]) ? 'brain' : 'voice' });
   if (findPhrase(padded, L.settings)) return out('open_settings');
 
+  // His own tools: «افتح السبورة», «دفتري», «سكر الدفتر», «راجع البطاقات».
+  {
+    const hit = findTool(text);
+    if (hit) {
+      const rest = WANT.reduce((t, w) => (t.startsWith(`${w} `) ? t.slice(w.length + 1) : t), text);
+      const closing = startsWithPhrase(text, L.close);
+      const opening = startsWithPhrase(text, L.open) || rest === hit.name || /^(راجع|ابدا|خلنا نراجع)/.test(text);
+      if (closing) return out('close_tool', { tool: hit.tool.id }, 0.92);
+      if (opening) return out('open_tool', { tool: hit.tool.id, review: /بطاقات|مراجعه|راجع/.test(text) }, 0.92);
+    }
+  }
   // «ابي الحاسبة» / just «الحاسبة»: open it.
   {
     const bare = findApp(text);

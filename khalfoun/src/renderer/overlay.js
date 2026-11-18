@@ -996,6 +996,10 @@ async function start() {
       case 'windows': lastWindows = Array.isArray(ev.list) ? ev.list : []; applyWindows(); noticeWindows(lastWindows); break;
       case 'download': if (!panelsOpen()) handle(brain.event('download_new', { name: ev.name, kind: ev.kind })); break;
       case 'resume': handle(brain.event('resume')); motion.come(); break;
+      case 'tool-closed': handle(brain.event('tool_closed', { tool: ev.tool })); break;
+      case 'tool-busy': handle(brain.event('tool_busy', { tool: ev.tool, mode: ev.mode })); break;
+      case 'tool-done': handle(brain.event('tool_done', { tool: ev.tool, mode: ev.mode, ok: !!ev.ok })); break;
+      case 'tool-event': handle(brain.event('tool_event', { tool: ev.tool, what: ev.what, count: ev.count })); break;
       case 'setup-progress': showSetupProgress(ev); break;
       case 'voice-ready':
         voiceAvailable = !!ev.available;

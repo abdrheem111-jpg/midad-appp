@@ -13,6 +13,8 @@ const APP_IDS = new Set(APPS.filter((a) => a.kind === 'app').map((a) => a.id));
 const URLS = new Set(APPS.filter((a) => a.kind === 'url').map((a) => a.url));
 const FOLDERS = new Set(['downloads', 'documents', 'pictures', 'desktop']);
 const CLOSABLE = new Set([...APP_IDS, ...FOLDERS]);
+/** Khalfoun's own windows: the maths whiteboard and the AI notebook. */
+export const TOOLS = new Set(['board', 'notebook']);
 const MAX_REMINDER_MIN = 7 * 24 * 60; // «ذكرني بكرة الساعة ٧» and up to a week ahead
 
 /**
@@ -46,6 +48,7 @@ export function validateAction(action) {
       if (p.page !== undefined && !(Number.isInteger(p.page) && p.page >= 1 && p.page <= 2000)) return 'bad_pdf';
       return str(p.text, 3000) && ['top', 'middle', 'bottom'].includes(p.position) ? null : 'bad_pdf';
     case 'organize_downloads': case 'undo_organize': return null;
+    case 'open_tool': case 'close_tool': return TOOLS.has(p.tool) ? null : 'bad_tool';
     default: return 'unknown_action';
   }
 }
@@ -79,6 +82,8 @@ export function createExecutor(deps) {
         }
         case 'read_screen': return deps.readScreen ? await deps.readScreen() : { ok: false, error: 'unsupported' };
         case 'active_window': return deps.activeWindow ? await deps.activeWindow() : { ok: false, error: 'unsupported' };
+        case 'open_tool': return deps.openTool ? deps.openTool(p.tool) : { ok: false, error: 'unsupported' };
+        case 'close_tool': return deps.closeTool ? deps.closeTool(p.tool) : { ok: false, error: 'unsupported' };
         case 'open_url': return await platform.openUrl(p.url);
         case 'open_folder': return await platform.openFolder(p.folder);
         case 'search': return await platform.search(p.query.trim(), p.engine);

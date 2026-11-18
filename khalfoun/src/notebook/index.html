@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'">
+  <title>دفتر خلفون</title>
+  <link rel="stylesheet" href="../../assets/fonts/fonts.css">
+  <link rel="stylesheet" href="notebook.css">
+</head>
+<body>
+  <header class="top">
+    <img class="logo" src="../../assets/icon.png" alt="">
+    <div class="brand">
+      <h1>دفتر خلفون</h1>
+      <p id="status" class="status">ملاحظاتك تبقى على جهازك.</p>
+    </div>
+    <input id="search" class="search" type="search" placeholder="دوّر في الدفتر…" aria-label="بحث">
+    <button id="review-all" class="btn ghost" type="button">راجع البطاقات <span id="due-count" class="pill" hidden></span></button>
+  </header>
+
+  <div class="layout">
+    <aside class="side">
+      <button id="new-note" class="btn primary wide" type="button">+ ملاحظة جديدة</button>
+      <ul id="notes" class="notes" aria-label="الملاحظات"></ul>
+      <p id="empty-list" class="hint" hidden>ما فيه ملاحظات بعد. ابدأ بملاحظة جديدة.</p>
+    </aside>
+
+    <main class="editor" id="editor">
+      <div id="welcome" class="welcome">
+        <img src="../../assets/icon.png" alt="">
+        <h2>هلا! هذا دفترك الذكي</h2>
+        <p>اكتب أو الصق درساً، وأنا ألخصه وأشرحه وأسوي منه أسئلة وبطاقات مراجعة.</p>
+        <button id="welcome-new" class="btn primary" type="button">ابدأ أول ملاحظة</button>
+      </div>
+
+      <section id="note" class="note" hidden>
+        <input id="title" class="title" type="text" placeholder="عنوان الملاحظة" maxlength="200" aria-label="العنوان">
+        <div class="meta"><span id="info"></span><span id="saved" class="saved"></span></div>
+        <textarea id="body" class="body" placeholder="اكتب هنا، أو الصق نص الدرس…" aria-label="النص"></textarea>
+        <div class="tools" role="toolbar" aria-label="أدوات خلفون">
+          <button class="btn tool" data-mode="summarize" type="button">لخّص</button>
+          <button class="btn tool" data-mode="explain" type="button">اشرح</button>
+          <button class="btn tool" data-mode="simplify" type="button">بسّط</button>
+          <button class="btn tool" data-mode="questions" type="button">سوّ أسئلة</button>
+          <button class="btn tool" data-mode="cards" type="button">بطاقات مراجعة</button>
+          <button class="btn tool" data-mode="solve" type="button">حل المسألة</button>
+          <span class="grow"></span>
+          <button id="to-board" class="btn ghost" type="button">افتح السبورة</button>
+          <button id="delete" class="btn danger" type="button">احذف</button>
+        </div>
+        <div id="result" class="result" hidden>
+          <div class="result-head"><strong id="result-title"></strong><span class="grow"></span>
+            <button id="result-insert" class="btn small" type="button">أضفه للملاحظة</button>
+            <button id="result-close" class="btn small ghost" type="button" aria-label="إغلاق">✕</button>
+          </div>
+          <div id="result-body" class="result-body"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="review" class="review" hidden role="dialog" aria-modal="true" aria-label="مراجعة البطاقات">
+    <div class="review-card">
+      <div class="review-top"><span id="review-progress"></span><span class="grow"></span><button id="review-close" class="btn small ghost" type="button">✕</button></div>
+      <button id="flash" class="flash" type="button" aria-live="polite">
+        <span id="flash-label" class="flash-label">السؤال</span>
+        <span id="flash-text" class="flash-text"></span>
+        <span class="flash-hint">اضغط عشان تقلب البطاقة</span>
+      </button>
+      <div class="review-actions">
+        <button id="wrong" class="btn danger" type="button" disabled>ما عرفتها</button>
+        <button id="right" class="btn primary" type="button" disabled>عرفتها ✓</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="notebook.js"></script>
+</body>
+</html>

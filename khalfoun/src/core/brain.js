@@ -458,6 +458,26 @@ export class Brain {
       case 'stt_unavailable': this.emotions.feel('not_understood', now); return this.reply('stt_unavailable');
       case 'stt_empty': this.emotions.feel('not_understood', now); return this.reply('stt_empty');
       case 'stt_failed': this.emotions.feel('confused', now); return this.reply('stt_failed');
+      // ---- his own tools: the whiteboard and the notebook tell him what happens there
+      case 'tool_closed':
+        if (this.focus || this.emotions.asleep) return null;
+        return this.rng() < 0.6 ? this.reply(data.tool === 'board' ? 'tool_closed_board' : 'tool_closed_notebook') : null;
+      case 'tool_busy': this.emotions.feel('curious', now); return this.reply('nb_thinking');
+      case 'tool_done':
+        if (!data.ok) { this.emotions.feel('error', now); return this.reply('nb_failed'); }
+        this.emotions.feel('success', now);
+        return this.reply(data.mode === 'cards' ? 'nb_done_cards' : 'nb_done', { behavior: 'jump' });
+      case 'tool_event': {
+        if (this.focus || this.emotions.asleep) return null;
+        if (data.what === 'card_right') { this.emotions.feel('praise', now); return this.rng() < 0.35 ? this.reply('nb_card_right') : null; }
+        if (data.what === 'card_wrong') { this.emotions.feel('care', now); return this.rng() < 0.35 ? this.reply('nb_card_wrong') : null; }
+        if (data.what === 'review_done') {
+          this.emotions.feel('celebrate', now);
+          return this.reply(data.count > 0 ? 'nb_review_done' : 'nb_review_zero', { vars: { count: toArabicDigits(data.count || 0) }, behavior: data.count > 0 ? 'dance' : null });
+        }
+        if (data.what === 'note_new') return this.rng() < 0.5 ? this.reply('nb_note_new') : null;
+        return null;
+      }
       case 'mic_error': this.emotions.feel('error', now); return this.reply('mic_error');
       case 'reminder_fire': {
         this.emotions.feel('greet', now);
@@ -642,6 +662,16 @@ export class Brain {
       case 'how_are_you': this.emotions.feel('curious', now); return this.reply('how_are_you');
       case 'who': this.emotions.feel('curious', now); return this.reply('who');
       case 'thanks': this.emotions.feel('thanks', now); return this.reply('thanks');
+      case 'open_tool': {
+        const name = s.tool === 'board' ? 'السبورة' : 'الدفتر';
+        return this.plan({ type: 'open_tool', params: { tool: s.tool } },
+          { situation: `tool_open_${s.tool}`, sayOn: 'start', summary: `فتح ${name}` }, now);
+      }
+      case 'close_tool': {
+        const name = s.tool === 'board' ? 'السبورة' : 'الدفتر';
+        return this.plan({ type: 'close_tool', params: { tool: s.tool } },
+          { situation: 'tool_close', sayOn: 'start', vars: { app: name }, summary: `إغلاق ${name}` }, now);
+      }
       case 'hear_check': this.emotions.feel('greet', now); return this.reply('hear_check');
       case 'fine': this.emotions.feel('greet', now); return this.reply('fine');
       case 'praise': this.emotions.feel('praise', now); return this.reply('praise');

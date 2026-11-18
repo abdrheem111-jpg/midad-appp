@@ -37,7 +37,12 @@ const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const ORIGIN = 'app://khalfoun';
 const START_URL = `${ORIGIN}/src/renderer/index.html`;
 const SMOKE = process.env.KHALFOUN_SMOKE === '1';
+// The maths whiteboard «مِداد» ships next to Khalfoun: the repository root when run from
+// the code, resources/midad in the installed app (see "extraResources" in package.json).
+const MIDAD_ROOT = app.isPackaged ? join(process.resourcesPath, 'midad') : join(ROOT, '..');
+const MIDAD_ALLOWED = ['index.html', 'manifest.webmanifest', `js${sep}`, `css${sep}`, `assets${sep}`];
 const MIME = {
+  '.webmanifest': 'application/manifest+json', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.woff': 'font/woff',
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2',
 };
@@ -85,10 +90,19 @@ function serveAppProtocol() {
   protocol.handle('app', async (request) => {
     const url = new URL(request.url);
     if (url.host !== 'khalfoun') return new Response('not found', { status: 404 });
-    const file = normalize(join(ROOT, decodeURIComponent(url.pathname)));
-    const rel = relative(ROOT, file);
-    const allowed = rel.startsWith(`src${sep}renderer${sep}`) || rel.startsWith(`src${sep}core${sep}`) || rel.startsWith(`assets${sep}`);
-    if (!allowed || rel.startsWith('..')) return new Response('forbidden', { status: 403 });
+    const path = decodeURIComponent(url.pathname);
+    let file;
+    if (path.startsWith('/midad/')) {
+      // The whiteboard: only its own page, scripts, styles and assets.
+      file = normalize(join(MIDAD_ROOT, path.slice('/midad/'.length)));
+      const rel = relative(MIDAD_ROOT, file);
+      if (rel.startsWith('..') || !MIDAD_ALLOWED.some((a) => rel === a || rel.startsWith(a))) return new Response('forbidden', { status: 403 });
+    } else {
+      file = normalize(join(ROOT, path));
+      const rel = relative(ROOT, file);
+      const allowed = rel.startsWith(`src${sep}renderer${sep}`) || rel.startsWith(`src${sep}core${sep}`) || rel.startsWith(`src${sep}notebook${sep}`) || rel.startsWith(`assets${sep}`);
+      if (!allowed || rel.startsWith('..')) return new Response('forbidden', { status: 403 });
+    }
     try {
       const body = await readFile(file);
       return new Response(body, { headers: { 'content-type': MIME[extname(file)] || 'application/octet-stream' } });
@@ -103,6 +117,74 @@ function fitToWorkArea() {
   const { workArea } = screen.getPrimaryDisplay();
   win.setBounds(workArea);
 }
+
+// ------------------------------------------------------------------ his tools
+// The whiteboard (مِداد) and the AI notebook open as normal windows of Khalfoun's own app.
+const TOOL_PAGES = {
+  board: { url: `${ORIGIN}/midad/index.html`, title: 'سبورة خلفون — مِداد', width: 1280, height: 820 },
+  notebook: { url: `${ORIGIN}/src/notebook/index.html`, title: 'دفتر خلفون', width: 1180, height: 780, preload: 'notebook-preload.cjs' },
+};
+const toolWindows = {};
+
+function openTool(tool) {
+  const page = TOOL_PAGES[tool];
+  if (!page) return { ok: false, error: 'bad_tool' };
+  const existing = toolWindows[tool];
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore();
+    existing.show();
+    existing.focus();
+    return { ok: true, data: { already: true } };
+  }
+  const { workArea } = screen.getPrimaryDisplay();
+  const w = new BrowserWindow({
+    width: Math.min(page.width, workArea.width - 40),
+    height: Math.min(page.height, workArea.height - 40),
+    title: page.title,
+    icon: join(ROOT, 'assets', 'icon.png'),
+    autoHideMenuBar: true,
+    show: false,
+    backgroundColor: '#fffdf7',
+    webPreferences: {
+      preload: page.preload ? join(ROOT, 'src', 'main', page.preload) : undefined,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      spellcheck: false,
+      devTools: !app.isPackaged,
+    },
+  });
+  w.setMenuBarVisibility(false);
+  w.webContents.setWindowOpenHandler(({ url }) => {
+    // Links inside the tools open in the person's browser, never inside the app.
+    if (/^https:\/\//.test(url)) shell.openExternal(url).catch(() => {});
+    return { action: 'deny' };
+  });
+  w.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(`${ORIGIN}/`)) e.preventDefault(); });
+  w.once('ready-to-show', () => { w.show(); w.focus(); });
+  w.on('closed', () => {
+    if (toolWindows[tool] === w) delete toolWindows[tool];
+    send('tool-closed', { tool });
+    diag.write('tool closed', tool);
+  });
+  toolWindows[tool] = w;
+  w.loadURL(page.url).catch((err) => diag.write('tool load failed', tool, String(err?.message || err)));
+  diag.write('tool opened', tool);
+  return { ok: true };
+}
+
+function closeTool(tool) {
+  const w = toolWindows[tool];
+  if (!w || w.isDestroyed()) return { ok: false, error: 'not_running' };
+  w.close();
+  return { ok: true };
+}
+
+/** Only the notebook window may use the notebook's IPC. */
+const fromNotebook = (event) => {
+  const w = toolWindows.notebook;
+  return Boolean(w && !w.isDestroyed() && event.sender === w.webContents && (event.senderFrame?.url || '').startsWith(`${ORIGIN}/src/notebook/`));
+};
 
 function createWindow() {
   const { workArea } = screen.getPrimaryDisplay();
@@ -492,6 +574,39 @@ function setupIpc(stores, executor) {
     win.setIgnoreMouseEvents(!on, { forward: true });
   });
 
+  // ----- the AI notebook window
+  const notebookStore = stores.notebook;
+  ipcMain.handle('nb:load', async (event) => {
+    if (!fromNotebook(event)) return null;
+    return { data: await notebookStore.read(), ai: Boolean(chat && settings.chatEnabled !== false), kidsMode: !!settings.kidsMode };
+  });
+  ipcMain.handle('nb:save', async (event, data) => {
+    if (!fromNotebook(event)) return { ok: false, error: 'forbidden' };
+    if (!data || typeof data !== 'object' || JSON.stringify(data).length > 8 * 1024 * 1024) return { ok: false, error: 'too_big' };
+    await notebookStore.write(data);
+    return { ok: true };
+  });
+  ipcMain.handle('nb:task', async (event, payload) => {
+    if (!fromNotebook(event)) return { ok: false, error: 'forbidden' };
+    if (!chat || settings.chatEnabled === false) return { ok: false, error: 'chat_unavailable' };
+    const p = payload && typeof payload === 'object' ? payload : {};
+    if (!TASK_MODES.includes(p.mode)) return { ok: false, error: 'bad_mode' };
+    send('tool-busy', { tool: 'notebook', mode: p.mode });
+    const res = await chat.task({ mode: p.mode, text: String(p.text || '').slice(0, 4000), kidsMode: !!settings.kidsMode });
+    diag.write('notebook task', p.mode, '→', res.ok ? `${res.text.length} chars` : `failed: ${res.error}`);
+    send('tool-done', { tool: 'notebook', mode: p.mode, ok: res.ok });
+    return res;
+  });
+  // The notebook tells Khalfoun what happened so he can react (a card answered, a note saved...).
+  ipcMain.on('nb:tell', (event, what, data) => {
+    if (!fromNotebook(event)) return;
+    const allowed = ['card_right', 'card_wrong', 'review_done', 'note_saved', 'note_new', 'note_deleted'];
+    if (!allowed.includes(what)) return;
+    const d = data && typeof data === 'object' ? data : {};
+    send('tool-event', { tool: 'notebook', what, count: Math.max(0, Math.min(999, Number(d.count) || 0)) });
+  });
+  ipcMain.on('nb:board', (event) => { if (fromNotebook(event)) openTool('board'); });
+
   ipcMain.handle('chat:task', async (event, payload) => {
     if (!fromApp(event)) return { ok: false, error: 'forbidden' };
     if (!chat || settings.chatEnabled === false) return { ok: false, error: 'chat_unavailable' };
@@ -718,6 +833,40 @@ async function runSmokeTest(stores) {
       })()`);
       step('installed whisper transcribes a recording', t && t.ok === true, t);
     }
+    // His own tools: the whiteboard (مِداد) and the AI notebook open as real windows.
+    const toolJs = (tool, code) => toolWindows[tool].webContents.executeJavaScript(code, true);
+    const waitTool = async (tool, code, ms = 20000) => {
+      const end = Date.now() + ms;
+      while (Date.now() < end) {
+        try { if (toolWindows[tool] && !toolWindows[tool].webContents.isLoading() && await toolJs(tool, code)) return true; } catch { /* still loading */ }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      return false;
+    };
+    const boardSaid = await hear('افتح السبورة');
+    step('«افتح السبورة» opens the whiteboard window', await waitTool('board', "document.querySelectorAll('canvas').length > 0"), { said: boardSaid });
+    const nbSaid = await hear('افتح الدفتر');
+    const nbReady = await waitTool('notebook', 'window.__notebookReady === true');
+    step('«افتح الدفتر» opens the notebook window', nbReady, { said: nbSaid });
+    if (nbReady) {
+      await toolJs('notebook', `document.getElementById('new-note').click();
+        const b = document.getElementById('body'); b.value = 'الكسور العشرية تكتب بعد الفاصلة. الجزء من عشرة يسمى عشراً. الجزء من مئة يسمى جزءاً من مئة. نقارن الكسور العشرية بمقارنة الأرقام من اليسار.';
+        b.dispatchEvent(new Event('input')); document.querySelector('[data-mode="summarize"]').click(); true`);
+      await new Promise((r) => setTimeout(r, 1500));
+      const saved = await stores.notebook.read();
+      step('a note written in the notebook is saved to notebook.json', saved.notes?.length === 1 && /الكسور/.test(saved.notes[0].body), { notes: saved.notes?.length });
+      const summary = await toolJs('notebook', "document.getElementById('result-body').textContent");
+      step('offline summary works without a model', /الكسور|العشري/.test(summary), { summary: summary.slice(0, 80) });
+    }
+    if (process.env.KHALFOUN_SMOKE_TOOLSHOTS) {
+      for (const tool of ['board', 'notebook']) {
+        if (!toolWindows[tool]) continue;
+        const img = await toolWindows[tool].webContents.capturePage();
+        await writeFile(join(process.env.KHALFOUN_SMOKE_TOOLSHOTS, `${tool}.png`), img.toPNG());
+      }
+    }
+    closeTool('board');
+    closeTool('notebook');
     if (process.env.KHALFOUN_SMOKE_SHOT) {
       await hear('قول نكتة');
       await new Promise((r) => setTimeout(r, 1800));
@@ -741,6 +890,7 @@ async function start() {
     memory: new JsonStore(userData, 'memory.json', {}),
     settings: new JsonStore(userData, 'settings.json', DEFAULT_SETTINGS),
     journal: new JsonStore(userData, 'organize-journal.json', { moves: [] }),
+    notebook: new JsonStore(userData, 'notebook.json', { version: 1, notes: [], cards: [] }),
   };
   settings = { ...DEFAULT_SETTINGS, ...(await stores.settings.read()) };
   voiceDirs = [join(userData, 'voice'), join(ROOT, 'voice')];
@@ -775,6 +925,8 @@ async function start() {
     readScreen,
     activeWindow,
     writePdf: (text, position, page) => writePdf(text, position, [downloadsDir, app.getPath('documents')], page),
+    openTool,
+    closeTool,
   });
   try {
     const font = await readFile(join(ROOT, 'assets', 'fonts', 'Tajawal-700-arabic.woff2'));

@@ -21,6 +21,8 @@ export const LEVEL_INFO = [
 
 /** Risk class for each action type the executor knows. */
 export const ACTION_RISK = {
+  open_tool: 'none', // his own whiteboard and notebook windows
+  close_tool: 'none',
   open_app: 'open',
   open_url: 'open',
   open_folder: 'open',
