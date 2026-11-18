@@ -96,9 +96,9 @@ jobs:
             (Join-Path $env:ProgramFiles 'Khalfoun\Khalfoun.exe')
           )
           $installed = $null
-          # Up to two attempts: a copy of the app left over from the previous self-test makes
+          # Up to three attempts: a copy of the app left over from the previous self-test makes
           # the installer stop silently, so close any running copy before each attempt.
-          for ($attempt = 1; $attempt -le 2 -and -not $installed; $attempt++) {
+          for ($attempt = 1; $attempt -le 3 -and -not $installed; $attempt++) {
             Get-Process -Name 'Khalfoun' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 2
             $timer = [Diagnostics.Stopwatch]::StartNew()

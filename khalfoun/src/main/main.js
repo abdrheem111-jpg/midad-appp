@@ -159,10 +159,10 @@ function buildTray() {
   const menu = Menu.buildFromTemplate([
     { label: 'خلفون', enabled: false },
     { type: 'separator' },
-    { label: 'اكتب أمراً  (Ctrl+Shift+K)', click: () => { if (win) { win.show(); win.focus(); send('open-command'); } } },
+    { label: 'اكتب أمراً  (Ctrl+Shift+K)', click: () => { if (win) { focusOverlay(); send('open-command'); } } },
     { label: 'تحدث  (Ctrl+Shift+Space)', click: showAnd('ptt') },
     { label: 'تعال يا خلفون', click: showAnd('come') },
-    { label: 'الإعدادات', click: () => { if (win) { win.show(); win.focus(); send('open-settings'); } } },
+    { label: 'الإعدادات', click: () => { if (win) { focusOverlay(); send('open-settings'); } } },
     { type: 'separator' },
     { label: 'سجل خلفون (لو في مشكلة)', click: () => { shell.openPath(diag.file || '').catch(() => {}); } },
     { label: 'إخفاء / إظهار', click: () => { if (!win) return; if (win.isVisible()) win.hide(); else win.showInactive(); } },
@@ -175,7 +175,7 @@ function buildTray() {
 
 function registerShortcuts() {
   const ok1 = globalShortcut.register('CommandOrControl+Shift+Space', () => { if (win) { win.showInactive(); send('ptt'); } });
-  const ok2 = globalShortcut.register('CommandOrControl+Shift+K', () => { if (win) { win.show(); win.focus(); send('open-command'); } });
+  const ok2 = globalShortcut.register('CommandOrControl+Shift+K', () => { if (win) { focusOverlay(); send('open-command'); } });
   if (!ok1 || !ok2) console.warn('Some keyboard shortcuts are taken by another program.');
   diag.write('shortcuts', { 'Ctrl+Shift+Space': ok1, 'Ctrl+Shift+K': ok2 });
 }
@@ -229,11 +229,22 @@ async function writePdf(text, position, dirs, page = 1) {
 }
 
 /** Hands keyboard focus back to the program the person was using before pasting. */
+let focusTimer = null;
 function releaseFocus() {
   if (!win || !win.isFocused()) return;
   win.setFocusable(false);
   win.blur();
-  setTimeout(() => { if (win && !win.isDestroyed()) win.setFocusable(true); }, 1500);
+  clearTimeout(focusTimer);
+  focusTimer = setTimeout(() => { if (win && !win.isDestroyed()) win.setFocusable(true); }, 1500);
+}
+
+/** Brings Khalfoun's window forward for typing, even right after he gave the focus away. */
+function focusOverlay() {
+  if (!win || win.isDestroyed()) return;
+  clearTimeout(focusTimer);
+  win.setFocusable(true);
+  win.show();
+  win.focus();
 }
 
 function sanitizeSettingsPatch(patch) {
@@ -323,6 +334,8 @@ function setupIpc(stores, executor) {
       sttBusy = false;
     }
   });
+
+  ipcMain.on('ui:focus', (event) => { if (fromApp(event)) focusOverlay(); });
 
   ipcMain.on('ui:interactive', (event, on) => {
     if (!fromApp(event) || !win) return;

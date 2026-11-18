@@ -185,6 +185,7 @@ let commandTimer = null;
 function openCommand() {
   els.command.hidden = false;
   setInteractive(true);
+  bridge.focus?.(); // the window may have just handed the focus to another program
   layout();
   els.input.focus();
   armCommandTimeout();
