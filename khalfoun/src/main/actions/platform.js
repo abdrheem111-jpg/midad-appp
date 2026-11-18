@@ -66,7 +66,7 @@ const KEY_LINUX = {
 };
 
 /** Folder windows («سكر الملفات») close through the shell, never by stopping explorer.exe itself. */
-const FOLDER_IDS = new Set(['explorer', 'downloads', 'documents', 'pictures']);
+const FOLDER_IDS = new Set(['explorer', 'downloads', 'documents', 'pictures', 'desktop']);
 
 export const SEARCH_URLS = {
   google: (q) => `https://www.google.com/search?q=${encodeURIComponent(q)}`,

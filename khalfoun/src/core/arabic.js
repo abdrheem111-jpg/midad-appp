@@ -43,7 +43,18 @@ const NUMBER_WORDS = new Map([
   ['ثلاث', 3], ['ثلاثه', 3], ['اربع', 4], ['اربعه', 4], ['خمس', 5], ['خمسه', 5],
   ['ست', 6], ['سته', 6], ['سبع', 7], ['سبعه', 7], ['ثمان', 8], ['ثمانيه', 8], ['ثماني', 8],
   ['تسع', 9], ['تسعه', 9], ['عشر', 10], ['عشره', 10], ['عشرين', 20], ['ثلاثين', 30],
-  ['اربعين', 40], ['خمسين', 50], ['ستين', 60], ['مية', 100], ['ميه', 100], ['مايه', 100], ['مئه', 100],
+  ['اربعين', 40], ['خمسين', 50], ['ستين', 60], ['سبعين', 70], ['ثمانين', 80], ['تسعين', 90],
+  ['مية', 100], ['ميه', 100], ['مايه', 100], ['مئه', 100],
+  // 11-19 as spoken in Oman and the Gulf, plus common spellings of each.
+  ['احدعش', 11], ['احداش', 11], ['حدعش', 11], ['حداش', 11], ['احدعشر', 11],
+  ['اثنعش', 12], ['اثناش', 12], ['ثنعش', 12], ['اطنعش', 12], ['اثنعشر', 12],
+  ['ثلطعش', 13], ['ثلاثطعش', 13], ['ثلتعش', 13], ['ثلاثتعش', 13],
+  ['اربعطعش', 14], ['اربعتعش', 14], ['ربعطعش', 14],
+  ['خمسطعش', 15], ['خمستعش', 15], ['خمسطاش', 15],
+  ['سطعش', 16], ['ستطعش', 16], ['ستعش', 16],
+  ['سبعطعش', 17], ['سبعتعش', 17],
+  ['ثمنطعش', 18], ['ثمانطعش', 18], ['ثمنتعش', 18],
+  ['تسعطعش', 19], ['تسعتعش', 19],
 ]);
 
 /**
@@ -65,24 +76,75 @@ export function parseNumberToken(token) {
  * @returns {number|null}
  */
 export function parseMinutes(text) {
-  const t = ` ${normalize(text)} `;
-  if (/ (ربع ساعه) /.test(t)) return 15;
-  if (/ (نص|نصف) ساعه /.test(t)) return 30;
-  if (/ ساعه الا ربع /.test(t)) return 45;
-  if (/ ساعتين /.test(t)) return 120;
-  if (/ دقيقتين /.test(t)) return 2;
-  const tokens = t.trim().split(' ');
+  const tokens = normalize(text).split(' ').filter(Boolean);
+  const MIN = /^(دقيقه|دقايق|دقائق|دقيقا|دقيق|دقيقتين|دقايقين)$/;
+  const HOUR = /^(ساعه|ساعات|ساعتين)$/;
+  const SEC = /^(ثانيه|ثواني|ثانيتين)$/;
+  // A fraction of an hour said with «و» after it: «ساعه ونص», «ساعتين وربع».
+  const FRACTION = new Map([['ونص', 30], ['ونصف', 30], ['وربع', 15], ['وثلث', 20], ['و نص', 30], ['و ربع', 15], ['و ثلث', 20]]);
+
+  // Reads a spoken number starting at token i: «٢٥», «خمسه», «خمسه وعشرين», «خمسه عشر».
+  const numberAt = (i) => {
+    const first = parseNumberToken(tokens[i]);
+    if (first === null) return null;
+    const next = tokens[i + 1] || '';
+    if (first < 10 && next.startsWith('و')) {
+      const spaced = next === 'و';
+      const tens = parseNumberToken(spaced ? tokens[i + 2] : next.slice(1));
+      if (tens !== null && tens >= 20 && tens % 10 === 0) return { n: first + tens, len: spaced ? 3 : 2 };
+    }
+    if (first < 10 && (next === 'عشر' || next === 'عشره')) return { n: first + 10, len: 2 };
+    return { n: first, len: 1 };
+  };
+
+  let total = 0;
+  let found = false;
+  let joined = false;
   for (let i = 0; i < tokens.length; i += 1) {
-    const unit = tokens[i + 1] || '';
-    const n = parseNumberToken(tokens[i]);
-    if (n === null) continue;
-    if (/^(دقيقه|دقايق|دقائق|دقيقة|دقايق|دقيقا|دقيق)$/.test(unit)) return n;
-    if (/^(ساعه|ساعات)$/.test(unit)) return n * 60;
-    if (/^(ثانيه|ثواني)$/.test(unit)) return Math.max(1, Math.round(n / 60));
+    const w = tokens[i];
+    let value = null;
+    let unit = null;
+    let len = 1;
+    // Words that carry their own number.
+    if (w === 'ساعتين') { value = 120; unit = 'h'; }
+    else if (w === 'دقيقتين') { value = 2; unit = 'm'; }
+    else if ((w === 'ربع' || w === 'نص' || w === 'نصف' || w === 'ثلث') && HOUR.test(tokens[i + 1] || '')) {
+      value = { ربع: 15, نص: 30, نصف: 30, ثلث: 20 }[w]; unit = 'h'; len = 2;
+    } else if (w === 'ثلاث' && /^ارباع$/.test(tokens[i + 1] || '') && HOUR.test(tokens[i + 2] || '')) {
+      value = 45; unit = 'h'; len = 3;
+    } else {
+      const num = numberAt(i);
+      if (num) {
+        const u = tokens[i + num.len] || '';
+        if (MIN.test(u)) { value = num.n; unit = 'm'; len = num.len + 1; }
+        else if (HOUR.test(u)) { value = num.n * 60; unit = 'h'; len = num.len + 1; }
+        else if (SEC.test(u)) { value = Math.max(1, Math.round(num.n / 60)); unit = 's'; len = num.len + 1; }
+      } else if (w === 'ساعه') { value = 60; unit = 'h'; }
+      else if (w === 'دقيقه') { value = 1; unit = 'm'; }
+    }
+    if (value === null) {
+      if (joined) break; // «ساعه وروح»: the «و» did not start another part
+      continue;
+    }
+    // «ساعه الا ربع» = 45, «ساعتين الا ربع» = 105, «ساعه ونص» = 90.
+    if (unit === 'h') {
+      const after = tokens[i + len] || '';
+      const after2 = `${after} ${tokens[i + len + 1] || ''}`;
+      if (FRACTION.has(after)) { value += FRACTION.get(after); len += 1; }
+      else if (FRACTION.has(after2)) { value += FRACTION.get(after2); len += 2; }
+      else if (after === 'الا' && ['ربع', 'ثلث'].includes(tokens[i + len + 1])) { value -= tokens[i + len + 1] === 'ربع' ? 15 : 20; len += 2; }
+    }
+    total += value;
+    found = true;
+    i += len - 1;
+    // «ساعه و عشر دقايق»: keep adding the parts joined by «و».
+    joined = true;
+    if (tokens[i + 1] === 'و') i += 1;
+    else if (tokens[i + 1] && tokens[i + 1].startsWith('و') && tokens[i + 1].length > 1) {
+      tokens[i + 1] = tokens[i + 1].slice(1);
+    } else break;
   }
-  if (/ دقيقه /.test(t)) return 1;
-  if (/ ساعه /.test(t)) return 60;
-  return null;
+  return found && total > 0 ? total : null;
 }
 
 /**

@@ -66,7 +66,7 @@ const cases = [
   ['اكيد سوها', 'yes', {}],
   ['لا لا', 'no', {}],
   ['خلها', 'no', {}],
-  ['السلام عليكم', 'greet', { part: 'any' }],
+  ['السلام عليكم', 'greet', { part: 'salam' }],
   ['صباح الخير يا خلفون', 'greet', { part: 'morning' }],
   ['مساء الخير', 'greet', { part: 'evening' }],
   ['شحالك', 'how_are_you', {}],

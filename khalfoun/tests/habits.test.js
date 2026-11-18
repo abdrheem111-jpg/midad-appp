@@ -44,7 +44,7 @@ test('a repeating reminder is planned with repeat, too-frequent ones are refused
   assert.equal(b.hear('ذكرني كل دقيقتين').situation, 'reminder_too_often');
   const c = b.hear('الغ التذكيرات');
   assert.equal(c.action.type, 'cancel_reminders');
-  assert.match(b.actionResult(c.action.id, { ok: true, data: { cancelled: 2 } }).say, /٢/);
+  assert.match(b.actionResult(c.action.id, { ok: true, data: { cancelled: 2 } }).say, /تذكيرين/);
   const c2 = b.hear('الغ التذكيرات');
   assert.equal(b.actionResult(c2.action.id, { ok: true, data: { cancelled: 0 } }).situation, 'reminders_none');
 });

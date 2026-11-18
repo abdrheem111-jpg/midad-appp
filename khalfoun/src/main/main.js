@@ -748,7 +748,7 @@ async function start() {
     capture: captureScreen,
     beforeType: releaseFocus,
     home: app.getPath('home'),
-    paths: { downloads: downloadsDir, documents: app.getPath('documents'), pictures: app.getPath('pictures') },
+    paths: { downloads: downloadsDir, documents: app.getPath('documents'), pictures: app.getPath('pictures'), desktop: app.getPath('desktop') },
   });
   reminderScheduler = new ReminderScheduler({ store: new JsonStore(userData, 'reminders.json', { items: [] }), onFire: showReminder });
   await reminderScheduler.restore();

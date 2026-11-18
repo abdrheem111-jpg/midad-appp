@@ -11,7 +11,7 @@ import { KEY_IDS } from '../../core/keys.js';
 
 const APP_IDS = new Set(APPS.filter((a) => a.kind === 'app').map((a) => a.id));
 const URLS = new Set(APPS.filter((a) => a.kind === 'url').map((a) => a.url));
-const FOLDERS = new Set(['downloads', 'documents', 'pictures']);
+const FOLDERS = new Set(['downloads', 'documents', 'pictures', 'desktop']);
 const CLOSABLE = new Set([...APP_IDS, ...FOLDERS]);
 const MAX_REMINDER_MIN = 7 * 24 * 60; // «ذكرني بكرة الساعة ٧» and up to a week ahead
 

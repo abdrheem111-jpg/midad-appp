@@ -5,6 +5,21 @@
 import { NAME_FALLBACKS } from './templates/ar-om.js';
 
 const VAR_RE = /\{(\w+)\}/g;
+// «[[مفتوح|مفتوحة]]»: the masculine or feminine form, chosen by the thing named in {app}.
+const GENDER_RE = /\[\[([^|\]]*)\|([^\]]*)\]\]/g;
+
+/**
+ * True when an Arabic name takes feminine agreement: «الحاسبة», «المفكرة», and plurals of
+ * things such as «التنزيلات» or «الصور». Names in other scripts («Zoom») count as masculine.
+ * @param {string} name
+ */
+export function isFeminineName(name) {
+  const w = String(name || '').trim().split(/\s+/)[0] || '';
+  if (!/[\u0600-\u06FF]/.test(w)) return false;
+  if (/[ةه]$/.test(w) && !/(الله|اله)$/.test(w)) return true;
+  if (/ات$/.test(w) && w.length > 4) return true;
+  return ['الصور', 'صوري', 'الملفات', 'ملفاتي', 'الوثايق', 'مريم', 'زينب', 'هند', 'نور', 'ريم', 'شهد', 'رغد', 'جود', 'ملاك', 'اسيل', 'أسيل', 'روان', 'سلمى', 'ليلى', 'منى', 'هدى', 'جنى', 'لمى', 'رهف', 'وعد', 'غدير', 'بشاير', 'عهود', 'خلود', 'ابتسام', 'أمل', 'امل', 'مها', 'رنا', 'دينا', 'ميار', 'جميلة', 'الطالبه', 'الطالبة'].includes(w);
+}
 const RECENT_LIMIT = 100;
 
 export class ResponseEngine {
@@ -77,6 +92,8 @@ export class ResponseEngine {
     } else {
       out = out.replace(/يا \{name\}/g, fallback).replace(/\{name\}/g, fallback);
     }
+    const fem = vars.fem ?? isFeminineName(vars.app ?? vars.student);
+    out = out.replace(GENDER_RE, (_, m, f) => (fem ? f : m));
     return out.replace(VAR_RE, (_, key) => String(vars[key] ?? '')).replace(/\s+([؟،.!])/g, '$1').replace(/\s{2,}/g, ' ').trim();
   }
 }

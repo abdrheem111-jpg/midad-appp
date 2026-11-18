@@ -27,18 +27,43 @@ const STREAK_WINDOW_MS = 2 * 60 * 1000;
 /** "بعد 5 دقايق" with correct Arabic number agreement. */
 export function durationPhrase(minutes) {
   const m = Math.round(minutes);
-  if (m % 60 === 0 && m >= 60) {
-    const h = m / 60;
-    if (h === 1) return 'ساعة';
-    if (h === 2) return 'ساعتين';
-    if (h <= 10) return `${toArabicDigits(h)} ساعات`;
-    return `${toArabicDigits(h)} ساعة`;
+  const hours = (h) => (h === 1 ? 'ساعة' : h === 2 ? 'ساعتين' : h <= 10 ? `${toArabicDigits(h)} ساعات` : `${toArabicDigits(h)} ساعة`);
+  if (m % 60 === 0 && m >= 60) return hours(m / 60);
+  // «ساعة ونص», «ساعتين وربع», «ساعة و٢٠ دقيقة»: how people say it, not «٩٠ دقيقة».
+  if (m > 60 && m < 24 * 60) {
+    const h = Math.floor(m / 60);
+    const rest = m % 60;
+    if (rest === 30) return `${hours(h)} ونص`;
+    if (rest === 15) return `${hours(h)} وربع`;
+    return `${hours(h)} و${durationPhrase(rest)}`;
   }
   if (m === 1) return 'دقيقة';
   if (m === 2) return 'دقيقتين';
   if (m <= 10) return `${toArabicDigits(m)} دقايق`;
   return `${toArabicDigits(m)} دقيقة`;
 }
+
+/**
+ * A counted noun with Arabic number agreement: countPhrase(1, COUNTED.file) → «ملف واحد»,
+ * 2 → «ملفين», 5 → «٥ ملفات», 12 → «١٢ ملف».
+ * @param {number} n
+ * @param {[string, string, string, string]} forms one, two, 3-10, 11+
+ */
+export function countPhrase(n, [one, two, few, many]) {
+  if (n === 1) return one;
+  if (n === 2) return two;
+  if (n >= 3 && n <= 10) return `${toArabicDigits(n)} ${few}`;
+  return `${toArabicDigits(n)} ${many}`;
+}
+
+export const COUNTED = {
+  file: ['ملف واحد', 'ملفين', 'ملفات', 'ملف'],
+  name: ['اسم واحد', 'اسمين', 'أسماء', 'اسم'],
+  lesson: ['حصة وحدة', 'حصتين', 'حصص', 'حصة'],
+  group: ['مجموعة وحدة', 'مجموعتين', 'مجموعات', 'مجموعة'],
+  sentence: ['جملة وحدة', 'جملتين', 'جمل', 'جملة'],
+  reminder: ['تذكير واحد', 'تذكيرين', 'تذكيرات', 'تذكير'],
+};
 
 export class Brain {
   /**
@@ -283,7 +308,7 @@ export class Brain {
       return { ...out, behavior: 'dictation_off' };
     }
     this.emotions.feel('success', now);
-    return this.reply(d.typed ? 'dictation_done' : 'dictation_empty', { vars: { count: toArabicDigits(d.typed) }, behavior: 'dictation_off' });
+    return this.reply(d.typed ? 'dictation_done' : 'dictation_empty', { vars: { count: countPhrase(d.typed, COUNTED.sentence) }, behavior: 'dictation_off' });
   }
 
   // ------------------------------------------------------------ classroom
@@ -544,17 +569,17 @@ export class Brain {
       if (spec.action.type === 'organize_downloads') {
         const count = result.data?.moved ?? 0;
         if (!count) situation = 'organize_empty';
-        vars.count = toArabicDigits(count);
+        vars.count = countPhrase(count, COUNTED.file);
       }
       if (spec.action.type === 'cancel_reminders') {
         const count = result.data?.cancelled ?? 0;
         if (!count) situation = 'reminders_none';
-        vars.count = toArabicDigits(count);
+        vars.count = countPhrase(count, COUNTED.reminder);
       }
       if (spec.action.type === 'undo_organize') {
         const count = result.data?.restored ?? 0;
         if (!count) situation = 'undo_none';
-        vars.count = toArabicDigits(count);
+        vars.count = countPhrase(count, COUNTED.file);
       }
       return this.reply(situation, { vars });
     }
@@ -614,6 +639,7 @@ export class Brain {
       case 'how_are_you': this.emotions.feel('curious', now); return this.reply('how_are_you');
       case 'who': this.emotions.feel('curious', now); return this.reply('who');
       case 'thanks': this.emotions.feel('thanks', now); return this.reply('thanks');
+      case 'fine': this.emotions.feel('greet', now); return this.reply('fine');
       case 'praise': this.emotions.feel('praise', now); return this.reply('praise');
       case 'scold': this.emotions.feel('scold', now); return this.reply('scold');
       case 'goodbye': this.emotions.sleep(now); return this.reply('goodbye', { behavior: 'sleep' });
@@ -675,7 +701,7 @@ export class Brain {
         this.saveRoom(room);
         if (!count) { this.emotions.feel('not_understood', now); return this.reply('students_none'); }
         this.emotions.feel('celebrate', now);
-        return this.reply('students_saved', { vars: { count: toArabicDigits(count), names: s.names.slice(0, 6).join('، ') } });
+        return this.reply('students_saved', { vars: { count: countPhrase(count, COUNTED.name), names: s.names.slice(0, 6).join('، ') } });
       }
       case 'student_add': {
         const room = this.room();
@@ -702,7 +728,8 @@ export class Brain {
         const today = classesOn(this.memory.data.schedule, new Date(now));
         if (!today.length) return this.reply('schedule_today_none');
         const list = today.map((c) => `${classTime(c)}: ${c.subject}`).join('\n');
-        return { ...this.reply('schedule_today', { vars: { count: toArabicDigits(today.length) } }), say: `${this.reply('schedule_today', { vars: { count: toArabicDigits(today.length) } }).say}\n${list}`, long: true };
+        const head = this.reply('schedule_today', { vars: { count: countPhrase(today.length, COUNTED.lesson) } });
+        return { ...head, say: `${head.say}\n${list}`, long: true };
       }
       case 'schedule_next': {
         const next = nextClass(this.memory.data.schedule, now);
@@ -758,7 +785,8 @@ export class Brain {
         const list = groups.map((g, i) => `المجموعة ${toArabicDigits(i + 1)}: ${g.join('، ')}`).join('\n');
         this.context.lastAnswer = { text: list, at: now };
         this.emotions.feel('celebrate', now);
-        return { ...this.reply('groups_result', { vars: { count: toArabicDigits(groups.length) } }), say: `${this.reply('groups_result', { vars: { count: toArabicDigits(groups.length) } }).say}\n${list}`, long: true };
+        const head = this.reply('groups_result', { vars: { count: countPhrase(groups.length, COUNTED.group) } });
+        return { ...head, say: `${head.say}\n${list}`, long: true };
       }
       case 'award': {
         const room = this.room();
@@ -766,7 +794,9 @@ export class Brain {
         this.saveRoom(room);
         if (!res) return this.reply('not_understood');
         this.emotions.feel(s.delta > 0 ? 'celebrate' : 'care', now);
-        return this.reply(s.delta > 0 ? 'award_ok' : 'award_minus', { vars: { student: res.name, points: toArabicDigits(res.points) }, behavior: s.delta > 0 ? 'star' : null });
+        const n = Math.abs(s.delta);
+        const stars = n === 1 ? 'نجمة' : n === 2 ? 'نجمتين' : n <= 10 ? `${toArabicDigits(n)} نجوم` : `${toArabicDigits(n)} نجمة`;
+        return this.reply(s.delta > 0 ? 'award_ok' : 'award_minus', { vars: { student: res.name, points: toArabicDigits(res.points), stars }, behavior: s.delta > 0 ? 'star' : null });
       }
       case 'points_board': {
         const board = this.room().board(10);
@@ -775,7 +805,8 @@ export class Brain {
         const list = board.map((b, i) => `${medals[i] || `${toArabicDigits(i + 1)}.`} ${b.name}: ${toArabicDigits(b.points)}`).join('\n');
         this.context.lastAnswer = { text: list.replace(/[🥇🥈🥉]/gu, '').trim(), at: now };
         this.emotions.feel('celebrate', now);
-        return { ...this.reply('board_result', { vars: { first: board[0].name } }), say: `${this.reply('board_result', { vars: { first: board[0].name } }).say}\n${list}`, long: true };
+        const head = this.reply('board_result', { vars: { first: board[0].name } });
+        return { ...head, say: `${head.say}\n${list}`, long: true };
       }
       case 'points_reset': {
         const room = this.room();
@@ -1209,6 +1240,7 @@ export class Brain {
   }
 
   greetSituation(part) {
+    if (part === 'salam') return 'greet_salam';
     if (part === 'morning') return 'greet_morning';
     if (part === 'evening') return 'greet_evening';
     const h = new Date(this.clock()).getHours();

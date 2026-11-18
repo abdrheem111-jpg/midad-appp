@@ -44,7 +44,13 @@ const CORPUS = [
   ['خلنا نفتح الحاسبة', 'open', { app: 'calculator' }],
   ['الحين افتح الحاسبة', 'open', { app: 'calculator' }],
 
+  ['خذني لليوتيوب', 'open', { app: 'youtube' }],
+  ['افتح سطح المكتب', 'open', { app: 'desktop' }],
+  ['طيب افتح الحاسبة', 'open', { app: 'calculator' }],
+
   // ---- closing
+  ['قفل الحاسبه', 'close', { app: 'calculator' }],
+  ['صك الوورد', 'close', { app: 'word' }],
   ['سكر الحاسبة', 'close', { app: 'calculator' }],
   ['سكر المفكره', 'close', { app: 'notepad' }],
   ['اقفل الوورد', 'close', { app: 'word' }],
@@ -77,6 +83,8 @@ const CORPUS = [
   ['اكتم الصوت', 'volume', { direction: 'mute' }],
   ['ما اسمع شي ارفع الصوت', 'volume', { direction: 'up' }],
   ['خفض الصوت لو سمحت', 'volume', { direction: 'down' }],
+  ['نقص الصوت', 'volume', { direction: 'down' }],
+  ['هد الصوت شوي', 'volume', { direction: 'down' }],
 
   // ---- reminders
   ['ذكرني بعد خمس دقايق', 'reminder', { minutes: 5 }],
