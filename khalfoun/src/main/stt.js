@@ -108,13 +108,28 @@ export async function transcribe(whisper, wav, opts = {}) {
     // The person's own words (taught phrases) help whisper spell them the same way.
     const extra = (opts.words || []).filter((w) => typeof w === 'string' && w.trim()).slice(0, 12).join('، ');
     const prompt = extra ? `${PROMPT} ${extra}.`.slice(0, 400) : PROMPT;
-    const args = ['-m', model, '-l', 'ar', '-f', file, '-nt', '-np', '-t', String(opts.threads || 4), '--prompt', prompt];
-    const text = await new Promise((resolve, reject) => {
-      run(whisper.bin, args, { windowsHide: true, timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
-        if (err) reject(err);
-        else resolve(String(stdout || ''));
+    const base = ['-m', model, '-l', 'ar', '-f', file, '-nt', '-np'];
+    const once = (args) => new Promise((resolve, reject) => {
+      run(whisper.bin, args, { windowsHide: true, timeout: 60000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+        if (err) {
+          // Keep what whisper said about the failure: «Command failed» alone does not say why.
+          const tail = String(stderr || '').replace(/\s+/g, ' ').trim().slice(-300);
+          reject(new Error(`exit ${err.code ?? '?'}${err.killed ? ' (killed)' : ''}${tail ? `: ${tail}` : ''}`));
+        } else resolve(String(stdout || ''));
       });
     });
+    let text;
+    try {
+      text = await once([...base, '-t', String(opts.threads || 4), '--prompt', prompt]);
+    } catch (first) {
+      // Seen on a teacher's PC: whisper failed once and the sentence was lost. Try again
+      // the plainest way (no prompt, fewer threads) before giving up.
+      try {
+        text = await once([...base, '-t', '2']);
+      } catch (second) {
+        throw new Error(`${first.message} | retry: ${second.message}`);
+      }
+    }
     const clean = cleanTranscript(text);
     return { ok: true, text: ECHO.test(clean) || isHallucination(clean) ? '' : clean };
   } catch (err) {

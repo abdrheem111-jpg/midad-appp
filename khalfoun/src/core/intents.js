@@ -3,7 +3,7 @@
 // intent name plus slots. The rules run offline and in well under a millisecond.
 
 import { normalize, hasPhrase, parseMinutes, parseClock, parseNumberToken } from './arabic.js';
-import { levenshtein } from './wake.js';
+import { swapDistance as levenshtein } from './wake.js';
 import { calculate } from './calc.js';
 import { keyFor } from './keys.js';
 import { parseClassEntry } from './schedule.js';
@@ -99,6 +99,7 @@ const L = {
   settings: N(['اعداداتك', 'الصلاحيات', 'غير الصلاحيات', 'اعدادات خلفون', 'افتح اعداداتك']),
   weather: N(['شو الجو', 'ايش الجو', 'كيف الجو', 'الجو اليوم', 'درجه الحراره', 'درجة الحرارة', 'الطقس اليوم', 'شو الطقس', 'كيف الطقس', 'بتمطر', 'بيمطر', 'في مطر اليوم']),
   prayer: N(['متى صلاه', 'متى الصلاه', 'مواقيت الصلاه', 'اوقات الصلاه', 'متى الاذان', 'كم باقي على الاذان', 'كم باقي على الصلاه', 'متى اذان', 'وقت الصلاه', 'وقت صلاه']),
+  hearCheck: N(['تسمعني', 'هل تسمعني', 'انت تسمعني', 'تسمعني ولا لا', 'تسمعني او لا', 'سامعني', 'انت سامعني', 'تسمع صوتي', 'وصلك صوتي', 'تسمعني زين', 'تشتغل', 'انت شغال', 'شغال', 'موجود', 'انت موجود', 'انت هنا', 'هل انت موجود', 'الو', 'الو الو']),
   fine: N(['الحمدلله', 'الحمد لله', 'بخير', 'ابخير', 'ماشي الحال', 'كله تمام', 'تمام الحمدلله', 'زين الحمدلله', 'طيب الحمدلله', 'زين وانت', 'بخير وانت', 'تمام وانت', 'كلش زين', 'في نعمه']),
   goodbye: N(['فمان الله', 'بامان الله', 'الله يحفظك', 'يلا باي', 'اشوفك بعدين', 'نشوفك بعدين', 'مع السلامه', 'باي', 'في امان الله', 'الله معك', 'نشوفك']),
   costumeOff: N(['شيل البشت', 'فسخ البشت', 'نزل العلم', 'شيل العلم', 'شيل الفانوس', 'شيل الزي', 'رجع لبسك العادي', 'البس العادي']),
@@ -552,6 +553,7 @@ function recognizeText(raw, fuzzy) {
   // «كم ٢٥ ضرب ٤», «احسب ١٥٪ من ٢٠٠»: only when every word belongs to the calculation.
   if (calculate(raw)) return out('calc', { expr: String(raw).trim() }, 0.95);
   if (L.repeat.includes(text)) return out('repeat', {}, 0.85);
+  if (L.hearCheck.includes(text)) return out('hear_check', {}, 0.95);
   if (L.closeIt.includes(text)) return out('close', { app: null, it: true }, 0.85);
   if (L.openIt.includes(text)) return out('open_again', {}, 0.85);
   // ---- classroom tools

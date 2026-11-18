@@ -188,3 +188,59 @@ test('how many students, a random number, a dice roll', () => {
     assert.ok(n >= 1 && n <= 6, String(n));
   }
 });
+
+// ---- found in the teacher's own log on his Windows PC (18 Nov 2026)
+
+test('log: «افتج الحسابه» (whisper swapped letters and wrote ج) opens the calculator', () => {
+  for (const s of ['افتج الحسابه', 'افتح الحسابه']) {
+    const r = recognize(s);
+    assert.equal(r.intent, 'open', s);
+    assert.equal(r.slots.app, 'calculator', s);
+  }
+  assert.equal(recognize('سكر الحسابه').slots.app, 'calculator');
+});
+
+test('log: «تسمعني» / «هل تسمعني؟» get an answer at once instead of waiting for the model', () => {
+  const { brain } = makeBrain();
+  for (const s of ['تسمعني', 'هل تسمعني؟', 'انت موجود']) assert.equal(brain.hear(s).situation, 'hear_check', s);
+});
+
+test('log: the first question to a cold local model gets a long timeout, later ones the short one', async () => {
+  const { ChatClient } = await import('../src/main/chat.js');
+  let now = 1_000_000;
+  const timeouts = [];
+  const realSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms, ...a) => { timeouts.push(ms); return realSetTimeout(fn, ms, ...a); };
+  try {
+    const fetchFn = async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: 'هلا والله' } }] }) });
+    const c = new ChatClient({ endpoint: 'http://127.0.0.1:11434/v1', model: 'gemma3:4b', fetchFn, now: () => now });
+    assert.equal(c.cold, true);
+    await c.reply({ text: 'تسمعني' });
+    now += 60_000;
+    await c.reply({ text: 'شحالك' });
+    now += 10 * 60_000;
+    await c.reply({ text: 'وينك' });
+    assert.deepEqual(timeouts.filter((t) => t >= 20000), [90000, 25000, 90000]);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+  }
+});
+
+test('log: whisper failing once is retried without the prompt, and the reason is kept', async () => {
+  const { transcribe } = await import('../src/main/stt.js');
+  const { encodeWav } = await import('../src/renderer/wav.js');
+  const calls = [];
+  const flaky = (bin, args, opts, cb) => {
+    calls.push(args);
+    if (calls.length === 1) cb(Object.assign(new Error('Command failed'), { code: 3221225477 }), '', 'ggml_aligned_malloc: insufficient memory');
+    else cb(null, 'افتح الحاسبة\n', '');
+  };
+  const w = { bin: 'whisper-cli.exe', model: 'ggml-small.bin' };
+  assert.deepEqual(await transcribe(w, encodeWav(new Float32Array(1600), 16000), { run: flaky }), { ok: true, text: 'افتح الحاسبة' });
+  assert.ok(calls[0].includes('--prompt'));
+  assert.ok(!calls[1].includes('--prompt'));
+  const broken = (bin, args, opts, cb) => cb(Object.assign(new Error('Command failed'), { code: 1 }), '', 'error: failed to open model');
+  const r = await transcribe(w, encodeWav(new Float32Array(1600), 16000), { run: broken });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /failed to open model/);
+});

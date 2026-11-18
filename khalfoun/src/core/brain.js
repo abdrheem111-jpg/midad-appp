@@ -641,6 +641,7 @@ export class Brain {
       case 'how_are_you': this.emotions.feel('curious', now); return this.reply('how_are_you');
       case 'who': this.emotions.feel('curious', now); return this.reply('who');
       case 'thanks': this.emotions.feel('thanks', now); return this.reply('thanks');
+      case 'hear_check': this.emotions.feel('greet', now); return this.reply('hear_check');
       case 'fine': this.emotions.feel('greet', now); return this.reply('fine');
       case 'praise': this.emotions.feel('praise', now); return this.reply('praise');
       case 'scold': this.emotions.feel('scold', now); return this.reply('scold');

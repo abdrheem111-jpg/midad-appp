@@ -375,6 +375,8 @@ function hear(text) {
 async function askModel(text, fallback) {
   chatting = true;
   handle(brain.reply('thinking'));
+  // A model loading from disk can take a while: say so instead of going quiet.
+  const slow = setTimeout(() => { if (chatting) handle(brain.reply('thinking_long')); }, 9000);
   try {
     const d = brain.memory.data;
     const res = await bridge.chat({ text, history: brain.chatHistory, name: d.name, humor: d.humor });
@@ -384,6 +386,7 @@ async function askModel(text, fallback) {
   } catch {
     handle(fallback);
   } finally {
+    clearTimeout(slow);
     chatting = false;
   }
 }

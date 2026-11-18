@@ -61,7 +61,34 @@ export class ChatClient {
     this.model = opts.model;
     this.fetchFn = opts.fetchFn || fetch;
     this.timeoutMs = opts.timeoutMs || 25000;
+    this.coldTimeoutMs = opts.coldTimeoutMs || 90000;
     this.busy = false;
+    this.lastUsed = 0; // when the model last answered; Ollama unloads it after about five idle minutes
+    this.now = opts.now || (() => Date.now());
+  }
+
+  /** A model that has not answered for a while must load from disk first, which can take a minute. */
+  get cold() {
+    return this.now() - this.lastUsed > 4.5 * 60 * 1000;
+  }
+
+  /** Loads the model in the background so the first real question does not time out. */
+  async warmUp() {
+    if (this.busy || !this.cold) return { ok: true, warm: true };
+    this.busy = true;
+    try {
+      await getJSON(this.fetchFn, `${this.endpoint}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: this.model, messages: [{ role: 'user', content: 'هلا' }], max_tokens: 1, stream: false }),
+      }, this.coldTimeoutMs);
+      this.lastUsed = this.now();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err?.name === 'AbortError' ? 'timeout' : String(err?.message || err) };
+    } finally {
+      this.busy = false;
+    }
   }
 
   /**
@@ -81,7 +108,8 @@ export class ChatClient {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: this.model, messages: buildTaskMessages(ctx), temperature: 0.4, max_tokens: 700, stream: false }),
-      }, Math.max(this.timeoutMs, 90000));
+      }, Math.max(this.timeoutMs, this.coldTimeoutMs));
+      this.lastUsed = this.now();
       const text = cleanTaskReply(data?.choices?.[0]?.message?.content);
       if (!isSafe(text, !!ctx.kidsMode)) return { ok: false, error: 'unsafe_or_empty' };
       return { ok: true, text };
@@ -125,7 +153,8 @@ export class ChatClient {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: this.model, messages: buildMessages(ctx), temperature: 0.8, max_tokens: 160, stream: false }),
-      }, this.timeoutMs);
+      }, this.cold ? Math.max(this.timeoutMs, this.coldTimeoutMs) : this.timeoutMs);
+      this.lastUsed = this.now();
       const rawText = String(data?.choices?.[0]?.message?.content || '').replace(/<think>[\s\S]*?<\/think>/gi, ' ').trim();
       // The model may answer with a command for the brain instead of a chat line.
       const command = extractCommand(rawText);

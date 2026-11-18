@@ -778,7 +778,12 @@ async function start() {
     if (!found) return;
     const hadChat = Boolean(chat);
     const hadVision = visionModel;
-    if (!chat) { chatInfo = found; chat = new ChatClient(found); }
+    if (!chat) {
+      chatInfo = found;
+      chat = new ChatClient(found);
+      // Load the model now: the first question used to time out while it loaded from disk.
+      chat.warmUp().then((r) => diag.write('local model warm-up', r)).catch(() => {});
+    }
     visionModel = pickVisionModel(found.models);
     if (!hadChat || hadVision !== visionModel) {
       diag.write('local model', { chat: chatInfo?.model, vision: visionModel });
