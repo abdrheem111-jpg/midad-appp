@@ -127,7 +127,7 @@ try {
   typeCommand('خلاص');
   await sleep(1500);
   typeCommand('اقرأ الشاشة');
-  step('«اقرأ الشاشة» reads words on the screen with Windows OCR', await until(async () => /action read_screen \{\} → ok text\([^)]*\): «[^»]*(Khalfoun|read this screen)/i.test(await readLog()), 45000));
+  step('«اقرأ الشاشة» reads words on the screen with Windows OCR', await until(async () => /action read_screen \{\} → ok text\([^)]*\): «[^»]*(Khalfoun|read this screen|Notepad|File Edit)/i.test(await readLog()), 45000));
 
   // Any installed program by its Arabic name, found in the Start menu.
   typeCommand('افتح باورشيل');

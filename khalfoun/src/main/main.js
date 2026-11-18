@@ -439,7 +439,7 @@ function setupIpc(stores, executor) {
   ipcMain.handle('action:run', async (event, action) => {
     if (!fromApp(event)) { diag.write('action refused: not from the app page'); return { ok: false, error: 'forbidden' }; }
     const result = await executor.run(action);
-    const seen = typeof result?.data?.text === 'string' ? ` text(${result.data.language || ''}): «${result.data.text.replace(/\s+/g, ' ').slice(0, 120)}»` : '';
+    const seen = typeof result?.data?.text === 'string' ? ` text(${result.data.language || ''}): «${result.data.text.replace(/\s+/g, ' ').slice(0, action?.type === 'read_screen' ? 900 : 160)}»` : '';
     diag.write('action', action?.type, action?.params || {}, '→', result?.ok ? `ok${seen}` : `failed: ${result?.error}`);
     return result;
   });
