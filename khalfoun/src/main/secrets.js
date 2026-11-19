@@ -112,9 +112,9 @@ export class CloudSecrets {
   }
 
   /** Counts seconds of audio sent; always-on listening stops using the cloud past its daily share. */
-  allowWake() {
+  allowWake(limit = WAKE_SECONDS_PER_DAY) {
     this.rollDay();
-    return this.data.usage.wakeSeconds < WAKE_SECONDS_PER_DAY;
+    return this.data.usage.wakeSeconds < limit;
   }
 
   count(seconds, wake) {

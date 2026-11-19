@@ -200,3 +200,18 @@ test('keys: a Gemini key works alone; Claude wins when both are set', async () =
   await s.update({ claudeKey: `sk-ant-api03-${'c'.repeat(40)}` });
   assert.equal(s.brain, 'claude');
 });
+
+test('Gemini can hear too: the recording goes inline, the words come back, silence is empty', async () => {
+  const { GeminiAgent } = await import('../src/main/cloud.js');
+  let sent;
+  const answers = ['يا خلفون افتح الحاسبة.', '-'];
+  const g = new GeminiAgent({ key: 'k', model: 'gemini-3.8-flash', fetchFn: async (url, init) => { sent = JSON.parse(init.body); return reply(200, { candidates: [{ content: { parts: [{ text: answers.shift() }] } }] }); } });
+  const wav = encodeWav(new Float32Array(1600), 16000);
+  const r = await g.transcribe(wav);
+  assert.deepEqual([r.ok, r.text], [true, 'يا خلفون افتح الحاسبة']);
+  assert.equal(sent.contents[0].parts[0].inline_data.mime_type, 'audio/wav');
+  assert.equal(Buffer.from(sent.contents[0].parts[0].inline_data.data, 'base64').length, wav.length);
+  assert.equal((await g.transcribe(wav)).text, '');
+  const q = new GeminiAgent({ key: 'k', model: 'm', fetchFn: async () => reply(429, {}) });
+  assert.equal((await q.transcribe(wav)).error, 'quota');
+});

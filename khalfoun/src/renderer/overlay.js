@@ -704,7 +704,7 @@ function radio(name, value) {
 /** Uses the cloud voice when the person set up Azure (falls back to Windows' voice). */
 function applyCloud() {
   voiceOut.remote = cloudInfo.azure && cloudInfo.use?.voice !== false && typeof bridge.speak === 'function' ? (line) => bridge.speak(line) : null;
-  if (cloudInfo.azure && cloudInfo.use?.hear !== false) voiceAvailable = true;
+  if ((cloudInfo.azure || cloudInfo.gemini) && cloudInfo.use?.hear !== false) voiceAvailable = true;
 }
 
 function renderCloud() {

@@ -338,4 +338,51 @@ export class GeminiAgent {
     const r = await this.respond({ text: 'هلا' });
     return r.ok ? { ok: true, ms: r.ms, model: r.model } : r;
   }
+
+  /**
+   * Hearing with the same free key: Gemini writes down what was said in the recording.
+   * @param {Uint8Array} wav 16 kHz mono WAV
+   * @returns {Promise<{ok: true, text: string, ms: number} | {ok: false, error: string}>}
+   */
+  async transcribe(wav, { timeoutMs = 9000 } = {}) {
+    const t0 = this.now();
+    let model = await this.resolveModel();
+    const data = Buffer.from(wav).toString('base64');
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const generationConfig = { temperature: 0, maxOutputTokens: 200 };
+      if (!this.noThinkingConfig) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+      let res;
+      try {
+        res = await withTimeout(this.fetchFn, `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-goog-api-key': this.key },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [
+              { inline_data: { mime_type: 'audio/wav', data } },
+              { text: 'اكتب الكلام العربي المنطوق في هذا التسجيل حرفياً كما قيل باللهجة العُمانية، بدون ترجمة ولا شرح ولا علامات. إذا ما فيه كلام واضح اكتب: -' },
+            ] }],
+            generationConfig,
+          }),
+        }, timeoutMs);
+      } catch (err) {
+        return { ok: false, error: errorName(err) };
+      }
+      if (res.status === 400 || res.status === 404) {
+        const msg = String((await res.json().catch(() => ({})))?.error?.message || '');
+        if (/API key not valid|API_KEY_INVALID/i.test(msg)) return { ok: false, error: 'bad_key' };
+        if (/thinking/i.test(msg) && !this.noThinkingConfig) { this.noThinkingConfig = true; continue; }
+        const found = await this.discoverModel();
+        if (found && found !== model) { model = found; this.model = found; continue; }
+        return { ok: false, error: `http_${res.status}` };
+      }
+      if (res.status === 401 || res.status === 403) return { ok: false, error: 'bad_key' };
+      if (res.status === 429) return { ok: false, error: 'quota' };
+      if (!res.ok) return { ok: false, error: `http_${res.status}` };
+      const out = await res.json();
+      const text = (out?.candidates?.[0]?.content?.parts || []).map((x) => x.text || '').join(' ')
+        .replace(/[«»"“”]/g, '').replace(/\s+/g, ' ').trim();
+      return { ok: true, text: /^[-–—.\s]*$/.test(text) ? '' : text.replace(/[.。]+$/u, ''), ms: this.now() - t0 };
+    }
+    return { ok: false, error: 'no_answer' };
+  }
 }

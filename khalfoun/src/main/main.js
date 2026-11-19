@@ -131,7 +131,14 @@ const toolWindows = {};
 let secrets = { status: () => ({}), data: { use: {} }, azure: null, allowWake: () => false };
 let agent = null;
 let saveUsageTimer = null;
-const cloudHears = () => Boolean(secrets.data.use?.hear && secrets.azure);
+// Hearing in the cloud: Azure when its key is set, else Gemini with the same free key as the brain.
+const cloudHears = () => Boolean(secrets.data.use?.hear && (secrets.azure || secrets.data.gemini));
+let geminiEars = null;
+function cloudTranscribe(bytes, isWake) {
+  if (secrets.azure) return transcribeAzure(secrets.azure, bytes, { timeoutMs: isWake ? 6000 : 8000 }).then((r) => ({ ...r, service: 'azure' }));
+  if (!geminiEars) geminiEars = new GeminiAgent({ key: secrets.geminiKey, fetchFn: (url, init) => net.fetch(url, init) });
+  return geminiEars.transcribe(bytes, { timeoutMs: isWake ? 7000 : 9000 }).then((r) => ({ ...r, service: 'gemini' }));
+}
 const cloudThinks = () => Boolean(secrets.data.use?.brain && secrets.brain);
 function getAgent() {
   if (!agent) {
@@ -513,6 +520,7 @@ function setupIpc(stores, executor) {
     let err;
     try { err = await secrets.update(patch); } catch (e) { err = String(e?.message || e); }
     agent = null; // rebuilt with the new key on next use
+    geminiEars = null;
     diag.write('cloud settings', { ...secrets.status(), error: err || undefined });
     return err ? { ok: false, error: err, status: secrets.status() } : { ok: true, status: secrets.status() };
   });
@@ -603,16 +611,17 @@ function setupIpc(stores, executor) {
     sttBusy = true;
     try {
       // The cloud first when the person set it up: about a second instead of many on a slow PC.
-      if (cloudHears() && (!isWake || secrets.allowWake())) {
-        const cloud = await transcribeAzure(secrets.azure, bytes, { timeoutMs: isWake ? 6000 : 8000 });
+      // Gemini's free tier counts requests per day, so always-on listening gets a smaller share there.
+      if (cloudHears() && (!isWake || secrets.allowWake(secrets.azure ? undefined : 3 * 60))) {
+        const cloud = await cloudTranscribe(bytes, isWake);
         if (cloud.ok) {
           secrets.count(wavSeconds(bytes), isWake);
           clearTimeout(saveUsageTimer);
           saveUsageTimer = setTimeout(() => secrets.save().catch(() => {}), 5000);
-          if (!isWake) diag.write(`voice (command, ${bytes.length} bytes) → «${cloud.text}» (${(cloud.ms / 1000).toFixed(1)} s, azure)`);
-          return { ...cloud, model: 'azure' };
+          if (!isWake) diag.write(`voice (command, ${bytes.length} bytes) → «${cloud.text}» (${(cloud.ms / 1000).toFixed(1)} s, ${cloud.service})`);
+          return { ...cloud, model: cloud.service };
         }
-        diag.write(`voice (${isWake ? 'wake' : 'command'}) azure failed: ${cloud.error}${whisper.available ? ' → whisper' : ''}`);
+        diag.write(`voice (${isWake ? 'wake' : 'command'}) ${cloud.service} failed: ${cloud.error}${whisper.available ? ' → whisper' : ''}`);
         if (!whisper.available) return { ok: false, error: `stt_failed: ${cloud.error}` };
       }
       // Use most cores for a command (faster answer), fewer for wake-word checks running in the background.
