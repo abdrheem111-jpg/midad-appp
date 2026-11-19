@@ -19,7 +19,7 @@ import { JsonStore } from './storage.js';
 import { createPlatform } from './actions/platform.js';
 import { createExecutor } from './actions/index.js';
 import { findWhisper, transcribe, wavSeconds } from './stt.js';
-import { transcribeAzure, speakAzure, verifyAzure, ClaudeAgent, GeminiAgent } from './cloud.js';
+import { transcribeAzure, speakAzure, verifyAzure, ClaudeAgent, GeminiAgent, chainAgents } from './cloud.js';
 import { CloudSecrets, DEFAULT_CLOUD } from './secrets.js';
 import { WindowWatcher } from './windows-watcher.js';
 import { ChatClient, findLocalModel, pickVisionModel } from './chat.js';
@@ -140,11 +140,24 @@ function cloudTranscribe(bytes, isWake) {
   return geminiEars.transcribe(bytes, { timeoutMs: isWake ? 7000 : 9000 }).then((r) => ({ ...r, service: 'gemini' }));
 }
 const cloudThinks = () => Boolean(secrets.data.use?.brain && secrets.brain);
+/**
+ * The cloud brain: Claude when its key is set, Gemini otherwise — and Gemini also steps in when
+ * Claude has no credit, a bad key or is busy (seen: a Claude key without credit blocked Gemini).
+ */
 function getAgent() {
-  if (!agent) {
-    const fetchFn = (url, init) => net.fetch(url, init);
-    agent = secrets.brain === 'claude' ? new ClaudeAgent({ key: secrets.claudeKey, fetchFn }) : new GeminiAgent({ key: secrets.geminiKey, fetchFn });
-  }
+  if (agent) return agent;
+  const fetchFn = (url, init) => net.fetch(url, init);
+  const claude = secrets.data.claude ? new ClaudeAgent({ key: secrets.claudeKey, fetchFn }) : null;
+  const gemini = secrets.data.gemini ? new GeminiAgent({ key: secrets.geminiKey, fetchFn }) : null;
+  agent = {
+    respond: (p) => chainAgents([claude, gemini]).respond(p),
+    async verifyAll() {
+      const out = {};
+      if (claude) out.claude = await claude.verify();
+      if (gemini) out.gemini = await gemini.verify();
+      return out;
+    },
+  };
   return agent;
 }
 
@@ -527,7 +540,7 @@ function setupIpc(stores, executor) {
   ipcMain.handle('cloud:test', async (event) => {
     if (!fromApp(event)) return null;
     const out = {};
-    if (secrets.brain) out[secrets.brain] = await getAgent().verify();
+    if (secrets.brain) Object.assign(out, await getAgent().verifyAll());
     if (secrets.azure) out.azure = await verifyAzure(secrets.azure);
     diag.write('cloud test', out);
     return out;
@@ -541,7 +554,7 @@ function setupIpc(stores, executor) {
       text: String(p.text || '').slice(0, 800), history, name: String(p.name || '').slice(0, 40),
       context: String(p.context || '').slice(0, 600), kidsMode: !!settings.kidsMode, level: settings.level,
     });
-    diag.write(secrets.brain || 'brain', `«${String(p.text || '').slice(0, 80)}» →`, res.ok ? `${res.addressed ? '' : '(not for me) '}«${res.say}» ${JSON.stringify(res.commands)} ${res.ms} ms` : `failed: ${res.error}`);
+    diag.write(secrets.brain || 'brain', `«${String(p.text || '').slice(0, 80)}» →`, res.ok ? `${res.addressed ? '' : '(not for me) '}«${res.say}» ${JSON.stringify(res.commands)} ${res.ms} ms${res.model ? ` ${res.model}` : ''}` : `failed: ${res.error}${res.detail ? ` (${res.detail})` : ''}`);
     return res;
   });
   ipcMain.handle('voice:speak', async (event, text) => {
@@ -621,7 +634,9 @@ function setupIpc(stores, executor) {
           if (!isWake) diag.write(`voice (command, ${bytes.length} bytes) → «${cloud.text}» (${(cloud.ms / 1000).toFixed(1)} s, ${cloud.service})`);
           return { ...cloud, model: cloud.service };
         }
-        diag.write(`voice (${isWake ? 'wake' : 'command'}) ${cloud.service} failed: ${cloud.error}${whisper.available ? ' → whisper' : ''}`);
+        diag.write(`voice (${isWake ? 'wake' : 'command'}) ${cloud.service} failed: ${cloud.error}${cloud.detail ? ` (${cloud.detail})` : ''}${whisper.available && !isWake ? ' → whisper' : ''}`);
+        // Always-on listening skips the sentence instead of making the PC crawl with whisper.
+        if (isWake) return { ok: true, text: '' };
         if (!whisper.available) return { ok: false, error: `stt_failed: ${cloud.error}` };
       }
       // Use most cores for a command (faster answer), fewer for wake-word checks running in the background.

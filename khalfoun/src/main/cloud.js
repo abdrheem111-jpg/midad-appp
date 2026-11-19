@@ -239,6 +239,17 @@ const GEMINI_SCHEMA = {
   required: ['addressed', 'say', 'commands'],
 };
 
+/** Google's reason for refusing a key, named so the person knows what to do. */
+async function geminiAuthError(res) {
+  const body = await res.json().catch(() => ({}));
+  const msg = String(body?.error?.message || '');
+  const reason = JSON.stringify(body?.error?.details || '');
+  if (/ACCESS_TOKEN_TYPE_UNSUPPORTED/.test(msg + reason)) return { ok: false, error: 'key_type', detail: msg.slice(0, 160) };
+  if (/SERVICE_DISABLED|has not been used|is disabled/i.test(msg + reason)) return { ok: false, error: 'api_disabled', detail: msg.slice(0, 160) };
+  if (/location is not supported|User location/i.test(msg)) return { ok: false, error: 'region_blocked', detail: msg.slice(0, 160) };
+  return { ok: false, error: 'bad_key', detail: msg.slice(0, 160) };
+}
+
 /** Picks the newest plain «Flash» model from Google's list (not lite, preview, image or audio). */
 export function pickGeminiModel(models) {
   const ok = (models || []).filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
@@ -254,9 +265,24 @@ export class GeminiAgent {
     this.key = opts.key;
     this.model = opts.model || null;
     this.fetchFn = opts.fetchFn || fetch;
-    this.timeoutMs = opts.timeoutMs || 12000;
+    this.timeoutMs = opts.timeoutMs || 15000;
     this.now = opts.now || (() => Date.now());
-    this.noThinkingConfig = false;
+    // How to ask for little thinking: newer models take «thinkingLevel», older «thinkingBudget»;
+    // if a model refuses both, ask without.
+    this.thinking = 'level';
+  }
+
+  thinkingConfig() {
+    if (this.thinking === 'level') return { thinkingLevel: 'MINIMAL' };
+    if (this.thinking === 'budget') return { thinkingBudget: 0 };
+    return null;
+  }
+
+  /** Steps down the thinking setting after a model refused it; false when nothing is left to try. */
+  refuseThinking() {
+    if (this.thinking === 'level') { this.thinking = 'budget'; return true; }
+    if (this.thinking === 'budget') { this.thinking = 'none'; return true; }
+    return false;
   }
 
   /** The model to call: the alias first; if Google rejects it, the newest Flash in the key's list. */
@@ -290,7 +316,8 @@ export class GeminiAgent {
     while (merged.length && merged[0].role !== 'user') merged.shift();
     const generationConfig = { responseMimeType: 'application/json', responseSchema: GEMINI_SCHEMA, maxOutputTokens: 300, temperature: 0.6 };
     // Thinking makes the answer slower; a short reply does not need it.
-    if (!this.noThinkingConfig) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    const thinking = this.thinkingConfig();
+    if (thinking) generationConfig.thinkingConfig = thinking;
     return {
       systemInstruction: { parts: [{ text: `${agentSystem(p)}\nأجب بكائن JSON فقط فيه addressed و say و commands.` }] },
       contents: merged,
@@ -301,7 +328,7 @@ export class GeminiAgent {
   async respond(p) {
     const t0 = this.now();
     let model = await this.resolveModel();
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
       let res;
       try {
         res = await withTimeout(this.fetchFn, `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`, {
@@ -314,14 +341,14 @@ export class GeminiAgent {
       }
       if (res.status === 400 || res.status === 404) {
         const msg = String((await res.json().catch(() => ({})))?.error?.message || '');
-        if (/API key not valid|API_KEY_INVALID/i.test(msg)) return { ok: false, error: 'bad_key' };
-        if (/thinking/i.test(msg) && !this.noThinkingConfig) { this.noThinkingConfig = true; continue; }
+        if (/API key not valid|API_KEY_INVALID/i.test(msg)) return { ok: false, error: 'bad_key', detail: msg.slice(0, 160) };
+        if (/thinking/i.test(msg) && this.refuseThinking()) continue;
         // The alias or a retired model: ask Google which Flash this key can use.
         const found = await this.discoverModel();
         if (found && found !== model) { model = found; this.model = found; continue; }
         return { ok: false, error: `http_${res.status}` };
       }
-      if (res.status === 401 || res.status === 403) return { ok: false, error: 'bad_key' };
+      if (res.status === 401 || res.status === 403) return geminiAuthError(res);
       if (res.status === 429) return { ok: false, error: 'quota' };
       if (res.status >= 500) return { ok: false, error: 'busy' };
       if (!res.ok) return { ok: false, error: `http_${res.status}` };
@@ -334,9 +361,27 @@ export class GeminiAgent {
     return { ok: false, error: 'no_answer' };
   }
 
+  /** Checks the key with Google's model list (fast), then one real short answer. */
   async verify() {
-    const r = await this.respond({ text: 'هلا' });
-    return r.ok ? { ok: true, ms: r.ms, model: r.model } : r;
+    const t0 = this.now();
+    try {
+      const res = await withTimeout(this.fetchFn, `${GEMINI_BASE}/models?pageSize=200`, { headers: { 'x-goog-api-key': this.key } }, 10000);
+      if (res.status === 400 || res.status === 401 || res.status === 403) return geminiAuthError(res);
+      if (res.ok) {
+        const best = pickGeminiModel((await res.json())?.models);
+        if (best && !this.model) this.model = best;
+      }
+    } catch (err) {
+      return { ok: false, error: errorName(err), detail: 'model list' };
+    }
+    const keep = this.timeoutMs;
+    this.timeoutMs = 25000; // the first answer may be slow while Google warms up
+    try {
+      const r = await this.respond({ text: 'هلا' });
+      return r.ok ? { ok: true, ms: this.now() - t0, model: r.model } : r;
+    } finally {
+      this.timeoutMs = keep;
+    }
   }
 
   /**
@@ -344,13 +389,14 @@ export class GeminiAgent {
    * @param {Uint8Array} wav 16 kHz mono WAV
    * @returns {Promise<{ok: true, text: string, ms: number} | {ok: false, error: string}>}
    */
-  async transcribe(wav, { timeoutMs = 9000 } = {}) {
+  async transcribe(wav, { timeoutMs = 12000 } = {}) {
     const t0 = this.now();
     let model = await this.resolveModel();
     const data = Buffer.from(wav).toString('base64');
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
       const generationConfig = { temperature: 0, maxOutputTokens: 200 };
-      if (!this.noThinkingConfig) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+      const thinking = this.thinkingConfig();
+      if (thinking) generationConfig.thinkingConfig = thinking;
       let res;
       try {
         res = await withTimeout(this.fetchFn, `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`, {
@@ -369,13 +415,13 @@ export class GeminiAgent {
       }
       if (res.status === 400 || res.status === 404) {
         const msg = String((await res.json().catch(() => ({})))?.error?.message || '');
-        if (/API key not valid|API_KEY_INVALID/i.test(msg)) return { ok: false, error: 'bad_key' };
-        if (/thinking/i.test(msg) && !this.noThinkingConfig) { this.noThinkingConfig = true; continue; }
+        if (/API key not valid|API_KEY_INVALID/i.test(msg)) return { ok: false, error: 'bad_key', detail: msg.slice(0, 160) };
+        if (/thinking/i.test(msg) && this.refuseThinking()) continue;
         const found = await this.discoverModel();
         if (found && found !== model) { model = found; this.model = found; continue; }
         return { ok: false, error: `http_${res.status}` };
       }
-      if (res.status === 401 || res.status === 403) return { ok: false, error: 'bad_key' };
+      if (res.status === 401 || res.status === 403) return geminiAuthError(res);
       if (res.status === 429) return { ok: false, error: 'quota' };
       if (!res.ok) return { ok: false, error: `http_${res.status}` };
       const out = await res.json();
@@ -385,4 +431,22 @@ export class GeminiAgent {
     }
     return { ok: false, error: 'no_answer' };
   }
+}
+
+/**
+ * Several cloud brains in order: the next one answers when the first has no credit, a bad
+ * key or is busy (a Claude key without credit must not block a working Gemini key).
+ */
+export function chainAgents(agents) {
+  const chain = agents.filter(Boolean);
+  return {
+    async respond(p) {
+      let last = { ok: false, error: 'not_configured' };
+      for (const a of chain) {
+        last = await a.respond(p);
+        if (last.ok || !['no_credit', 'bad_key', 'busy', 'key_type', 'quota'].includes(last.error)) return last;
+      }
+      return last;
+    },
+  };
 }

@@ -183,11 +183,11 @@ test('Gemini (free): JSON answer, alias first, the newest Flash when the alias i
   assert.equal((await bad.respond({ text: 'x' })).error, 'bad_key');
   const quota = new GeminiAgent({ key: 'k', fetchFn: async () => reply(429, {}) });
   assert.equal((await quota.respond({ text: 'x' })).error, 'quota');
-  // A model that refuses the thinking setting is asked again without it.
+  // A model that refuses the thinking settings is asked again with the next one, then without.
   let n = 0;
   const think = new GeminiAgent({ key: 'k', model: 'gemini-3.8-flash', fetchFn: async (u, init) => { n += 1; const b = JSON.parse(init.body); return b.generationConfig.thinkingConfig ? reply(400, { error: { message: 'thinking budget is not supported' } }) : reply(200, { candidates: [{ content: { parts: [{ text: '{"addressed":false,"say":"","commands":[]}' }] } }] }); } });
   const t = await think.respond({ text: 'x' });
-  assert.deepEqual([t.ok, t.addressed, n], [true, false, 2]);
+  assert.deepEqual([t.ok, t.addressed, n], [true, false, 3]);
 });
 
 test('keys: a Gemini key works alone; Claude wins when both are set', async () => {
@@ -217,4 +217,30 @@ test('Gemini can hear too: the recording goes inline, the words come back, silen
   assert.equal((await g.transcribe(wav)).text, '');
   const q = new GeminiAgent({ key: 'k', model: 'm', fetchFn: async () => reply(429, {}) });
   assert.equal((await q.transcribe(wav)).error, 'quota');
+});
+
+test('from the teacher\'s log: a Claude key without credit no longer blocks Gemini', async () => {
+  const { chainAgents } = await import('../src/main/cloud.js');
+  const claude = { respond: async () => ({ ok: false, error: 'no_credit' }) };
+  const gemini = { respond: async () => ({ ok: true, addressed: true, say: 'هلا', commands: [] }) };
+  assert.equal((await chainAgents([claude, gemini]).respond({ text: 'هلا' })).say, 'هلا');
+  const offline = { respond: async () => ({ ok: false, error: 'offline' }) };
+  assert.equal((await chainAgents([offline, gemini]).respond({ text: 'x' })).error, 'offline'); // no point trying the next
+});
+
+test('from the teacher\'s log: Gemini asks for minimal thinking (it timed out), checks the key by the model list, names Google\'s refusals', async () => {
+  const { GeminiAgent } = await import('../src/main/cloud.js');
+  let body;
+  const ok = new GeminiAgent({ key: 'k', fetchFn: async (url, init) => {
+    if (url.includes('/models?')) return reply(200, { models: [{ name: 'models/gemini-3.8-flash', supportedGenerationMethods: ['generateContent'] }] });
+    body = JSON.parse(init.body);
+    return reply(200, { candidates: [{ content: { parts: [{ text: '{"addressed":true,"say":"هلا","commands":[]}' }] } }] });
+  } });
+  const v = await ok.verify();
+  assert.deepEqual([v.ok, v.model], [true, 'gemini-3.8-flash']);
+  assert.deepEqual(body.generationConfig.thinkingConfig, { thinkingLevel: 'MINIMAL' });
+  const typed = new GeminiAgent({ key: 'AQ.x', fetchFn: async () => reply(401, { error: { message: 'Expected OAuth 2 access token', details: [{ reason: 'ACCESS_TOKEN_TYPE_UNSUPPORTED' }] } }) });
+  assert.equal((await typed.verify()).error, 'key_type');
+  const off = new GeminiAgent({ key: 'k', fetchFn: async () => reply(403, { error: { message: 'Generative Language API has not been used in project 1 before or it is disabled.' } }) });
+  assert.equal((await off.verify()).error, 'api_disabled');
 });

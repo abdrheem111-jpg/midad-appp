@@ -960,7 +960,7 @@ $('cl-test').addEventListener('click', async () => {
   if (!bridge.cloud) return;
   $('cl-result').textContent = 'أجرب المفاتيح...';
   const r = await bridge.cloud.test();
-  const say = (x, name) => (!x ? '' : x.ok ? `${name}: يشتغل ✓${x.ms ? ` (${(x.ms / 1000).toFixed(1)} ث)` : ''}` : `${name}: ${{ bad_key: 'المفتاح غلط', no_credit: 'ما فيه رصيد', offline: 'ما فيه نت', timeout: 'تأخر', quota: 'خلص الحد المجاني لليوم' }[x.error] || x.error}`);
+  const say = (x, name) => (!x ? '' : x.ok ? `${name}: يشتغل ✓${x.ms ? ` (${(x.ms / 1000).toFixed(1)} ث)` : ''}` : `${name}: ${{ bad_key: 'المفتاح غلط', no_credit: 'ما فيه رصيد', offline: 'ما فيه نت', timeout: 'تأخر', quota: 'خلص الحد المجاني لليوم', key_type: 'جوجل رفضت نوع المفتاح (مشكلة من جوجل)', api_disabled: 'خدمة Gemini مب مفعّلة في المشروع', region_blocked: 'جوجل ما تسمح بالخدمة من منطقتك' }[x.error] || x.error}`);
   $('cl-result').textContent = [say(r?.claude, 'Claude'), say(r?.gemini, 'Gemini'), say(r?.azure, 'Azure')].filter(Boolean).join(' · ') || 'حط مفتاح أول.';
 });
 $('cl-forget').addEventListener('click', () => saveCloud({ claudeKey: '', geminiKey: '', azureKey: '', azureRegion: '' }));
