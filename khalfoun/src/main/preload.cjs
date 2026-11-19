@@ -11,6 +11,13 @@ contextBridge.exposeInMainWorld('khalfoun', {
   chat: (payload) => ipcRenderer.invoke('chat:reply', payload),
   chatTask: (payload) => ipcRenderer.invoke('chat:task', payload),
   visionLook: (payload) => ipcRenderer.invoke('vision:look', payload),
+  agent: (payload) => ipcRenderer.invoke('agent:respond', payload),
+  speak: (text) => ipcRenderer.invoke('voice:speak', String(text || '').slice(0, 600)),
+  cloud: {
+    status: () => ipcRenderer.invoke('cloud:status'),
+    set: (patch) => ipcRenderer.invoke('cloud:set', patch),
+    test: () => ipcRenderer.invoke('cloud:test'),
+  },
   transcribe: (wav, purpose) => ipcRenderer.invoke('voice:transcribe', wav, purpose === 'wake' ? 'wake' : 'command'),
   setup: {
     status: () => ipcRenderer.invoke('setup:status'),

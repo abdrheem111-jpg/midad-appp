@@ -37,6 +37,9 @@ const workArea = () => ({ width: window.innerWidth, height: window.innerHeight -
 let brain;
 let voiceAvailable = false;
 let chatInfo = { available: false, model: null };
+let cloudInfo = { claude: false, azure: false, use: {} }; // the person's own cloud keys (status only)
+const agentOn = () => Boolean(cloudInfo.claude && cloudInfo.use?.brain !== false && typeof bridge.agent === 'function');
+let followUntil = 0; // after he answers, a follow-up needs no «يا خلفون» for a few seconds
 const character = createCharacter(els.stage);
 const animator = new Animator();
 const motion = new Motion(workArea(), { width: CHAR_W, height: CHAR_H });
@@ -359,16 +362,58 @@ async function runAction(action) {
 let chatting = false;
 const chatOn = () => chatInfo.available && brain.memory.data.chatEnabled !== false && typeof bridge.chat === 'function';
 
-function hear(text) {
+function hear(text, opts = {}) {
   const t = String(text || '').trim();
   if (!t) return;
   const reply = brain.hear(t);
   bridge.note?.(`heard «${t}» → ${reply?.situation || 'nothing'}${reply?.action ? ` (action ${reply.action.type})` : ''}${reply?.awaitingConfirm ? ' (asks to confirm)' : ''}`);
-  if (reply?.situation === 'not_understood' && reply.unknownText && chatOn() && !chatting) {
-    askModel(t, reply);
-    return;
+  followUntil = Date.now() + 9000;
+  if (reply?.situation === 'not_understood' && reply.unknownText && !opts.viaAgent && !chatting) {
+    // Claude first (fast and clever, with the person's key), then the local model.
+    if (agentOn()) { askAgent(t, reply, opts); return; }
+    if (chatOn()) { askModel(t, reply); return; }
   }
+  if (opts.quietIfUnknown && reply?.situation === 'not_understood') return;
   handle(reply);
+}
+
+/**
+ * Claude understands anything his rules do not: it answers in his voice, turns the request
+ * into his own commands (checked like everything else), or stays quiet when the words were
+ * not meant for him.
+ */
+async function askAgent(text, fallback, opts = {}) {
+  chatting = true;
+  // Only show «thinking» if the answer is not almost instant.
+  const thinking = setTimeout(() => { if (chatting) handle(brain.reply('thinking')); }, 700);
+  try {
+    const d = brain.memory.data;
+    const res = await bridge.agent({ text, history: brain.chatHistory, name: d.name, context: brain.chatContext() });
+    if (!res?.ok) {
+      bridge.note?.(`claude for «${text}» → failed: ${res?.error}`);
+      clearTimeout(thinking);
+      if (chatOn()) { chatting = false; askModel(text, fallback); return; }
+      handle(res?.error === 'no_credit' || res?.error === 'bad_key' ? brain.event('cloud_problem', { error: res.error }) : (opts.quietIfUnknown ? null : fallback));
+      return;
+    }
+    clearTimeout(thinking);
+    if (!res.addressed) { bridge.note?.(`claude: «${text}» was not for me`); return; }
+    if (res.commands.length) {
+      brain.chatHistory.push({ user: text, khalfoun: res.say || res.commands.join('، ') });
+      if (brain.chatHistory.length > 6) brain.chatHistory.shift();
+      chatting = false;
+      if (res.say && res.commands.every((c) => !/^(اكتب|دور)/.test(c))) showBubble(res.say, brain.emotions.current?.emotion);
+      hear(res.commands.join(' وبعدين '), { viaAgent: true });
+      return;
+    }
+    if (res.say) handle(brain.chatReply(text, res.say));
+  } catch {
+    clearTimeout(thinking);
+    handle(opts.quietIfUnknown ? null : fallback);
+  } finally {
+    clearTimeout(thinking);
+    chatting = false;
+  }
 }
 
 /** Lets the local model answer what his built-in rules do not understand. */
@@ -430,6 +475,7 @@ els.input.addEventListener('input', armCommandTimeout);
 
 async function listen() {
   if (recorder.active) { recorder.stop(); return; }
+  voiceOut.stop(); // he stops talking when you start
   if (!voiceAvailable) {
     handle(brain.event('stt_unavailable'));
     openCommand();
@@ -499,7 +545,12 @@ async function onWakeSentence(wav) {
     const res = await bridge.transcribe(wav, 'wake');
     if (!res?.ok || !res.text) return;
     const hit = findWakeWord(res.text);
-    if (!hit.found) return;
+    if (!hit.found) {
+      // A follow-up right after he answered needs no name; Claude (or the rules) decide
+      // whether it was meant for him, and he stays quiet if not.
+      if (Date.now() < followUntil && !chatting) hear(res.text, { quietIfUnknown: true });
+      return;
+    }
     els.ear.classList.add('heard');
     setTimeout(() => els.ear.classList.remove('heard'), 900);
     if (hit.rest && !['call', 'empty'].includes(recognize(hit.rest).intent)) {
@@ -650,8 +701,43 @@ function radio(name, value) {
   if (el) el.checked = true;
 }
 
+/** Uses the cloud voice when the person set up Azure (falls back to Windows' voice). */
+function applyCloud() {
+  voiceOut.remote = cloudInfo.azure && cloudInfo.use?.voice !== false && typeof bridge.speak === 'function' ? (line) => bridge.speak(line) : null;
+  if (cloudInfo.azure && cloudInfo.use?.hear !== false) voiceAvailable = true;
+}
+
+function renderCloud() {
+  const s = cloudInfo;
+  $('cl-claude-state').textContent = s.claude ? 'مضبوط ✓' : 'ما فيه مفتاح';
+  $('cl-azure-state').textContent = s.azure ? `مضبوط ✓ (${s.azureRegion})` : 'ما فيه مفتاح';
+  $('cl-region').value = s.azureRegion || '';
+  $('cl-use-hear').checked = s.use?.hear !== false;
+  $('cl-use-brain').checked = s.use?.brain !== false;
+  $('cl-use-voice').checked = s.use?.voice !== false;
+  $('cl-claude').value = '';
+  $('cl-azure').value = '';
+}
+
+const CLOUD_ERRORS = {
+  bad_claude_key: 'مفتاح Claude شكله غلط. لازم يبدأ بـ sk-ant-', bad_azure_key: 'مفتاح Azure شكله غلط (حروف وأرقام بس).',
+  bad_region: 'اسم المنطقة غلط. مثال: uaenorth', encryption_unavailable: 'ويندوز ما سمح بتشفير المفاتيح على هالجهاز.',
+};
+
+async function saveCloud(patch) {
+  if (!bridge.cloud) return;
+  const r = await bridge.cloud.set(patch);
+  if (r?.status) cloudInfo = r.status;
+  applyCloud();
+  brain.setChatAvailable(chatOn() || agentOn());
+  renderCloud();
+  $('cl-result').textContent = r?.ok ? 'انحفظ.' : (CLOUD_ERRORS[r?.error] || `ما انحفظ: ${r?.error}`);
+  return r?.ok;
+}
+
 function openSettings(focus = null) {
   const d = brain.memory.data;
+  renderCloud();
   $('st-name').value = d.name || '';
   radio('st-level', d.level || 1);
   radio('st-humor', d.humor);
@@ -859,6 +945,26 @@ $('st-sounds').addEventListener('change', () => {
   sounds.setEnabled($('st-sounds').checked);
   if ($('st-sounds').checked) sounds.effect('ding');
 });
+$('cl-save').addEventListener('click', async () => {
+  const patch = {};
+  if ($('cl-claude').value.trim()) patch.claudeKey = $('cl-claude').value.trim();
+  if ($('cl-azure').value.trim()) patch.azureKey = $('cl-azure').value.trim();
+  if ($('cl-region').value.trim() !== (cloudInfo.azureRegion || '')) patch.azureRegion = $('cl-region').value.trim();
+  if (!Object.keys(patch).length) { $('cl-result').textContent = 'ما فيه شي جديد.'; return; }
+  if (await saveCloud(patch)) $('cl-test').click();
+});
+$('cl-test').addEventListener('click', async () => {
+  if (!bridge.cloud) return;
+  $('cl-result').textContent = 'أجرب المفاتيح...';
+  const r = await bridge.cloud.test();
+  const say = (x, name) => (!x ? '' : x.ok ? `${name}: يشتغل ✓${x.ms ? ` (${(x.ms / 1000).toFixed(1)} ث)` : ''}` : `${name}: ${{ bad_key: 'المفتاح غلط', no_credit: 'ما فيه رصيد', offline: 'ما فيه نت', timeout: 'تأخر' }[x.error] || x.error}`);
+  $('cl-result').textContent = [say(r?.claude, 'Claude'), say(r?.azure, 'Azure')].filter(Boolean).join(' · ') || 'حط مفتاح أول.';
+});
+$('cl-forget').addEventListener('click', () => saveCloud({ claudeKey: '', azureKey: '', azureRegion: '' }));
+for (const [id, key] of [['cl-use-hear', 'hear'], ['cl-use-brain', 'brain'], ['cl-use-voice', 'voice']]) {
+  $(id).addEventListener('change', () => saveCloud({ use: { [key]: $(id).checked } }));
+}
+
 $('st-speak').addEventListener('change', () => {
   handle(brain.hear($('st-speak').checked ? 'تكلم' : 'لا تتكلم'));
   $('st-speak').checked = !!brain.memory.data.speak;
@@ -973,6 +1079,9 @@ async function start() {
   const loaded = await bridge.loadState();
   voiceAvailable = !!loaded?.voice?.available;
   chatInfo = { available: !!loaded?.chat?.available, model: loaded?.chat?.model || null, vision: loaded?.chat?.vision || null };
+  cloudInfo = loaded?.cloud || cloudInfo;
+  applyCloud();
+  renderCloud();
   const memoryData = { ...(loaded?.memory || {}), ...(loaded?.settings || {}) };
   let saveTimer = null;
   brain = new Brain({
@@ -984,7 +1093,7 @@ async function start() {
   });
 
   voiceOut.setEnabled(!!brain.memory.data.speak);
-  brain.setChatAvailable(chatOn());
+  brain.setChatAvailable(chatOn() || agentOn());
   brain.setVisionAvailable(Boolean(chatInfo.vision) && chatOn());
   bridge.onEvent((ev) => {
     switch (ev?.type) {

@@ -467,6 +467,55 @@ await check('known commands never go to the model; a failed model falls back pol
   assert(fb === 'not_understood', `fallback situation: ${fb}, bubble: ${await cbubble()}`);
 });
 
+// ---- Claude (the person's own key): free speech → his commands, or quiet when not for him
+const apage = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+await apage.goto(`${base}?fakeagent=1`);
+await apage.evaluate(() => {
+  localStorage.setItem('khalfoun.settings', JSON.stringify({ onboarded: true, level: 3, kidsMode: false }));
+  localStorage.setItem('khalfoun.memory', JSON.stringify({ name: 'عبدالرحيم', humor: 1 }));
+});
+await apage.reload();
+await apage.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 15000 });
+
+await check('Claude turns free speech into his own commands, which then run through the usual checks', async () => {
+  await apage.waitForTimeout(1200);
+  await apage.evaluate(() => { window.__fakeAgent = [{ addressed: true, say: 'ابشر، الحين', commands: ['افتح الحاسبة'] }]; window.__khalfoun.hear('ابغى احسب درجات الطلاب بسرعة'); });
+  await apage.waitForTimeout(1500);
+  const actions = await apage.evaluate(() => window.__khalfoun.bridge._actions.map((a) => `${a.type}:${a.params?.app || ''}`));
+  assert(actions.includes('open_app:calculator'), JSON.stringify(actions));
+  const calls = await apage.evaluate(() => window.__khalfoun.bridge._agentCalls);
+  assert(calls.length === 1 && calls[0].name === 'عبدالرحيم' && /٢٠٢٦|2026/.test(calls[0].context), JSON.stringify(calls).slice(0, 300));
+});
+
+await check('Claude answers chat in his bubble, and stays quiet when the words were not for him', async () => {
+  await apage.evaluate(() => { window.__fakeAgent = [{ addressed: true, say: 'جبل شمس أحلى وقت في الشتا!', commands: [] }]; window.__khalfoun.hear('متى أحسن وقت أطلع جبل شمس'); });
+  await apage.waitForTimeout(1200);
+  const t = await apage.locator('#bubble-text').textContent();
+  assert(t.includes('جبل شمس'), `bubble: ${t}`);
+  const before = await apage.evaluate(() => window.__khalfoun.lastReply?.say);
+  await apage.evaluate(() => { window.__fakeAgent = [{ addressed: false, say: '', commands: [] }]; window.__khalfoun.hear('يا ولد روح جيب الكتاب من السيارة'); });
+  await apage.waitForTimeout(1200);
+  const after = await apage.evaluate(() => window.__khalfoun.lastReply?.say);
+  assert(after === before, `he talked: ${after}`);
+});
+
+await check('known commands stay instant and never go to Claude', async () => {
+  const n = await apage.evaluate(() => window.__khalfoun.bridge._agentCalls.length);
+  await apage.evaluate(() => window.__khalfoun.hear('كم الساعة'));
+  await apage.waitForTimeout(500);
+  assert((await apage.evaluate(() => window.__khalfoun.bridge._agentCalls.length)) === n, 'sent to Claude');
+});
+
+await check('the cloud keys section is in settings; keys are password fields', async () => {
+  await apage.evaluate(() => window.__khalfoun.hear('افتح الاعدادات'));
+  await apage.evaluate(() => document.getElementById('settings').hidden || true);
+  const types = await apage.evaluate(() => [document.getElementById('cl-claude').type, document.getElementById('cl-azure').type]);
+  assert(types[0] === 'password' && types[1] === 'password', JSON.stringify(types));
+  const state = await apage.evaluate(() => document.getElementById('cl-claude-state').textContent);
+  assert(/مضبوط|مفتاح/.test(state), state);
+});
+await apage.close();
+
 /** Waits until `fn` is true on `pg`, or fails the check after `ms`. */
 async function untilOn(pg, fn, ms = 5000) {
   const end = Date.now() + ms;

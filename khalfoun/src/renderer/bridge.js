@@ -19,6 +19,9 @@ function createPreviewBridge() {
   const fakeVoice = typeof location !== 'undefined' && new URLSearchParams(location.search).has('fakevoice');
   const fakeChat = typeof location !== 'undefined' && new URLSearchParams(location.search).has('fakechat');
   const fakeVision = typeof location !== 'undefined' && new URLSearchParams(location.search).has('fakevision');
+  // ?fakeagent pretends a Claude key is set and answers from window.__fakeAgent ({addressed, say, commands}).
+  const fakeAgent = typeof location !== 'undefined' && new URLSearchParams(location.search).has('fakeagent');
+  const agentCalls = [];
   const chatCalls = [];
   const transcribeCalls = [];
   const listeners = new Set();
@@ -81,7 +84,8 @@ function createPreviewBridge() {
         memory: readJSON(MEM_KEY),
         settings: readJSON(SET_KEY) || { onboarded: false, level: 0, kidsMode: false },
         voice: { available: fakeVoice },
-        chat: { available: fakeChat, model: fakeChat ? 'test-model' : null, vision: fakeVision ? 'gemma3:4b' : null },
+        chat: { available: fakeChat || fakeAgent, model: fakeChat ? 'test-model' : null, vision: fakeVision ? 'gemma3:4b' : null, cloud: fakeAgent },
+        cloud: { claude: fakeAgent, azure: false, azureRegion: '', use: { hear: true, brain: true, voice: true }, encryption: true },
         platform: 'preview',
       };
     },
@@ -137,6 +141,19 @@ function createPreviewBridge() {
       const queue = window.__fakeChat || [];
       return queue.length ? { ok: true, text: queue.shift() } : { ok: false, error: 'timeout' };
     },
+    async agent(payload) {
+      if (!fakeAgent) return { ok: false, error: 'not_configured' };
+      agentCalls.push(payload);
+      await new Promise((r) => setTimeout(r, 150));
+      const queue = window.__fakeAgent || [];
+      return queue.length ? { ok: true, ms: 150, ...queue.shift() } : { ok: false, error: 'timeout' };
+    },
+    async speak() { return { ok: false, error: 'not_configured' }; },
+    cloud: {
+      async status() { return { claude: fakeAgent, azure: false, azureRegion: '', use: { hear: true, brain: true, voice: true }, encryption: true }; },
+      async set(patch) { return { ok: true, status: { claude: fakeAgent || Boolean(patch?.claudeKey), azure: Boolean(patch?.azureKey), azureRegion: patch?.azureRegion || '', use: { hear: true, brain: true, voice: true }, encryption: true } }; },
+      async test() { return {}; },
+    },
     setInteractive() {},
     watchWindows() {},
     onEvent(cb) { listeners.add(cb); return () => listeners.delete(cb); },
@@ -146,6 +163,7 @@ function createPreviewBridge() {
     _actions: actionsRun,
     _transcribeCalls: transcribeCalls,
     _chatCalls: chatCalls,
+    _agentCalls: agentCalls,
     _setup: setupState,
   };
 }

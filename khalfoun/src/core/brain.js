@@ -458,6 +458,7 @@ export class Brain {
       case 'stt_unavailable': this.emotions.feel('not_understood', now); return this.reply('stt_unavailable');
       case 'stt_empty': this.emotions.feel('not_understood', now); return this.reply('stt_empty');
       case 'stt_failed': this.emotions.feel('confused', now); return this.reply('stt_failed');
+      case 'cloud_problem': this.emotions.feel('confused', now); return this.reply(data.error === 'no_credit' ? 'cloud_no_credit' : 'cloud_bad_key');
       // ---- his own tools: the whiteboard and the notebook tell him what happens there
       case 'tool_closed':
         if (this.focus || this.emotions.asleep) return null;
@@ -638,9 +639,14 @@ export class Brain {
       return this.reply('idle_bored', { event: null });
     }
     const humor = this.memory.data.humor;
-    const gap = humor === 2 ? 3 * 60e3 : 6 * 60e3;
+    // He learns to be quiet: each remark the person ignored doubles the wait for the next
+    // (up to eight times); anything the person says or does resets it.
+    if (snap.idleMs < now - this.lastIdleTalk) this.idleBackoff = 1;
+    const gap = (humor === 2 ? 3 * 60e3 : 6 * 60e3) * (this.idleBackoff || 1);
     if (humor > 0 && snap.idleMs > 60e3 && now - this.lastIdleTalk > gap) {
+      if (this.spokeIdle && snap.idleMs > now - this.lastIdleTalk) this.idleBackoff = Math.min(8, (this.idleBackoff || 1) * 2);
       this.lastIdleTalk = now;
+      this.spokeIdle = true;
       return this.reply('idle_comment', { event: null });
     }
     return null;

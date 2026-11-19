@@ -1,6 +1,6 @@
-// Khalfoun's optional speaking voice: the Arabic text-to-speech voice that
-// Windows (or macOS) already has, through the browser speech API. Off by
-// default; nothing is sent anywhere.
+// Khalfoun's optional speaking voice. With the person's Azure key, an Omani neural voice
+// from the cloud (set `remote`); otherwise the Arabic voice Windows already has, through
+// the browser speech API. Off by default.
 
 /** Text as it should be spoken: no emoji, no «(قول ...)» hints, no symbols read aloud. */
 export function speakableText(text) {
@@ -34,6 +34,11 @@ export class VoiceOut {
     this.speaking = false;
     this.onStart = null;
     this.onEnd = null;
+    /** @type {null | ((line: string) => Promise<{ok: boolean, audio?: Uint8Array}>)} cloud voice */
+    this.remote = null;
+    this.AudioCtor = deps.Audio ?? (typeof Audio !== 'undefined' ? Audio : null);
+    this.seq = 0;
+    this.audio = null;
   }
 
   get voice() {
@@ -41,8 +46,12 @@ export class VoiceOut {
   }
 
   /** True when this computer has an Arabic voice to speak with. */
-  get available() {
+  get localAvailable() {
     return Boolean(this.synth && this.Utterance && this.voice);
+  }
+
+  get available() {
+    return Boolean((this.remote && this.AudioCtor) || this.localAvailable);
   }
 
   setEnabled(on) {
@@ -56,6 +65,30 @@ export class VoiceOut {
     const line = speakableText(text);
     if (!line) return false;
     this.stop();
+    if (this.remote && this.AudioCtor) {
+      const token = ++this.seq;
+      this.speaking = true;
+      this.onStart?.();
+      const done = () => { if (token === this.seq) { this.speaking = false; this.audio = null; this.onEnd?.(); } };
+      this.remote(line).then((res) => {
+        if (token !== this.seq) return;
+        if (!res?.ok || !res.audio) { this.speaking = false; this.onEnd?.(); this.speakLocal(line); return; }
+        const url = URL.createObjectURL(new Blob([res.audio], { type: 'audio/mpeg' }));
+        const a = new this.AudioCtor(url);
+        this.audio = a;
+        const end = () => { URL.revokeObjectURL(url); done(); };
+        a.onended = end;
+        a.onerror = end;
+        a.play().catch(end);
+      }).catch(() => { if (token === this.seq) { this.speaking = false; this.onEnd?.(); this.speakLocal(line); } });
+      return true;
+    }
+    return this.speakLocal(line);
+  }
+
+  /** The Windows voice. */
+  speakLocal(line) {
+    if (!this.localAvailable) return false;
     const u = new this.Utterance(line);
     u.voice = this.voice;
     u.lang = u.voice.lang;
@@ -69,7 +102,9 @@ export class VoiceOut {
   }
 
   stop() {
+    this.seq += 1;
+    if (this.audio) { try { this.audio.pause(); } catch { /* gone */ } this.audio = null; }
     if (this.synth && (this.speaking || this.synth.speaking)) this.synth.cancel();
-    this.speaking = false;
+    if (this.speaking) { this.speaking = false; this.onEnd?.(); }
   }
 }

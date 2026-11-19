@@ -7,7 +7,7 @@
 
 import {
   app, BrowserWindow, ipcMain, protocol, screen, shell, clipboard, desktopCapturer, Tray, Menu,
-  nativeImage, globalShortcut, dialog, Notification, session, net, powerMonitor,
+  nativeImage, globalShortcut, dialog, Notification, session, net, powerMonitor, safeStorage,
 } from 'electron';
 import { readFile, mkdtemp, writeFile, mkdir, stat, rm } from 'node:fs/promises';
 import { watch as watchFolder } from 'node:fs';
@@ -18,7 +18,9 @@ import { fileURLToPath } from 'node:url';
 import { JsonStore } from './storage.js';
 import { createPlatform } from './actions/platform.js';
 import { createExecutor } from './actions/index.js';
-import { findWhisper, transcribe } from './stt.js';
+import { findWhisper, transcribe, wavSeconds } from './stt.js';
+import { transcribeAzure, speakAzure, verifyAzure, ClaudeAgent } from './cloud.js';
+import { CloudSecrets, DEFAULT_CLOUD } from './secrets.js';
 import { WindowWatcher } from './windows-watcher.js';
 import { ChatClient, findLocalModel, pickVisionModel } from './chat.js';
 import { ReminderScheduler } from './reminders.js';
@@ -125,6 +127,16 @@ const TOOL_PAGES = {
   notebook: { url: `${ORIGIN}/src/notebook/index.html`, title: 'دفتر خلفون', width: 1180, height: 780, preload: 'notebook-preload.cjs' },
 };
 const toolWindows = {};
+
+let secrets = { status: () => ({}), data: { use: {} }, azure: null, allowWake: () => false };
+let agent = null;
+let saveUsageTimer = null;
+const cloudHears = () => Boolean(secrets.data.use?.hear && secrets.azure);
+const cloudThinks = () => Boolean(secrets.data.use?.brain && secrets.data.claude);
+function getAgent() {
+  if (!agent) agent = new ClaudeAgent({ key: secrets.claudeKey, fetchFn: (url, init) => net.fetch(url, init) });
+  return agent;
+}
 
 function openTool(tool) {
   const page = TOOL_PAGES[tool];
@@ -483,7 +495,50 @@ function setupIpc(stores, executor) {
   ipcMain.handle('state:load', async (event) => {
     if (!fromApp(event)) return null;
     const memory = await stores.memory.read();
-    return { memory: Object.keys(memory).length ? memory : null, settings, voice: { available: whisper.available }, chat: { available: Boolean(chat), model: chatInfo?.model || null, vision: visionModel }, platform: process.platform };
+    return {
+      memory: Object.keys(memory).length ? memory : null, settings,
+      voice: { available: whisper.available || cloudHears(), cloud: cloudHears() },
+      chat: { available: Boolean(chat) || cloudThinks(), model: chatInfo?.model || null, vision: visionModel, cloud: cloudThinks() },
+      cloud: secrets.status(), platform: process.platform,
+    };
+  });
+
+  // ----- the cloud: Azure hearing and voice, Claude brain (only with the person's own keys)
+  ipcMain.handle('cloud:status', (event) => (fromApp(event) ? secrets.status() : null));
+  ipcMain.handle('cloud:set', async (event, patch) => {
+    if (!fromApp(event)) return { ok: false, error: 'forbidden' };
+    let err;
+    try { err = await secrets.update(patch); } catch (e) { err = String(e?.message || e); }
+    agent = null; // rebuilt with the new key on next use
+    diag.write('cloud settings', { ...secrets.status(), error: err || undefined });
+    return err ? { ok: false, error: err, status: secrets.status() } : { ok: true, status: secrets.status() };
+  });
+  ipcMain.handle('cloud:test', async (event) => {
+    if (!fromApp(event)) return null;
+    const out = {};
+    if (secrets.data.claude) out.claude = await getAgent().verify();
+    if (secrets.azure) out.azure = await verifyAzure(secrets.azure);
+    diag.write('cloud test', out);
+    return out;
+  });
+  ipcMain.handle('agent:respond', async (event, payload) => {
+    if (!fromApp(event)) return { ok: false, error: 'forbidden' };
+    if (!cloudThinks()) return { ok: false, error: 'not_configured' };
+    const p = payload && typeof payload === 'object' ? payload : {};
+    const history = Array.isArray(p.history) ? p.history.slice(-6).map((h) => ({ user: String(h?.user || '').slice(0, 400), khalfoun: String(h?.khalfoun || '').slice(0, 400) })) : [];
+    const res = await getAgent().respond({
+      text: String(p.text || '').slice(0, 800), history, name: String(p.name || '').slice(0, 40),
+      context: String(p.context || '').slice(0, 600), kidsMode: !!settings.kidsMode, level: settings.level,
+    });
+    diag.write('claude', `«${String(p.text || '').slice(0, 80)}» →`, res.ok ? `${res.addressed ? '' : '(not for me) '}«${res.say}» ${JSON.stringify(res.commands)} ${res.ms} ms` : `failed: ${res.error}`);
+    return res;
+  });
+  ipcMain.handle('voice:speak', async (event, text) => {
+    if (!fromApp(event)) return { ok: false, error: 'forbidden' };
+    if (!secrets.data.use.voice || !secrets.azure) return { ok: false, error: 'not_configured' };
+    const res = await speakAzure(secrets.azure, String(text || ''));
+    if (!res.ok) diag.write('cloud voice failed', res.error);
+    return res;
   });
 
   ipcMain.handle('memory:save', async (event, data) => {
@@ -544,6 +599,19 @@ function setupIpc(stores, executor) {
     await turn;
     sttBusy = true;
     try {
+      // The cloud first when the person set it up: about a second instead of many on a slow PC.
+      if (cloudHears() && (!isWake || secrets.allowWake())) {
+        const cloud = await transcribeAzure(secrets.azure, bytes, { timeoutMs: isWake ? 6000 : 8000 });
+        if (cloud.ok) {
+          secrets.count(wavSeconds(bytes), isWake);
+          clearTimeout(saveUsageTimer);
+          saveUsageTimer = setTimeout(() => secrets.save().catch(() => {}), 5000);
+          if (!isWake) diag.write(`voice (command, ${bytes.length} bytes) → «${cloud.text}» (${(cloud.ms / 1000).toFixed(1)} s, azure)`);
+          return { ...cloud, model: 'azure' };
+        }
+        diag.write(`voice (${isWake ? 'wake' : 'command'}) azure failed: ${cloud.error}${whisper.available ? ' → whisper' : ''}`);
+        if (!whisper.available) return { ok: false, error: `stt_failed: ${cloud.error}` };
+      }
       // Use most cores for a command (faster answer), fewer for wake-word checks running in the background.
       const cores = Math.max(1, cpus().length);
       const threads = isWake ? Math.min(4, Math.max(2, cores - 2)) : Math.min(8, Math.max(2, cores - 1));
@@ -833,6 +901,16 @@ async function runSmokeTest(stores) {
       })()`);
       step('installed whisper transcribes a recording', t && t.ok === true, t);
     }
+    // Cloud keys through the real IPC: checked, encrypted on disk, never returned to the page.
+    const badKey = await js("window.khalfoun.cloud.set({ claudeKey: 'hello' })");
+    step('a wrong Claude key is refused', badKey && badKey.ok === false && badKey.error === 'bad_claude_key', badKey);
+    if (safeStorage.isEncryptionAvailable()) {
+      const fake = `sk-ant-api03-${'q'.repeat(40)}`;
+      const set = await js(`window.khalfoun.cloud.set({ claudeKey: '${fake}', azureKey: '${'z'.repeat(32)}', azureRegion: 'uaenorth' })`);
+      const onDisk = JSON.stringify(await stores.cloud.read());
+      step('cloud keys are stored encrypted and not handed back', set?.ok && set.status.claude && set.status.azure && !onDisk.includes(fake) && !JSON.stringify(set).includes(fake), set);
+      await js("window.khalfoun.cloud.set({ claudeKey: '', azureKey: '', azureRegion: '' })");
+    }
     // His own tools: the whiteboard (مِداد) and the AI notebook open as real windows.
     const toolJs = (tool, code) => toolWindows[tool].webContents.executeJavaScript(code, true);
     const waitTool = async (tool, code, ms = 20000) => {
@@ -891,7 +969,9 @@ async function start() {
     settings: new JsonStore(userData, 'settings.json', DEFAULT_SETTINGS),
     journal: new JsonStore(userData, 'organize-journal.json', { moves: [] }),
     notebook: new JsonStore(userData, 'notebook.json', { version: 1, notes: [], cards: [] }),
+    cloud: new JsonStore(userData, 'cloud.json', DEFAULT_CLOUD),
   };
+  secrets = await new CloudSecrets(stores.cloud, safeStorage).load();
   settings = { ...DEFAULT_SETTINGS, ...(await stores.settings.read()) };
   voiceDirs = [join(userData, 'voice'), join(ROOT, 'voice')];
   whisper = await findWhisper({ dirs: voiceDirs });

@@ -79,11 +79,27 @@
       </div>
     </div>
     <label class="check"><input id="st-kids" type="checkbox"> وضع الأطفال</label>
-    <label class="check"><input id="st-speak" type="checkbox"> خلفون يتكلم بصوت (صوت عربي من ويندوز)</label>
+    <label class="check"><input id="st-speak" type="checkbox"> خلفون يتكلم بصوت</label>
     <label class="check"><input id="st-sounds" type="checkbox"> أصوات خلفون (همهمات ومؤثرات بدون كلام)</label>
     <label class="check"><input id="st-windows" type="checkbox"> يمشي فوق النوافذ المفتوحة</label>
     <label class="check"><input id="st-listen" type="checkbox"> استمع لندائي «يا خلفون» دائماً (دون ضغط زر)</label>
     <label class="check"><input id="st-chat" type="checkbox"> عقل خلفون: يسولف بحرية عبر نموذج على جهازك</label>
+    <section class="setup cloud" aria-labelledby="cl-title">
+      <h3 id="cl-title">السرعة والذكاء (السحابة)</h3>
+      <p class="fine">بمفاتيحك أنت: Claude يفهم أي كلام ويرد في ثانية، و Azure يسمع لهجتك ويتكلم بصوت عُماني. بدونها يشتغل خلفون على جهازك مثل قبل. المفاتيح تنحفظ مشفّرة على جهازك.</p>
+      <label class="field"><span>مفتاح Claude <small id="cl-claude-state" class="pill"></small></span><input id="cl-claude" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-..." dir="ltr"></label>
+      <label class="field"><span>مفتاح Azure Speech <small id="cl-azure-state" class="pill"></small></span><input id="cl-azure" type="password" autocomplete="off" spellcheck="false" placeholder="مفتاح الخدمة (Key 1)" dir="ltr"></label>
+      <label class="field"><span>منطقة Azure</span><input id="cl-region" type="text" autocomplete="off" spellcheck="false" placeholder="uaenorth" dir="ltr" maxlength="26"></label>
+      <div class="setup-controls">
+        <button id="cl-save" type="button" class="small-btn">احفظ وجرّب</button>
+        <button id="cl-test" type="button" class="ghost">جرّب</button>
+        <button id="cl-forget" type="button" class="ghost danger">امسح المفاتيح</button>
+      </div>
+      <p id="cl-result" class="fine" role="status" aria-live="polite"></p>
+      <label class="check"><input id="cl-use-hear" type="checkbox"> يسمعني بالسحابة (Azure)</label>
+      <label class="check"><input id="cl-use-brain" type="checkbox"> يفهم ويرد بالسحابة (Claude)</label>
+      <label class="check"><input id="cl-use-voice" type="checkbox"> صوته من السحابة (Azure)</label>
+    </section>
     <section class="setup" aria-labelledby="su-title">
       <h3 id="su-title">تجهيز خلفون</h3>
       <div class="setup-card" id="su-voice">
