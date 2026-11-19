@@ -154,3 +154,49 @@ test('he learns to be quiet: ignored idle remarks come less and less often', asy
   assert.ok(gaps.length >= 2, JSON.stringify(times));
   assert.ok(gaps[gaps.length - 1] > gaps[0], `gaps should grow: ${gaps}`);
 });
+
+test('Gemini (free): JSON answer, alias first, the newest Flash when the alias is rejected, errors named', async () => {
+  const { GeminiAgent, pickGeminiModel, GEMINI_ALIAS } = await import('../src/main/cloud.js');
+  assert.equal(pickGeminiModel([
+    { name: 'models/gemini-3.7-flash', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-3.8-flash', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-3.9-flash-lite', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-4.0-flash-image', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-9-flash', supportedGenerationMethods: ['embedContent'] },
+  ]), 'gemini-3.8-flash');
+  const urls = [];
+  let sent;
+  const fetchFn = async (url, init) => {
+    urls.push(url);
+    if (url.includes(`${GEMINI_ALIAS}:generateContent`)) return reply(404, { error: { message: 'model not found' } });
+    if (url.endsWith('/models?pageSize=200')) return reply(200, { models: [{ name: 'models/gemini-3.8-flash', supportedGenerationMethods: ['generateContent'] }] });
+    sent = JSON.parse(init.body);
+    return reply(200, { candidates: [{ content: { parts: [{ text: '{"addressed":true,"say":"ابشر","commands":["افتح الحاسبة"]}' }] } }] });
+  };
+  const g = new GeminiAgent({ key: `AIza${'x'.repeat(35)}`, fetchFn });
+  const r = await g.respond({ text: 'ابغى احسب', history: [{ user: 'هلا', khalfoun: 'هلا بك' }], name: 'عبدالرحيم' });
+  assert.deepEqual([r.ok, r.say, r.commands, r.model], [true, 'ابشر', ['افتح الحاسبة'], 'gemini-3.8-flash']);
+  assert.equal(sent.generationConfig.responseMimeType, 'application/json');
+  assert.deepEqual(sent.contents.map((c) => c.role), ['user', 'model', 'user']);
+  assert.match(sent.systemInstruction.parts[0].text, /عبدالرحيم/);
+  const bad = new GeminiAgent({ key: 'k', fetchFn: async () => reply(400, { error: { message: 'API key not valid. Please pass a valid API key.' } }) });
+  assert.equal((await bad.respond({ text: 'x' })).error, 'bad_key');
+  const quota = new GeminiAgent({ key: 'k', fetchFn: async () => reply(429, {}) });
+  assert.equal((await quota.respond({ text: 'x' })).error, 'quota');
+  // A model that refuses the thinking setting is asked again without it.
+  let n = 0;
+  const think = new GeminiAgent({ key: 'k', model: 'gemini-3.8-flash', fetchFn: async (u, init) => { n += 1; const b = JSON.parse(init.body); return b.generationConfig.thinkingConfig ? reply(400, { error: { message: 'thinking budget is not supported' } }) : reply(200, { candidates: [{ content: { parts: [{ text: '{"addressed":false,"say":"","commands":[]}' }] } }] }); } });
+  const t = await think.respond({ text: 'x' });
+  assert.deepEqual([t.ok, t.addressed, n], [true, false, 2]);
+});
+
+test('keys: a Gemini key works alone; Claude wins when both are set', async () => {
+  const store = { read: async () => DEFAULT_CLOUD, write: async () => {} };
+  const s = await new CloudSecrets(store, fakeSafe()).load();
+  assert.equal(await s.update({ geminiKey: 'AIzaWRONG' }), 'bad_gemini_key');
+  await s.update({ geminiKey: `AIza${'g'.repeat(35)}` });
+  assert.equal(s.brain, 'gemini');
+  assert.equal(s.status().gemini, true);
+  await s.update({ claudeKey: `sk-ant-api03-${'c'.repeat(40)}` });
+  assert.equal(s.brain, 'claude');
+});

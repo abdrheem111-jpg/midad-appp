@@ -6,6 +6,7 @@ import { AZURE_REGION_RE } from './cloud.js';
 
 export const DEFAULT_CLOUD = {
   claude: '', // encrypted, base64
+  gemini: '', // encrypted, base64 (Google AI Studio key, free tier)
   azureKey: '', // encrypted, base64
   azureRegion: '',
   use: { hear: true, brain: true, voice: true },
@@ -50,6 +51,15 @@ export class CloudSecrets {
 
   get claudeKey() { return this.decrypt(this.data.claude); }
 
+  get geminiKey() { return this.decrypt(this.data.gemini); }
+
+  /** Which cloud brain to use: Claude when its key is set, else Gemini, else none. */
+  get brain() {
+    if (this.data.claude) return 'claude';
+    if (this.data.gemini) return 'gemini';
+    return null;
+  }
+
   get azure() {
     const key = this.decrypt(this.data.azureKey);
     return key && this.data.azureRegion ? { key, region: this.data.azureRegion } : null;
@@ -59,6 +69,8 @@ export class CloudSecrets {
   status() {
     return {
       claude: Boolean(this.data.claude),
+      gemini: Boolean(this.data.gemini),
+      brain: this.brain,
       azure: Boolean(this.data.azureKey && this.data.azureRegion),
       azureRegion: this.data.azureRegion,
       use: { ...this.data.use },
@@ -76,6 +88,11 @@ export class CloudSecrets {
       const k = String(p.claudeKey).trim();
       if (k && !/^sk-ant-[A-Za-z0-9_-]{20,300}$/.test(k)) return 'bad_claude_key';
       this.data.claude = this.encrypt(k);
+    }
+    if (p.geminiKey !== undefined) {
+      const k = String(p.geminiKey).trim();
+      if (k && !/^AIza[0-9A-Za-z_-]{30,60}$/.test(k)) return 'bad_gemini_key';
+      this.data.gemini = this.encrypt(k);
     }
     if (p.azureKey !== undefined) {
       const k = String(p.azureKey).trim();

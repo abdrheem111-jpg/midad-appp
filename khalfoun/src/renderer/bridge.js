@@ -85,7 +85,7 @@ function createPreviewBridge() {
         settings: readJSON(SET_KEY) || { onboarded: false, level: 0, kidsMode: false },
         voice: { available: fakeVoice },
         chat: { available: fakeChat || fakeAgent, model: fakeChat ? 'test-model' : null, vision: fakeVision ? 'gemma3:4b' : null, cloud: fakeAgent },
-        cloud: { claude: fakeAgent, azure: false, azureRegion: '', use: { hear: true, brain: true, voice: true }, encryption: true },
+        cloud: { claude: fakeAgent, brain: fakeAgent ? 'claude' : null, azure: false, azureRegion: '', use: { hear: true, brain: true, voice: true }, encryption: true },
         platform: 'preview',
       };
     },

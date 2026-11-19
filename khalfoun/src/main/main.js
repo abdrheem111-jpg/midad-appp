@@ -19,7 +19,7 @@ import { JsonStore } from './storage.js';
 import { createPlatform } from './actions/platform.js';
 import { createExecutor } from './actions/index.js';
 import { findWhisper, transcribe, wavSeconds } from './stt.js';
-import { transcribeAzure, speakAzure, verifyAzure, ClaudeAgent } from './cloud.js';
+import { transcribeAzure, speakAzure, verifyAzure, ClaudeAgent, GeminiAgent } from './cloud.js';
 import { CloudSecrets, DEFAULT_CLOUD } from './secrets.js';
 import { WindowWatcher } from './windows-watcher.js';
 import { ChatClient, findLocalModel, pickVisionModel } from './chat.js';
@@ -132,9 +132,12 @@ let secrets = { status: () => ({}), data: { use: {} }, azure: null, allowWake: (
 let agent = null;
 let saveUsageTimer = null;
 const cloudHears = () => Boolean(secrets.data.use?.hear && secrets.azure);
-const cloudThinks = () => Boolean(secrets.data.use?.brain && secrets.data.claude);
+const cloudThinks = () => Boolean(secrets.data.use?.brain && secrets.brain);
 function getAgent() {
-  if (!agent) agent = new ClaudeAgent({ key: secrets.claudeKey, fetchFn: (url, init) => net.fetch(url, init) });
+  if (!agent) {
+    const fetchFn = (url, init) => net.fetch(url, init);
+    agent = secrets.brain === 'claude' ? new ClaudeAgent({ key: secrets.claudeKey, fetchFn }) : new GeminiAgent({ key: secrets.geminiKey, fetchFn });
+  }
   return agent;
 }
 
@@ -516,7 +519,7 @@ function setupIpc(stores, executor) {
   ipcMain.handle('cloud:test', async (event) => {
     if (!fromApp(event)) return null;
     const out = {};
-    if (secrets.data.claude) out.claude = await getAgent().verify();
+    if (secrets.brain) out[secrets.brain] = await getAgent().verify();
     if (secrets.azure) out.azure = await verifyAzure(secrets.azure);
     diag.write('cloud test', out);
     return out;
@@ -530,7 +533,7 @@ function setupIpc(stores, executor) {
       text: String(p.text || '').slice(0, 800), history, name: String(p.name || '').slice(0, 40),
       context: String(p.context || '').slice(0, 600), kidsMode: !!settings.kidsMode, level: settings.level,
     });
-    diag.write('claude', `«${String(p.text || '').slice(0, 80)}» →`, res.ok ? `${res.addressed ? '' : '(not for me) '}«${res.say}» ${JSON.stringify(res.commands)} ${res.ms} ms` : `failed: ${res.error}`);
+    diag.write(secrets.brain || 'brain', `«${String(p.text || '').slice(0, 80)}» →`, res.ok ? `${res.addressed ? '' : '(not for me) '}«${res.say}» ${JSON.stringify(res.commands)} ${res.ms} ms` : `failed: ${res.error}`);
     return res;
   });
   ipcMain.handle('voice:speak', async (event, text) => {

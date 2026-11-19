@@ -38,7 +38,7 @@ let brain;
 let voiceAvailable = false;
 let chatInfo = { available: false, model: null };
 let cloudInfo = { claude: false, azure: false, use: {} }; // the person's own cloud keys (status only)
-const agentOn = () => Boolean(cloudInfo.claude && cloudInfo.use?.brain !== false && typeof bridge.agent === 'function');
+const agentOn = () => Boolean((cloudInfo.brain || cloudInfo.claude) && cloudInfo.use?.brain !== false && typeof bridge.agent === 'function');
 let followUntil = 0; // after he answers, a follow-up needs no «يا خلفون» for a few seconds
 const character = createCharacter(els.stage);
 const animator = new Animator();
@@ -710,6 +710,8 @@ function applyCloud() {
 function renderCloud() {
   const s = cloudInfo;
   $('cl-claude-state').textContent = s.claude ? 'مضبوط ✓' : 'ما فيه مفتاح';
+  $('cl-gemini-state').textContent = s.gemini ? (s.claude ? 'محفوظ (Claude أولاً)' : 'مضبوط ✓') : 'ما فيه مفتاح';
+  $('cl-gemini').value = '';
   $('cl-azure-state').textContent = s.azure ? `مضبوط ✓ (${s.azureRegion})` : 'ما فيه مفتاح';
   $('cl-region').value = s.azureRegion || '';
   $('cl-use-hear').checked = s.use?.hear !== false;
@@ -720,7 +722,7 @@ function renderCloud() {
 }
 
 const CLOUD_ERRORS = {
-  bad_claude_key: 'مفتاح Claude شكله غلط. لازم يبدأ بـ sk-ant-', bad_azure_key: 'مفتاح Azure شكله غلط (حروف وأرقام بس).',
+  bad_claude_key: 'مفتاح Claude شكله غلط. لازم يبدأ بـ sk-ant-', bad_gemini_key: 'مفتاح Gemini شكله غلط. لازم يبدأ بـ AIza', bad_azure_key: 'مفتاح Azure شكله غلط (حروف وأرقام بس).',
   bad_region: 'اسم المنطقة غلط. مثال: uaenorth', encryption_unavailable: 'ويندوز ما سمح بتشفير المفاتيح على هالجهاز.',
 };
 
@@ -948,6 +950,7 @@ $('st-sounds').addEventListener('change', () => {
 $('cl-save').addEventListener('click', async () => {
   const patch = {};
   if ($('cl-claude').value.trim()) patch.claudeKey = $('cl-claude').value.trim();
+  if ($('cl-gemini').value.trim()) patch.geminiKey = $('cl-gemini').value.trim();
   if ($('cl-azure').value.trim()) patch.azureKey = $('cl-azure').value.trim();
   if ($('cl-region').value.trim() !== (cloudInfo.azureRegion || '')) patch.azureRegion = $('cl-region').value.trim();
   if (!Object.keys(patch).length) { $('cl-result').textContent = 'ما فيه شي جديد.'; return; }
@@ -957,10 +960,10 @@ $('cl-test').addEventListener('click', async () => {
   if (!bridge.cloud) return;
   $('cl-result').textContent = 'أجرب المفاتيح...';
   const r = await bridge.cloud.test();
-  const say = (x, name) => (!x ? '' : x.ok ? `${name}: يشتغل ✓${x.ms ? ` (${(x.ms / 1000).toFixed(1)} ث)` : ''}` : `${name}: ${{ bad_key: 'المفتاح غلط', no_credit: 'ما فيه رصيد', offline: 'ما فيه نت', timeout: 'تأخر' }[x.error] || x.error}`);
-  $('cl-result').textContent = [say(r?.claude, 'Claude'), say(r?.azure, 'Azure')].filter(Boolean).join(' · ') || 'حط مفتاح أول.';
+  const say = (x, name) => (!x ? '' : x.ok ? `${name}: يشتغل ✓${x.ms ? ` (${(x.ms / 1000).toFixed(1)} ث)` : ''}` : `${name}: ${{ bad_key: 'المفتاح غلط', no_credit: 'ما فيه رصيد', offline: 'ما فيه نت', timeout: 'تأخر', quota: 'خلص الحد المجاني لليوم' }[x.error] || x.error}`);
+  $('cl-result').textContent = [say(r?.claude, 'Claude'), say(r?.gemini, 'Gemini'), say(r?.azure, 'Azure')].filter(Boolean).join(' · ') || 'حط مفتاح أول.';
 });
-$('cl-forget').addEventListener('click', () => saveCloud({ claudeKey: '', azureKey: '', azureRegion: '' }));
+$('cl-forget').addEventListener('click', () => saveCloud({ claudeKey: '', geminiKey: '', azureKey: '', azureRegion: '' }));
 for (const [id, key] of [['cl-use-hear', 'hear'], ['cl-use-brain', 'brain'], ['cl-use-voice', 'voice']]) {
   $(id).addEventListener('change', () => saveCloud({ use: { [key]: $(id).checked } }));
 }

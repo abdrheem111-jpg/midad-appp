@@ -222,3 +222,120 @@ export function cleanAgentAnswer(input) {
     : [];
   return { addressed, say, commands };
 }
+
+// ------------------------------------------------------------------ Gemini (free tier)
+
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+/** Google keeps renaming its models; this alias follows the newest Flash. */
+export const GEMINI_ALIAS = 'gemini-flash-latest';
+
+const GEMINI_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    addressed: { type: 'BOOLEAN' },
+    say: { type: 'STRING' },
+    commands: { type: 'ARRAY', items: { type: 'STRING' } },
+  },
+  required: ['addressed', 'say', 'commands'],
+};
+
+/** Picks the newest plain «Flash» model from Google's list (not lite, preview, image or audio). */
+export function pickGeminiModel(models) {
+  const ok = (models || []).filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+    .map((m) => String(m.name || '').replace(/^models\//, ''))
+    .filter((n) => /^gemini-\d+(\.\d+)?-flash$/.test(n));
+  const ver = (n) => Number(/^gemini-(\d+(?:\.\d+)?)/.exec(n)[1]);
+  return ok.sort((a, b) => ver(b) - ver(a))[0] || null;
+}
+
+export class GeminiAgent {
+  /** @param {{key: string, model?: string, fetchFn?: typeof fetch, timeoutMs?: number, now?: () => number}} opts */
+  constructor(opts) {
+    this.key = opts.key;
+    this.model = opts.model || null;
+    this.fetchFn = opts.fetchFn || fetch;
+    this.timeoutMs = opts.timeoutMs || 12000;
+    this.now = opts.now || (() => Date.now());
+    this.noThinkingConfig = false;
+  }
+
+  /** The model to call: the alias first; if Google rejects it, the newest Flash in the key's list. */
+  async resolveModel() {
+    if (this.model) return this.model;
+    this.model = GEMINI_ALIAS;
+    return this.model;
+  }
+
+  async discoverModel() {
+    try {
+      const res = await withTimeout(this.fetchFn, `${GEMINI_BASE}/models?pageSize=200`, { headers: { 'x-goog-api-key': this.key } }, 8000);
+      if (!res.ok) return null;
+      return pickGeminiModel((await res.json())?.models);
+    } catch { return null; }
+  }
+
+  body(p) {
+    const contents = [];
+    for (const h of (p.history || []).slice(-6)) {
+      if (h.user) contents.push({ role: 'user', parts: [{ text: String(h.user).slice(0, 400) }] });
+      if (h.khalfoun) contents.push({ role: 'model', parts: [{ text: String(h.khalfoun).slice(0, 400) }] });
+    }
+    contents.push({ role: 'user', parts: [{ text: String(p.text || '').slice(0, 800) }] });
+    const merged = [];
+    for (const c of contents) {
+      const last = merged[merged.length - 1];
+      if (last && last.role === c.role) last.parts[0].text += `\n${c.parts[0].text}`;
+      else merged.push({ role: c.role, parts: [{ text: c.parts[0].text }] });
+    }
+    while (merged.length && merged[0].role !== 'user') merged.shift();
+    const generationConfig = { responseMimeType: 'application/json', responseSchema: GEMINI_SCHEMA, maxOutputTokens: 300, temperature: 0.6 };
+    // Thinking makes the answer slower; a short reply does not need it.
+    if (!this.noThinkingConfig) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    return {
+      systemInstruction: { parts: [{ text: `${agentSystem(p)}\nأجب بكائن JSON فقط فيه addressed و say و commands.` }] },
+      contents: merged,
+      generationConfig,
+    };
+  }
+
+  async respond(p) {
+    const t0 = this.now();
+    let model = await this.resolveModel();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let res;
+      try {
+        res = await withTimeout(this.fetchFn, `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-goog-api-key': this.key },
+          body: JSON.stringify(this.body(p)),
+        }, this.timeoutMs);
+      } catch (err) {
+        return { ok: false, error: errorName(err) };
+      }
+      if (res.status === 400 || res.status === 404) {
+        const msg = String((await res.json().catch(() => ({})))?.error?.message || '');
+        if (/API key not valid|API_KEY_INVALID/i.test(msg)) return { ok: false, error: 'bad_key' };
+        if (/thinking/i.test(msg) && !this.noThinkingConfig) { this.noThinkingConfig = true; continue; }
+        // The alias or a retired model: ask Google which Flash this key can use.
+        const found = await this.discoverModel();
+        if (found && found !== model) { model = found; this.model = found; continue; }
+        return { ok: false, error: `http_${res.status}` };
+      }
+      if (res.status === 401 || res.status === 403) return { ok: false, error: 'bad_key' };
+      if (res.status === 429) return { ok: false, error: 'quota' };
+      if (res.status >= 500) return { ok: false, error: 'busy' };
+      if (!res.ok) return { ok: false, error: `http_${res.status}` };
+      const data = await res.json();
+      const text = (data?.candidates?.[0]?.content?.parts || []).map((x) => x.text || '').join('').trim();
+      let parsed;
+      try { parsed = JSON.parse(text.replace(/^```(?:json)?|```$/g, '').trim()); } catch { return { ok: false, error: 'no_answer' }; }
+      return { ok: true, ...cleanAgentAnswer(parsed), ms: this.now() - t0, model };
+    }
+    return { ok: false, error: 'no_answer' };
+  }
+
+  async verify() {
+    const r = await this.respond({ text: 'هلا' });
+    return r.ok ? { ok: true, ms: r.ms, model: r.model } : r;
+  }
+}
