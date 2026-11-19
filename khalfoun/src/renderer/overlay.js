@@ -722,7 +722,7 @@ function renderCloud() {
 }
 
 const CLOUD_ERRORS = {
-  bad_claude_key: 'مفتاح Claude شكله غلط. لازم يبدأ بـ sk-ant-', bad_gemini_key: 'مفتاح Gemini شكله غلط. لازم يبدأ بـ AIza', bad_azure_key: 'مفتاح Azure شكله غلط (حروف وأرقام بس).',
+  bad_claude_key: 'مفتاح Claude شكله غلط. لازم يبدأ بـ sk-ant-', bad_gemini_key: 'مفتاح Gemini شكله غلط. لازم يبدأ بـ AQ. أو AIza', bad_azure_key: 'مفتاح Azure شكله غلط (حروف وأرقام بس).',
   bad_region: 'اسم المنطقة غلط. مثال: uaenorth', encryption_unavailable: 'ويندوز ما سمح بتشفير المفاتيح على هالجهاز.',
 };
 

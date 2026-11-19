@@ -196,6 +196,9 @@ test('keys: a Gemini key works alone; Claude wins when both are set', async () =
   assert.equal(await s.update({ geminiKey: 'AIzaWRONG' }), 'bad_gemini_key');
   await s.update({ geminiKey: `AIza${'g'.repeat(35)}` });
   assert.equal(s.brain, 'gemini');
+  // The new «auth key» format from AI Studio (AQ.…), as the teacher got it.
+  assert.equal(await s.update({ geminiKey: `AQ.Ab8RN6${'x'.repeat(40)}_${'y'.repeat(10)}` }), null);
+  assert.equal(s.geminiKey.startsWith('AQ.'), true);
   assert.equal(s.status().gemini, true);
   await s.update({ claudeKey: `sk-ant-api03-${'c'.repeat(40)}` });
   assert.equal(s.brain, 'claude');

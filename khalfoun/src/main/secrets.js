@@ -91,7 +91,8 @@ export class CloudSecrets {
     }
     if (p.geminiKey !== undefined) {
       const k = String(p.geminiKey).trim();
-      if (k && !/^AIza[0-9A-Za-z_-]{30,60}$/.test(k)) return 'bad_gemini_key';
+      // Old «standard» keys start with AIza; AI Studio now issues «auth» keys starting with AQ.
+      if (k && !/^(?:AIza[0-9A-Za-z_-]{30,60}|AQ\.[0-9A-Za-z_.-]{20,300})$/.test(k)) return 'bad_gemini_key';
       this.data.gemini = this.encrypt(k);
     }
     if (p.azureKey !== undefined) {
