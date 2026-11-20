@@ -15,6 +15,7 @@ import { calculate } from './calc.js';
 import { KEYS } from './keys.js';
 import { isKnownProgramName } from './app-match.js';
 import { Classroom } from './classroom.js';
+import { routeClassroom, riddleTurn, classroomEvent } from './brain-class.js';
 import { classesOn, nextClass, dueClasses, classTime, DAY_NAMES } from './schedule.js';
 
 const FEELING_LABEL = { tired: 'تعبان', sad: 'متضايق', sick: 'مريض', stressed: 'مضغوط' };
@@ -86,6 +87,9 @@ export class Brain {
     this.successes = [];
     this.focus = false;
     this.quiz = null;
+    this.riddle = null; // a riddle waiting for the class to answer
+    this.race = null; // the camel race on screen
+    this.noiseOn = false;
     this.chatHistory = [];
     this.quizTries = 0;
     this.rng = opts.rng || Math.random;
@@ -171,9 +175,11 @@ export class Brain {
     const now = this.clock();
     this.memory.touch(now);
     this.learnFromReaction(raw, now);
-    // A sentence with several commands runs them one after another.
-    if (!this.pending && !this.quiz && !this.dictation) {
-      const parts = splitCommands(raw);
+    // A sentence with several commands runs them one after another; a taught phrase may
+    // stand for several («لما أقول بداية الحصة: افتح العرض وبعدين شغل مؤقت ٤٠ دقيقة»).
+    if (!this.pending && !this.quiz && !this.dictation && !this.riddle) {
+      const taught = (this.memory.data.aliases || {})[phraseKey(raw)];
+      const parts = taught ? splitCommands(taught, { force: true }) : splitCommands(raw);
       if (parts.length > 1) {
         this.queue = parts.slice(1);
         return this.withMore(this.hearOne(parts[0], now));
@@ -252,6 +258,10 @@ export class Brain {
 
     if (this.quiz) {
       const handled = this.quizTurn(r, raw, now);
+      if (handled) return handled;
+    }
+    if (this.riddle) {
+      const handled = riddleTurn(this, r, raw, now);
       if (handled) return handled;
     }
 
@@ -447,6 +457,8 @@ export class Brain {
    */
   event(name, data = {}) {
     const now = this.clock();
+    const joy = classroomEvent(this, name, data, now);
+    if (joy !== undefined) return joy;
     switch (name) {
       case 'poke': this.emotions.feel('poke', now); return this.reply('poke');
       case 'tickle': this.emotions.feel('tickle', now); return this.reply('tickle');
@@ -462,6 +474,7 @@ export class Brain {
       // ---- his own tools: the whiteboard and the notebook tell him what happens there
       case 'tool_closed':
         if (this.focus || this.emotions.asleep) return null;
+        if (data.tool === 'reading') return null;
         return this.rng() < 0.6 ? this.reply(data.tool === 'board' ? 'tool_closed_board' : 'tool_closed_notebook') : null;
       case 'tool_busy': this.emotions.feel('curious', now); return this.reply('nb_thinking');
       case 'tool_done':
@@ -476,6 +489,13 @@ export class Brain {
           this.emotions.feel('celebrate', now);
           return this.reply(data.count > 0 ? 'nb_review_done' : 'nb_review_zero', { vars: { count: toArabicDigits(data.count || 0) }, behavior: data.count > 0 ? 'dance' : null });
         }
+        if (data.what === 'reading_done') {
+          const score = Math.max(0, Math.min(100, Number(data.count) || 0));
+          this.emotions.feel(score >= 85 ? 'celebrate' : 'care', now);
+          const sit = score >= 95 ? 'reading_great' : score >= 80 ? 'reading_good' : 'reading_practice';
+          return { ...this.reply(sit, { vars: { score: toArabicDigits(score) } }), effect: score >= 95 ? 'stars' : undefined };
+        }
+        if (data.what === 'reading_started') return null;
         if (data.what === 'note_new') return this.rng() < 0.5 ? this.reply('nb_note_new') : null;
         return null;
       }
@@ -656,6 +676,9 @@ export class Brain {
 
   route(r, raw, now) {
     const s = r.slots;
+    const joy = routeClassroom(this, r, raw, now);
+    if (joy !== undefined) return joy;
+    if (r.intent === 'attendance') return this.route({ ...r, intent: 'unknown' }, raw, now); // «جا أحمد» with no such student
     switch (r.intent) {
       case 'empty': return null;
       case 'call':
@@ -669,12 +692,12 @@ export class Brain {
       case 'who': this.emotions.feel('curious', now); return this.reply('who');
       case 'thanks': this.emotions.feel('thanks', now); return this.reply('thanks');
       case 'open_tool': {
-        const name = s.tool === 'board' ? 'السبورة' : 'الدفتر';
+        const name = TOOL_NAMES[s.tool] || 'الدفتر';
         return this.plan({ type: 'open_tool', params: { tool: s.tool } },
           { situation: `tool_open_${s.tool}`, sayOn: 'start', summary: `فتح ${name}` }, now);
       }
       case 'close_tool': {
-        const name = s.tool === 'board' ? 'السبورة' : 'الدفتر';
+        const name = TOOL_NAMES[s.tool] || 'الدفتر';
         return this.plan({ type: 'close_tool', params: { tool: s.tool } },
           { situation: 'tool_close', sayOn: 'start', vars: { app: name }, summary: `إغلاق ${name}` }, now);
       }
@@ -944,8 +967,9 @@ export class Brain {
         return this.route(again, last.raw, now);
       }
       case 'teach': {
-        const target = recognize(s.command);
-        if (['unknown', 'open_unknown', 'teach', 'repeat'].includes(target.intent)) {
+        const steps = splitCommands(s.command, { force: true });
+        const bad = steps.find((step) => ['unknown', 'open_unknown', 'teach', 'repeat', 'empty', 'call'].includes(recognize(step).intent));
+        if (bad !== undefined) {
           this.emotions.feel('not_understood', now);
           return this.reply('teach_bad', { vars: { command: s.command } });
         }
@@ -1393,6 +1417,7 @@ export class Brain {
   }
 }
 
+const TOOL_NAMES = { board: 'السبورة', notebook: 'الدفتر', reading: 'اختبار القراءة' };
 const LOOK_LABEL = { describe: 'الشاشة', explain: 'شرح اللي في الشاشة', solve: 'حل التمرين', questions: 'الأسئلة', summarize: 'التلخيص' };
 const TASK_LABEL = { summarize: 'التلخيص', explain: 'الشرح', questions: 'الأسئلة', solve: 'حل المسألة' };
 const DICTATION_END = new Set(['خلاص', 'خلصت', 'انتهيت', 'تم', 'بس خلاص', 'خلاص بس', 'وقف الاملاء', 'خلاص الاملاء', 'انهي الاملاء', 'وقف', 'بس', 'خلصنا', 'كفايه'].map(normalize));

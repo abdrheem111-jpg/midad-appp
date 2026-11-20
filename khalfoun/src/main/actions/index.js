@@ -4,7 +4,7 @@
 
 import { decide } from '../../core/permissions.js';
 import { APPS } from '../../core/intents.js';
-import { access } from 'node:fs/promises';
+import { access, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { organizeFolder, undoMoves } from './organize.js';
 import { KEY_IDS } from '../../core/keys.js';
@@ -14,7 +14,7 @@ const URLS = new Set(APPS.filter((a) => a.kind === 'url').map((a) => a.url));
 const FOLDERS = new Set(['downloads', 'documents', 'pictures', 'desktop']);
 const CLOSABLE = new Set([...APP_IDS, ...FOLDERS]);
 /** Khalfoun's own windows: the maths whiteboard and the AI notebook. */
-export const TOOLS = new Set(['board', 'notebook']);
+export const TOOLS = new Set(['board', 'notebook', 'reading']);
 const MAX_REMINDER_MIN = 7 * 24 * 60; // «ذكرني بكرة الساعة ٧» and up to a week ahead
 
 /**
@@ -49,6 +49,10 @@ export function validateAction(action) {
       return str(p.text, 3000) && ['top', 'middle', 'bottom'].includes(p.position) ? null : 'bad_pdf';
     case 'organize_downloads': case 'undo_organize': return null;
     case 'open_tool': case 'close_tool': return TOOLS.has(p.tool) ? null : 'bad_tool';
+    case 'save_sheet':
+      // A new spreadsheet in Documents\خلفون: a plain name (letters, digits, spaces, dashes) and CSV text.
+      if (!str(p.name, 80) || !/^[\p{L}\p{N} _-]+$/u.test(p.name) || /^\.|\.$/.test(p.name)) return 'bad_sheet';
+      return typeof p.csv === 'string' && p.csv.length > 0 && p.csv.length <= 500000 ? null : 'bad_sheet';
     default: return 'unknown_action';
   }
 }
@@ -83,6 +87,15 @@ export function createExecutor(deps) {
         case 'read_screen': return deps.readScreen ? await deps.readScreen() : { ok: false, error: 'unsupported' };
         case 'active_window': return deps.activeWindow ? await deps.activeWindow() : { ok: false, error: 'unsupported' };
         case 'open_tool': return deps.openTool ? deps.openTool(p.tool) : { ok: false, error: 'unsupported' };
+        case 'save_sheet': {
+          if (!deps.documentsDir) return { ok: false, error: 'unsupported' };
+          const dir = join(deps.documentsDir, 'خلفون');
+          await mkdir(dir, { recursive: true });
+          const file = join(dir, `${p.name.trim()}.csv`);
+          await writeFile(file, p.csv, 'utf8');
+          const err = deps.openSaved === false ? 'skipped' : await platform.openPath(file);
+          return { ok: true, data: { file, opened: !err } };
+        }
         case 'close_tool': return deps.closeTool ? deps.closeTool(p.tool) : { ok: false, error: 'unsupported' };
         case 'open_url': return await platform.openUrl(p.url);
         case 'open_folder': return await platform.openFolder(p.folder);

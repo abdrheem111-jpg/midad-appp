@@ -98,7 +98,7 @@ export function wavSeconds(wav) {
 /**
  * @param {{bin: string, model: string, wakeModel?: string}} whisper
  * @param {Uint8Array} wav 16 kHz mono WAV
- * @param {{run?: typeof execFile, threads?: number, purpose?: 'command'|'wake', words?: string[],
+ * @param {{run?: typeof execFile, threads?: number, purpose?: 'command'|'wake'|'reading', words?: string[],
  *   fast?: boolean, now?: () => number}} [opts] fast: use the small, quick model and greedy decoding
  * @returns {Promise<{ok: true, text: string, ms: number, model: string} | {ok: false, error: string}>}
  */
@@ -140,7 +140,9 @@ export async function transcribe(whisper, wav, opts = {}) {
     let text;
     let used = model;
     try {
-      text = await once([...args(model), ...(fast ? greedy : []), '-t', String(opts.threads || 4), '--prompt', prompt], limit);
+      // A student reading a passage is not a command: no command hints for whisper.
+      const hint = opts.purpose === 'reading' ? [] : ['--prompt', prompt];
+      text = await once([...args(model), ...(fast ? greedy : []), '-t', String(opts.threads || 4), ...hint], limit);
     } catch (first) {
       // Seen on a teacher's PC: the accurate model was too slow and every sentence was lost.
       // Try again with the quick model, greedy and without the prompt before giving up.

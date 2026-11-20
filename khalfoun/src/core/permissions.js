@@ -23,6 +23,7 @@ export const LEVEL_INFO = [
 export const ACTION_RISK = {
   open_tool: 'none', // his own whiteboard and notebook windows
   close_tool: 'none',
+  save_sheet: 'system', // a new spreadsheet in Documents\\خلفون (attendance, points); never overwrites another file
   open_app: 'open',
   open_url: 'open',
   open_folder: 'open',

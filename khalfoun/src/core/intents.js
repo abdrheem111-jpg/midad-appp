@@ -7,6 +7,7 @@ import { swapDistance as levenshtein } from './wake.js';
 import { calculate } from './calc.js';
 import { keyFor } from './keys.js';
 import { parseClassEntry } from './schedule.js';
+import { recognizeClassroom } from './class-intents.js';
 
 const N = (list) => list.map(normalize).sort((a, b) => b.length - a.length);
 
@@ -128,6 +129,7 @@ export const FEELINGS = [
 /** Khalfoun's own windows: the maths whiteboard «مِداد» and the AI notebook. */
 export const TOOLS = [
   { id: 'board', names: N(['السبوره', 'سبوره', 'السبوره الذكيه', 'سبوره الرياضيات', 'سبوره رياضيات', 'مداد', 'سبوره مداد', 'اللوح', 'لوح الرياضيات', 'الوايت بورد', 'وايت بورد', 'السبوره حقتك', 'سبورتك']) },
+  { id: 'reading', names: N(['اختبار القراءه', 'اختبار قراءه', 'تقييم القراءه', 'قيم القراءه', 'القراءه الجهريه', 'اختبار القراءه الجهريه', 'قياس القراءه', 'اسمع قراءه الطالب', 'اسمع الطالب يقرا', 'نافذه القراءه', 'اداه القراءه', 'تحدي القراءه']) },
   { id: 'notebook', names: N(['الدفتر', 'دفتري', 'الدفتر الذكي', 'دفتر خلفون', 'دفتر الملاحظات', 'النوت بوك', 'نوت بوك', 'دفترك', 'مذكرتي', 'البطاقات', 'بطاقات المراجعه', 'راجع البطاقات', 'المراجعه']) },
 ];
 
@@ -280,7 +282,11 @@ export function parseTeach(raw) {
   let phrase = null;
   let command = null;
   const sep = TEACH_SEP.exec(body);
-  if (sep) {
+  const colon = body.search(/[:：]/);
+  if (colon > 0 && (!sep || colon < sep.index)) {
+    phrase = body.slice(0, colon);
+    command = body.slice(colon + 1).replace(/^\s*(?:يعني|معناها|معناه)\s+/u, '');
+  } else if (sep) {
     phrase = body.slice(0, sep.index);
     command = body.slice(sep.index + sep[0].length);
   } else {
@@ -291,7 +297,7 @@ export function parseTeach(raw) {
   }
   phrase = (phrase || '').replace(/[،,:.!؟?]+$/u, '').trim();
   command = (command || '').replace(/[،,:.!؟?]+$/u, '').trim();
-  if (!phrase || !command || phrase.length > 60 || command.length > 200) return null;
+  if (!phrase || !command || phrase.length > 60 || command.length > 300) return null;
   return { phrase, command };
 }
 
@@ -303,8 +309,10 @@ export function phraseKey(raw) {
 // ------------------------------------------------------- several commands
 const THEN = new Set(N(['وبعدين', 'بعدين', 'وبعدها', 'بعدها', 'ثم', 'وثم', 'وبعد كذا', 'بعد كذا']));
 const SPLIT_INTENTS = new Set(['open', 'close', 'search', 'type_text', 'pdf_write', 'volume', 'reminder', 'screenshot', 'time', 'date',
-  'joke', 'dance', 'jump', 'come', 'away', 'sleep', 'organize_downloads', 'cancel_reminders', 'quiz', 'sounds']);
-const LEAD_VERBS = new Set(N(['افتح', 'فج', 'شغل', 'سكر', 'اقفل', 'طفي', 'دور', 'ابحث', 'اكتب', 'ذكرني', 'ارفع', 'وطي', 'نزل', 'اكتم', 'رتب', 'صور', 'قول', 'ارقص', 'تعال', 'روح']));
+  'joke', 'dance', 'jump', 'come', 'away', 'sleep', 'organize_downloads', 'cancel_reminders', 'quiz', 'sounds',
+  'timer', 'open_tool', 'close_tool', 'pick_student', 'wheel', 'celebrate', 'effect', 'effect_stop', 'noise', 'class_mode', 'race_start', 'riddle',
+  'class_star', 'attendance_today', 'speak', 'points_board', 'schedule_today', 'schedule_next']);
+const LEAD_VERBS = new Set(N(['افتح', 'فج', 'شغل', 'سكر', 'اقفل', 'طفي', 'دور', 'ابحث', 'اكتب', 'ذكرني', 'ارفع', 'وطي', 'نزل', 'اكتم', 'رتب', 'صور', 'قول', 'ارقص', 'تعال', 'روح', 'اختار', 'اختر', 'لف', 'احتفل', 'سو', 'سوي', 'ابدا', 'حط']));
 
 /**
  * Splits «افتح الحاسبة وبعدين المفكرة» or «افتح الحاسبة وافتح الوورد» into
@@ -313,9 +321,23 @@ const LEAD_VERBS = new Set(N(['افتح', 'فج', 'شغل', 'سكر', 'اقفل'
  * @param {string} raw
  * @returns {string[]}
  */
-export function splitCommands(raw) {
+export function splitCommands(raw, { force = false } = {}) {
   const tokens = String(raw || '').trim().split(/\s+/).filter(Boolean);
   if (tokens.length < 3) return [String(raw || '').trim()];
+  if (force) {
+    // A taught list of steps: split on «وبعدين/ثم» and «و» + a command verb only, and trust it.
+    const steps = [[]];
+    for (let i = 0; i < tokens.length; i += 1) {
+      const n = normalize(tokens[i]);
+      const two = i + 1 < tokens.length ? `${n} ${normalize(tokens[i + 1])}` : '';
+      if (steps.at(-1).length && THEN.has(two)) { steps.push([]); i += 1; continue; }
+      if (steps.at(-1).length && THEN.has(n)) { steps.push([]); continue; }
+      if (steps.at(-1).length && n.length > 2 && n.startsWith('و') && LEAD_VERBS.has(n.slice(1))) { steps.push([tokens[i].replace(/^و/u, '')]); continue; }
+      steps.at(-1).push(tokens[i]);
+    }
+    const list = steps.map((p) => p.join(' ').replace(/[،,]+$/u, '').trim()).filter(Boolean);
+    if (list.length > 1) return list.slice(0, 8);
+  }
   const parts = [[]];
   for (let i = 0; i < tokens.length; i += 1) {
     const t = tokens[i];
@@ -569,6 +591,11 @@ function recognizeText(raw, fuzzy) {
   if (L.hearCheck.includes(text)) return out('hear_check', {}, 0.95);
   if (L.closeIt.includes(text)) return out('close', { app: null, it: true }, 0.85);
   if (L.openIt.includes(text)) return out('open_again', {}, 0.85);
+  // ---- classroom joy: attendance, riddles, wheel, race, stars, effects, noise meter, camera
+  {
+    const hit = recognizeClassroom(text, raw);
+    if (hit) return out(...hit);
+  }
   // ---- classroom tools
   const namesM = /^(?:اسماء|اسامي) (?:الطلاب|الصف|طلابي|الطالبات|طالباتي)\s*(?:هم|هي)?\s*[:：]?\s*(.+)$/u.exec(normalize(String(raw).split(/[:：]/)[0]) === normalize(String(raw)) ? text : `${normalize(String(raw).split(/[:：]/)[0])} ${String(raw).split(/[:：]/).slice(1).join(':')}`);
   if (namesM) {

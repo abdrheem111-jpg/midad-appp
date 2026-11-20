@@ -111,6 +111,9 @@ export const COMMAND_EXAMPLES = [
   'قول نكتة', 'رتب التنزيلات', 'اختار طالب', 'قسمهم ٤ مجموعات', 'اعط احمد نجمة', 'شو حصتي الجاية', 'شو عندي اليوم', 'ابدأ العرض',
   'الشريحة الجاية', 'وقف العرض', 'انسخ', 'الصق', 'احفظ', 'تراجع', 'ملف جديد', 'اشرح اللي في الشاشة', 'لخص اللي في الشاشة', 'ابدأ الإملاء',
   'نام', 'تعال هنا', 'روح بعيد', 'ارقص',
+  'غايب <اسم> و<اسم>', '<اسم> متأخر', 'حضر <اسم>', 'منو غايب اليوم', 'صدر كشف الغياب', 'صدر النقاط', 'عطني لغز', 'لف العجلة',
+  'ابدأ سباق الهجن', 'نقطة للفريق الأول', 'نجمة للصف', 'كم نجمة عند الصف', 'احتفل', 'العاب نارية', 'سو مطر', 'زينة العيد الوطني',
+  'شيل الزينة', 'مقياس الهدوء', 'وقف مقياس الهدوء', 'وضع الصف', 'الوضع العادي', 'حل من الكاميرا', 'افتح اختبار القراءة', 'اختبر السمع',
 ];
 
 const RESPOND_TOOL = {
@@ -137,6 +140,8 @@ export function agentSystem({ name = '', context = '', kidsMode = false, level =
     'لا تخترع أوامر خارج هذه الصيغ. إذا ما يقدر ينعمل، قل ذلك بلطف واقترح البديل.',
     'إذا الكلام مب موجّه لك (ناس يتكلمون مع بعض، تلفزيون، نص جملة، كلام ما له معنى): addressed=false و say فارغ و commands فارغة. السكوت أحسن من الرد الغلط.',
     'إذا الطلب واضح نفّذ مباشرة بدون أسئلة. اسأل سؤال واحد قصير فقط إذا الطلب ناقص فعلاً.',
+    'إذا الشخص قال نكتة أو مزحة أو تريقة، افهم وين الضحكة وردّ بضحكة وتعليق ذكي قصير على نفس النكتة (بدون أوامر). وإذا طلب نكتة قلها أنت مباشرة في say.',
+    'في الصف: شجّع الطلاب، ولا تحرج أحد، ولا تسخر من اسم أو شكل.',
     'لا تذكر أنك نموذج أو ذكاء اصطناعي من شركة. أنت خلفون.',
     kidsMode ? 'وضع الأطفال مفعّل: كلام بسيط ولطيف، لا مواقع غير مناسبة، لا شي مخيف.' : '',
     level < 2 ? 'مستوى الإذن «التعارف»: لا تقترح أوامر تفتح أو تغيّر برامج؛ تكلم فقط.' : '',
@@ -389,12 +394,15 @@ export class GeminiAgent {
    * @param {Uint8Array} wav 16 kHz mono WAV
    * @returns {Promise<{ok: true, text: string, ms: number} | {ok: false, error: string}>}
    */
-  async transcribe(wav, { timeoutMs = 12000 } = {}) {
+  async transcribe(wav, { timeoutMs = 12000, reading = false } = {}) {
     const t0 = this.now();
     let model = await this.resolveModel();
     const data = Buffer.from(wav).toString('base64');
+    const ask = reading
+      ? 'هذا تسجيل طالب يقرأ نصاً عربياً بصوت عالٍ. اكتب الكلمات التي نطقها حرفياً كما قرأها، حتى لو أخطأ أو كرر أو تلعثم، بدون تصحيح ولا تشكيل ولا شرح. إذا ما فيه كلام واضح اكتب: -'
+      : 'اكتب الكلام العربي المنطوق في هذا التسجيل حرفياً كما قيل باللهجة العُمانية، بدون ترجمة ولا شرح ولا علامات. إذا ما فيه كلام واضح اكتب: -';
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      const generationConfig = { temperature: 0, maxOutputTokens: 200 };
+      const generationConfig = { temperature: 0, maxOutputTokens: reading ? 1500 : 200 };
       const thinking = this.thinkingConfig();
       if (thinking) generationConfig.thinkingConfig = thinking;
       let res;
@@ -405,7 +413,7 @@ export class GeminiAgent {
           body: JSON.stringify({
             contents: [{ role: 'user', parts: [
               { inline_data: { mime_type: 'audio/wav', data } },
-              { text: 'اكتب الكلام العربي المنطوق في هذا التسجيل حرفياً كما قيل باللهجة العُمانية، بدون ترجمة ولا شرح ولا علامات. إذا ما فيه كلام واضح اكتب: -' },
+              { text: ask },
             ] }],
             generationConfig,
           }),
@@ -433,6 +441,91 @@ export class GeminiAgent {
   }
 }
 
+/** What Khalfoun asks when he looks at a photo from the camera. */
+export function visionPrompt(mode = 'solve') {
+  if (mode === 'look') return 'أنت خلفون، مساعد معلم عُماني. صف باختصار ما في الصورة بالعربية (٣ جمل كحد أقصى). إذا فيها سؤال أو مسألة اذكرها.';
+  return [
+    'أنت خلفون، مساعد معلم عُماني. في الصورة سؤال أو مسألة من دفتر أو ورقة أو سبورة.',
+    'اكتب أولاً سطراً يبدأ بـ «السؤال:» فيه نص السؤال كما تقرؤه.',
+    'ثم «الحل:» بخطوات مرقمة قصيرة واضحة لطالب، بالعربية، والأرقام بالأرقام العربية المشرقية أو العادية كما في السؤال.',
+    'ثم سطر أخير يبدأ بـ «الجواب:».',
+    'إذا الصورة غير واضحة أو ما فيها سؤال، اكتب فقط: غير واضح.',
+    'لا تكتب أكثر من ١٢ سطراً.',
+  ].join('\n');
+}
+
+/** Cleans a vision answer; null when the model could not read the photo. */
+export function cleanVision(text) {
+  const t = String(text || '').replace(/\*\*/g, '').replace(/^#+\s*/gm, '').replace(/\n{3,}/g, '\n\n').trim();
+  if (!t || /^غير واضح[.!]?$/.test(t)) return null;
+  return t.slice(0, 2500);
+}
+
+/** Gemini looks at a photo (base64 JPEG/PNG) and answers in Arabic. */
+GeminiAgent.prototype.vision = async function vision(image, { mime = 'image/jpeg', mode = 'solve', timeoutMs = 30000 } = {}) {
+  const t0 = this.now();
+  let model = await this.resolveModel();
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const generationConfig = { temperature: 0.2, maxOutputTokens: 1500 };
+    const thinking = this.thinkingConfig();
+    if (thinking) generationConfig.thinkingConfig = thinking;
+    let res;
+    try {
+      res = await withTimeout(this.fetchFn, `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': this.key },
+        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ inline_data: { mime_type: mime, data: image } }, { text: visionPrompt(mode) }] }], generationConfig }),
+      }, timeoutMs);
+    } catch (err) {
+      return { ok: false, error: errorName(err) };
+    }
+    if (res.status === 400 || res.status === 404) {
+      const msg = String((await res.json().catch(() => ({})))?.error?.message || '');
+      if (/API key not valid|API_KEY_INVALID/i.test(msg)) return { ok: false, error: 'bad_key' };
+      if (/thinking/i.test(msg) && this.refuseThinking()) continue;
+      const found = await this.discoverModel();
+      if (found && found !== model) { model = found; this.model = found; continue; }
+      return { ok: false, error: `http_${res.status}` };
+    }
+    if (res.status === 401 || res.status === 403) return geminiAuthError(res);
+    if (res.status === 429) return { ok: false, error: 'quota' };
+    if (res.status >= 500) return { ok: false, error: 'busy' };
+    if (!res.ok) return { ok: false, error: `http_${res.status}` };
+    const out = await res.json();
+    const text = cleanVision((out?.candidates?.[0]?.content?.parts || []).map((x) => x.text || '').join(''));
+    return text ? { ok: true, text, ms: this.now() - t0, service: 'gemini' } : { ok: false, error: 'unclear' };
+  }
+  return { ok: false, error: 'no_answer' };
+};
+
+/** Claude looks at a photo and answers in Arabic. */
+ClaudeAgent.prototype.vision = async function vision(image, { mime = 'image/jpeg', mode = 'solve', timeoutMs = 30000 } = {}) {
+  const t0 = this.now();
+  try {
+    const res = await withTimeout(this.fetchFn, CLAUDE_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': this.key, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: this.model,
+        max_tokens: 1200,
+        messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: mime, data: image } }, { type: 'text', text: visionPrompt(mode) }] }],
+      }),
+    }, timeoutMs);
+    if (res.status === 401 || res.status === 403) return { ok: false, error: 'bad_key' };
+    if (res.status === 402 || res.status === 400) {
+      const msg = String((await res.json().catch(() => ({})))?.error?.message || '');
+      return { ok: false, error: /credit|balance|billing/i.test(msg) ? 'no_credit' : `http_${res.status}` };
+    }
+    if (res.status === 429 || res.status === 529) return { ok: false, error: 'busy' };
+    if (!res.ok) return { ok: false, error: `http_${res.status}` };
+    const data = await res.json();
+    const text = cleanVision((data?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n'));
+    return text ? { ok: true, text, ms: this.now() - t0, service: 'claude' } : { ok: false, error: 'unclear' };
+  } catch (err) {
+    return { ok: false, error: errorName(err) };
+  }
+};
+
 /**
  * Several cloud brains in order: the next one answers when the first has no credit, a bad
  * key or is busy (a Claude key without credit must not block a working Gemini key).
@@ -445,6 +538,15 @@ export function chainAgents(agents) {
       for (const a of chain) {
         last = await a.respond(p);
         if (last.ok || !['no_credit', 'bad_key', 'busy', 'key_type', 'quota'].includes(last.error)) return last;
+      }
+      return last;
+    },
+    async vision(image, opts) {
+      let last = { ok: false, error: 'not_configured' };
+      for (const a of chain) {
+        if (!a.vision) continue;
+        last = await a.vision(image, opts);
+        if (last.ok || !['no_credit', 'bad_key', 'busy', 'key_type', 'quota', 'timeout'].includes(last.error)) return last;
       }
       return last;
     },

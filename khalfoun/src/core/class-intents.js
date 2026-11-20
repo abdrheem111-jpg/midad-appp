@@ -1,0 +1,144 @@
+// Understanding the classroom-joy commands: attendance, riddles, the name wheel, the camel
+// race, class stars, celebrations and screen effects, the noise meter, the big class mode,
+// solving from the camera, and the voice test. Called by intents.recognizeText with the
+// normalized, filler-free text; returns [intent, slots, confidence] or null.
+
+import { normalize, parseNumberToken } from './arabic.js';
+import { teamNumber } from './classfun.js';
+
+const N = (list) => list.map(normalize);
+const S = (list) => new Set(N(list));
+
+const ABSENT_WORDS = S(['غايب', 'غايبه', 'غايبين', 'غايبات', 'غياب', 'الغياب', 'غاب', 'غابت', 'غابوا', 'ما حضر', 'ما حضرت', 'ما جا', 'ما جات']);
+const LATE_WORDS = S(['متاخر', 'متاخره', 'متاخرين', 'تاخر', 'تاخرت', 'تاخروا', 'جا متاخر', 'جات متاخره', 'التاخير']);
+const VERB_FORMS = S(['غاب', 'غابت', 'غابوا', 'تاخر', 'تاخرت', 'تاخروا']);
+const PRESENT_WORDS = S(['حاضر', 'حاضره', 'حضر', 'حضرت', 'وصل', 'وصلت', 'موجود', 'موجوده', 'جا', 'جات']);
+const NAME_NOISE = S(['سجل', 'اكتب', 'حط', 'اليوم', 'الحين', 'يا', 'خلفون', 'تراه', 'تراها', 'تراهم', 'كمان', 'بعد', 'برضو', 'الطالب', 'الطالبه', 'الطلاب', 'هم', 'هو', 'هي', 'عندي', 'عندنا', 'في', 'من', 'الصف', 'سجلي', 'لي']);
+
+/** The words of the sentence that are not attendance words: the names, as said. */
+function namesPart(raw, drop) {
+  return String(raw).replace(/[،,:：.!؟?]/g, ' ').split(/\s+/).filter((w) => {
+    const n = normalize(w).replace(/^و(?=\S{3,})/, '');
+    return w && !drop.has(normalize(w)) && !drop.has(n) && !NAME_NOISE.has(normalize(w)) && !NAME_NOISE.has(n);
+  }).join(' ');
+}
+
+const ATT_TODAY = S(['منو غايب', 'مين غايب', 'منو الغايب', 'من الغايب', 'منو الغايبين', 'منو غايب اليوم', 'مين غايب اليوم', 'الغياب اليوم', 'غياب اليوم', 'كم غايب', 'كم غايب اليوم',
+  'منو غاب اليوم', 'منو متاخر', 'منو تاخر', 'منو تاخر اليوم', 'شو الغياب', 'وش الغياب', 'كشف الغياب اليوم', 'الحضور اليوم', 'منو حاضر']);
+const EXPORT_ATT = S(['صدر الغياب', 'صدر كشف الغياب', 'طلع كشف الغياب', 'طلع ملف الغياب', 'سو كشف الغياب', 'سوي كشف الغياب', 'سو ملف الغياب', 'كشف الغياب', 'ملف الغياب',
+  'صدر الحضور', 'كشف الحضور', 'صدر الحضور والغياب', 'كشف الحضور والغياب', 'حط الغياب في اكسل', 'الغياب في اكسل', 'صدر الغياب اكسل', 'طلع الغياب', 'نزل الغياب']);
+const EXPORT_PTS = S(['صدر النقاط', 'طلع النقاط', 'كشف النقاط', 'ملف النقاط', 'سو كشف النقاط', 'النقاط في اكسل', 'حط النقاط في اكسل', 'صدر الدرجات', 'كشف الدرجات', 'طلع ملف النقاط', 'نزل النقاط']);
+const CLEAR_ATT = S(['امسح غياب اليوم', 'الغ غياب اليوم', 'شيل غياب اليوم', 'صفر غياب اليوم', 'كلهم حاضرين', 'الكل حاضر', 'كلهم حاضرين اليوم', 'ما في غياب', 'ما فيه غياب', 'محد غايب', 'ماحد غايب', 'ولا واحد غايب']);
+
+const RIDDLE = S(['لغز', 'عطني لغز', 'اعطني لغز', 'قول لغز', 'عندك لغز', 'لغز جديد', 'لغز ثاني', 'الغاز', 'حزوره', 'فزوره', 'حزاوي', 'عطنا لغز', 'اعطنا لغز', 'خلنا نحل لغز', 'لغز للصف', 'سو لغز', 'هات لغز']);
+const WHEEL = S(['لف العجله', 'العجله', 'عجله الاسماء', 'عجله الحظ', 'دولاب الاسماء', 'دور العجله', 'لف الدولاب', 'دولاب الحظ', 'عجله الطلاب', 'لف عجله الاسماء', 'دوار الاسماء', 'لف العجله واختار طالب', 'اختار بالعجله']);
+const RACE_START = /^(?:ابدا |ابدأ |شغل |سو |سوي |يلا |خلنا نلعب )?(?:سباق (?:الهجن|الجمال|البعارين|البعير|الابل)|السباق|لعبه السباق|لعبه الهجن|سباق)(?: (?:بين|ب|ل|في|على)? ?(\S+) (?:فرق|فريق|مجموعات|مجموعه|فريقين))?$/u;
+const RACE_STOP = S(['وقف السباق', 'خلص السباق', 'انهي السباق', 'سكر السباق', 'الغ السباق', 'خلاص السباق', 'كفايه سباق', 'وقف سباق الهجن']);
+const STAR = S(['نجمه للصف', 'نجمه للفصل', 'الصف يستاهل نجمه', 'اعط الصف نجمه', 'عط الصف نجمه', 'اعطي الصف نجمه', 'نجمه للكل', 'زيد نجمه', 'ضيف نجمه', 'نجمه', 'نجمه ذهبيه', 'نجمه للجميع', 'برافو للصف نجمه', 'الصف ممتاز نجمه']);
+const STARS_ASK = S(['كم نجمه', 'كم نجمه عندنا', 'كم نجمه عند الصف', 'نجوم الصف', 'كم نجوم الصف', 'شو فتحنا', 'شو الجوايز', 'كم باقي للجايزه', 'كم باقي على الجايزه', 'الجوايز']);
+const CELEBRATE = S(['احتفل', 'احتفال', 'احتفلوا', 'نحتفل', 'خلنا نحتفل', 'سو احتفال', 'سوي احتفال', 'صفقوا', 'صفق', 'صفقه', 'برافو', 'برافو عليكم', 'برافو للصف', 'تصفيق', 'شي يفرح', 'فرحنا', 'هيصه',
+  'احتفال كبير', 'زغرد', 'كونفيتي', 'ورق ملون', 'قصاصات', 'مبروك للصف', 'الصف ممتاز', 'احسنتم', 'احسنتم يا طلاب', 'يا سلام عليكم']);
+const EFFECTS = [
+  ['fireworks', N(['العاب ناريه', 'الالعاب الناريه', 'العاب ناريه', 'مفرقعات', 'الفشك', 'فشك', 'سو العاب ناريه', 'طلق العاب ناريه'])],
+  ['national', N(['العيد الوطني', 'احتفال العيد الوطني', 'زينه العيد الوطني', 'علم عمان', 'اعلام عمان', 'ارسم علم عمان', 'حط علم عمان', 'زين بعلم عمان', 'الاعلام', 'رفرف العلم', 'عمان', 'يا عمان', 'زينه وطنيه', 'حب عمان'])],
+  ['rain', N(['مطر', 'خلها تمطر', 'سو مطر', 'امطر', 'امطري', 'نزل مطر', 'خل الدنيا تمطر', 'المطر', 'مطر على الشاشه'])],
+  ['snow', N(['ثلج', 'سو ثلج', 'خلها تثلج', 'نزل ثلج', 'الثلج', 'ثلوج'])],
+  ['lanterns', N(['فوانيس', 'فوانيس رمضان', 'زينه رمضان', 'رمضان كريم', 'هلال رمضان', 'رمضان', 'فانوس رمضان'])],
+  ['balloons', N(['بالونات', 'بلالين', 'نفاخات', 'زينه العيد', 'عيد مبارك', 'العيد', 'عيدكم مبارك', 'بالون', 'طير بالونات'])],
+  ['stars', N(['نجوم', 'سما نجوم', 'نجوم على الشاشه', 'سو نجوم', 'مطر نجوم'])],
+  ['hearts', N(['قلوب', 'سو قلوب', 'قلوب على الشاشه', 'حب'])],
+  ['bubbles', N(['فقاعات', 'فقاعات صابون', 'سو فقاعات', 'بقابيق'])],
+];
+const EFFECT_LEAD = /^(?:سو |سوي |حط |ارسم |زين |ابي |ابغي |ابغى |اريد |خل |شغل |طلع |نزل |اعرض |ورني |ورنا )?(?:لنا |لي )?(?:الشاشه |الشاشة )?(?:ب|بال)?/u;
+const EFFECT_STOP = S(['وقف المطر', 'وقف الثلج', 'شيل الزينه', 'امسح الزينه', 'وقف الزينه', 'خلاص الزينه', 'وقف الاحتفال', 'وقف المؤثرات', 'شيل المؤثرات', 'نظف الشاشه', 'وقف الالعاب الناريه', 'شيل الفوانيس', 'شيل البالونات', 'شيل الاعلام', 'خلاص المطر', 'وقف الفقاعات', 'وقف النجوم', 'امسح الشاشه']);
+
+const NOISE_ON = S(['مقياس الهدوء', 'مقياس الازعاج', 'مقياس الضجه', 'مقياس الصوت في الصف', 'شغل مقياس الهدوء', 'شغل مقياس الازعاج', 'راقب الهدوء', 'راقب الصف', 'راقب الازعاج', 'وقت الهدوء', 'وضع الهدوء', 'هدوء في الصف', 'خل الصف هادي', 'تحدي الهدوء', 'مسابقه الهدوء', 'شغل مقياس الضجه', 'عداد الهدوء']);
+const NOISE_OFF = S(['وقف مقياس الهدوء', 'سكر مقياس الهدوء', 'طفي مقياس الهدوء', 'وقف مقياس الازعاج', 'وقف مراقبه الصف', 'خلاص الهدوء', 'وقف الهدوء', 'وقف تحدي الهدوء', 'سكر مقياس الازعاج', 'لا تراقب الصف']);
+const CLASS_ON = S(['وضع الصف', 'شغل وضع الصف', 'وضع العرض', 'وضع البروجكتر', 'وضع الشاشه الكبيره', 'كبر نفسك', 'كبر حجمك', 'خلك كبير', 'صير كبير', 'خلفون كبير', 'كبر خلفون']);
+const CLASS_OFF = S(['اطلع من وضع الصف', 'وقف وضع الصف', 'سكر وضع الصف', 'الوضع العادي', 'وضع عادي', 'صغر نفسك', 'صغر حجمك', 'خلك صغير', 'صير صغير', 'رجع حجمك', 'رجع عادي', 'خلاص وضع الصف']);
+const CAMERA = S(['حل من الكاميرا', 'شوف الكاميرا', 'صور المساله وحلها', 'صور المساله', 'صور التمرين وحله', 'صور التمرين', 'حل اللي في الورقه', 'حل الورقه', 'شوف الورقه', 'شوف الدفتر وحله',
+  'افتح الكاميرا', 'شغل الكاميرا', 'الكاميرا', 'صور السؤال', 'حل السؤال من الكاميرا', 'اقرا الورقه', 'شوف هذي المساله', 'شوف هذا السؤال', 'ورني الكاميرا', 'حل المساله من الكاميرا', 'شوف المساله في الكاميرا']);
+const VOICE_TEST = S(['اختبر السمع', 'اختبار السمع', 'اختبر سمعك', 'اختبار الصوت', 'اختبر المايك', 'اختبار المايك', 'اختبر الميكروفون', 'جرب السمع', 'جرب سمعك', 'فحص السمع', 'افحص السمع', 'افحص المايك', 'اختبر الاستماع', 'اختبار الاستماع']);
+const WALK = S(['امش على النوافذ', 'امشي على النوافذ', 'اطلع فوق النوافذ', 'اطلع على النافذه', 'نط على النوافذ', 'العب على النوافذ', 'تمشى على الشاشه', 'تمشى', 'تجول', 'تمشي', 'روح تمشى', 'استكشف الشاشه']);
+const USER_JOKE = /(ههه|هاها|خخخ|😂|🤣)|^(?:اسمع|عندي|خذ|هذي|هاذي|بقولك|بقول لك) (?:ذي |هذي |هالـ ?)?(?:نكته|نكتة|طرفه)/u;
+
+/**
+ * @param {string} text normalized, filler-free
+ * @param {string} raw as said
+ * @returns {[string, object, number] | null}
+ */
+export function recognizeClassroom(text, raw) {
+  if (!text) return null;
+  if (EXPORT_ATT.has(text)) return ['export_sheet', { what: 'attendance' }, 0.95];
+  if (EXPORT_PTS.has(text)) return ['export_sheet', { what: 'points' }, 0.95];
+  if (ATT_TODAY.has(text)) return ['attendance_today', {}, 0.95];
+  if (CLEAR_ATT.has(text)) return ['attendance_clear', {}, 0.92];
+  const howMany = /^(?:كم (?:مره|يوم|مرات) )(?:غاب|غابت|تاخر|تاخرت) (.+)$/u.exec(text);
+  if (howMany) return ['attendance_student', { name: namesPart(raw, S(['كم', 'مره', 'مرة', 'يوم', 'مرات', 'غاب', 'غابت', 'تاخر', 'تأخر', 'تاخرت', 'تأخرت'])) }, 0.9];
+
+  const words = text.split(' ');
+  const first = words[0];
+  const last = words.at(-1);
+  const firstTwo = words.slice(0, 2).join(' ');
+  const lastTwo = words.slice(-2).join(' ');
+  const has = (set) => set.has(first) || set.has(last) || set.has(firstTwo) || set.has(lastTwo) || (words[0] === 'سجل' && set.has(words[1]));
+  if (words.length >= 2 && words.length <= 14) {
+    // «غايب أحمد ومريم», «أحمد وسالم غايبين», «سجل غياب سعيد»
+    // A past verb at the end («الشمس غابت», «سالم تأخر») counts only for a name on the class list.
+    const verbLast = VERB_FORMS.has(last) && !ABSENT_WORDS.has(first) && !LATE_WORDS.has(first) && first !== 'سجل';
+    if (has(ABSENT_WORDS) && !/^(?:انا|انت|انتي|هو) /.test(text)) {
+      const names = namesPart(raw, ABSENT_WORDS);
+      if (names) return ['attendance', { kind: 'absent', names, ...(verbLast ? { soft: true } : {}) }, 0.9];
+    }
+    if (has(LATE_WORDS) && !/^(?:انا|انت|انتي) /.test(text)) {
+      const names = namesPart(raw, LATE_WORDS);
+      if (names) return ['attendance', { kind: 'late', names, ...(verbLast ? { soft: true } : {}) }, 0.9];
+    }
+    // «حضر أحمد» / «أحمد وصل»: a name must follow or lead; «انا وصلت» is not attendance.
+    if ((PRESENT_WORDS.has(first) || PRESENT_WORDS.has(last)) && !/^(?:انا|انت|انتي|هو|هي|خلفون|يا) /.test(text) && !/^(?:جا|جات|وصل|وصلت) (?:وقت|الوقت|موعد)/.test(text)) {
+      const names = namesPart(raw, PRESENT_WORDS);
+      if (names && words.length <= 8) return ['attendance', { kind: 'present', names, soft: true }, 0.8];
+    }
+  }
+
+  if (RIDDLE.has(text)) return ['riddle', {}, 0.95];
+  if (WHEEL.has(text)) return ['wheel', {}, 0.95];
+  if (RACE_STOP.has(text)) return ['race_stop', {}, 0.95];
+  const race = RACE_START.exec(text);
+  if (race) {
+    const teams = race[1] ? parseNumberToken(race[1]) : null;
+    return ['race_start', { teams: teams && teams >= 2 && teams <= 6 ? teams : null }, 0.92];
+  }
+  // «الفريق الثاني جاوب صح», «نقطة للفريق الثالث», «قدم جمل الفريق الأول», «تقدم الفريق ٢»
+  if (/(?:فريق|الفريق|مجموعه|المجموعه|جمل|الجمل)/.test(text) && /^(?:نقطه|نقطتين|قدم|تقدم|زيد|خطوه|خطوتين|برافو|صح|الفريق|فريق|المجموعه|جمل|الجمل)/.test(text) && !/^(?:قسم|اقسم|سو|سوي)/.test(text)) {
+    const team = teamNumber(text);
+    if (team) {
+      const steps = /(?:نقطتين|خطوتين)/.test(text) ? 2 : 1;
+      return ['race_advance', { team, steps }, 0.88];
+    }
+  }
+  if (STARS_ASK.has(text)) return ['class_stars', {}, 0.92];
+  if (STAR.has(text)) return ['class_star', { count: 1 }, 0.92];
+  const stars = /^(\S+) نجوم (?:للصف|للفصل)$/u.exec(text);
+  if (stars) {
+    const n = parseNumberToken(stars[1]);
+    if (n && n <= 10) return ['class_star', { count: n }, 0.9];
+  }
+  if (CELEBRATE.has(text)) return ['celebrate', {}, 0.92];
+  if (EFFECT_STOP.has(text)) return ['effect_stop', {}, 0.95];
+  {
+    const bare = text.replace(EFFECT_LEAD, '').replace(/ (?:على|في) الشاشه$/, '').trim();
+    for (const [effect, names] of EFFECTS) {
+      if (names.includes(text) || names.includes(bare)) return ['effect', { effect }, 0.9];
+    }
+  }
+  if (NOISE_OFF.has(text)) return ['noise', { on: false }, 0.95];
+  if (NOISE_ON.has(text)) return ['noise', { on: true }, 0.95];
+  if (CLASS_OFF.has(text)) return ['class_mode', { on: false }, 0.92];
+  if (CLASS_ON.has(text)) return ['class_mode', { on: true }, 0.92];
+  if (CAMERA.has(text)) return ['camera', { mode: /(?:حل|حله|وحله|وحلها)/.test(text) ? 'solve' : 'look' }, 0.92];
+  if (VOICE_TEST.has(text)) return ['voice_test', {}, 0.95];
+  if (WALK.has(text)) return ['walk_windows', {}, 0.9];
+  if (USER_JOKE.test(String(raw)) && text.split(' ').length >= 3) return ['user_joke', { text: String(raw).slice(0, 300) }, 0.7];
+  return null;
+}

@@ -17,8 +17,13 @@ export class Recorder {
   /**
    * Records until silence. Resolves with {wav, spoke} or rejects on mic errors.
    * @param {(level: number) => void} [onLevel] loudness 0..1 for the UI
+   * @param {{maxMs?: number, silenceMs?: number|null, noSpeechMs?: number, worklet?: string, onChunk?: (samples: Float32Array) => void}} [opts]
+   *   silenceMs null: keep recording through pauses (a student reading) until stop() or maxMs.
    */
-  async record(onLevel) {
+  async record(onLevel, opts = {}) {
+    const maxMs = opts.maxMs || MAX_MS;
+    const silenceMs = opts.silenceMs === null ? Infinity : (opts.silenceMs || SILENCE_AFTER_SPEECH_MS);
+    const noSpeechMs = opts.noSpeechMs || NO_SPEECH_MS;
     if (this.active) throw new Error('busy');
     this.active = true;
     let stream;
@@ -26,7 +31,7 @@ export class Recorder {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
       ctx = new AudioContext();
-      await ctx.audioWorklet.addModule('recorder-worklet.js');
+      await ctx.audioWorklet.addModule(opts.worklet || 'recorder-worklet.js');
       const src = ctx.createMediaStreamSource(stream);
       const node = new AudioWorkletNode(ctx, 'khalfoun-recorder');
       const chunks = [];
@@ -42,7 +47,7 @@ export class Recorder {
           if (onLevel) onLevel(Math.min(1, level * 12));
           const now = performance.now();
           if (level > SILENCE_RMS) { spoke = true; lastLoud = now; }
-          if ((spoke && now - lastLoud > SILENCE_AFTER_SPEECH_MS) || now - started > MAX_MS || (!spoke && now - started > NO_SPEECH_MS)) resolve();
+          if ((spoke && now - lastLoud > silenceMs) || now - started > maxMs || (!spoke && now - started > noSpeechMs)) resolve();
         };
         src.connect(node);
       });

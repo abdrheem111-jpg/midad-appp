@@ -29,6 +29,7 @@ import { LEVEL_INFO } from '../core/permissions.js';
 import { DiagLog } from './diag.js';
 import { ocrImage } from './ocr.js';
 import { TASK_MODES, LOOK_MODES } from '../core/chat-prompt.js';
+import { Notebook } from '../core/notebook.js';
 import { PARTIAL_DOWNLOAD, downloadKind } from '../core/desktop.js';
 import {
   setupVoice, pullOllamaModel, ollamaStatus, setupErrorText, packSizeMB,
@@ -102,7 +103,7 @@ function serveAppProtocol() {
     } else {
       file = normalize(join(ROOT, path));
       const rel = relative(ROOT, file);
-      const allowed = rel.startsWith(`src${sep}renderer${sep}`) || rel.startsWith(`src${sep}core${sep}`) || rel.startsWith(`src${sep}notebook${sep}`) || rel.startsWith(`assets${sep}`);
+      const allowed = rel.startsWith(`src${sep}renderer${sep}`) || rel.startsWith(`src${sep}core${sep}`) || rel.startsWith(`src${sep}notebook${sep}`) || rel.startsWith(`src${sep}reading${sep}`) || rel.startsWith(`assets${sep}`);
       if (!allowed || rel.startsWith('..')) return new Response('forbidden', { status: 403 });
     }
     try {
@@ -125,6 +126,7 @@ function fitToWorkArea() {
 const TOOL_PAGES = {
   board: { url: `${ORIGIN}/midad/index.html`, title: 'سبورة خلفون — مِداد', width: 1280, height: 820 },
   notebook: { url: `${ORIGIN}/src/notebook/index.html`, title: 'دفتر خلفون', width: 1180, height: 780, preload: 'notebook-preload.cjs' },
+  reading: { url: `${ORIGIN}/src/reading/index.html`, title: 'اختبار القراءة — خلفون', width: 1100, height: 760, preload: 'reading-preload.cjs' },
 };
 const toolWindows = {};
 
@@ -220,6 +222,22 @@ const fromNotebook = (event) => {
   const w = toolWindows.notebook;
   return Boolean(w && !w.isDestroyed() && event.sender === w.webContents && (event.senderFrame?.url || '').startsWith(`${ORIGIN}/src/notebook/`));
 };
+
+/** Only the reading window may use the reading IPC. */
+const fromReading = (event) => {
+  const w = toolWindows.reading;
+  return Boolean(w && !w.isDestroyed() && event.sender === w.webContents && (event.senderFrame?.url || '').startsWith(`${ORIGIN}/src/reading/`));
+};
+
+/** Puts a note into the notebook file (used by the camera solve) and refreshes an open notebook. */
+async function addNotebookNote(store, title, body) {
+  const nb = new Notebook(await store.read());
+  const note = nb.add({ title, body });
+  await store.write(nb.data);
+  const w = toolWindows.notebook;
+  if (w && !w.isDestroyed()) w.webContents.send('nb:refresh', { id: note.id });
+  return note;
+}
 
 function createWindow() {
   const { workArea } = screen.getPrimaryDisplay();
@@ -702,6 +720,77 @@ function setupIpc(stores, executor) {
   });
   ipcMain.on('nb:board', (event) => { if (fromNotebook(event)) openTool('board'); });
 
+  // «حل من الكاميرا»: a photo from the webcam, read by the cloud brain (or a local vision model).
+  ipcMain.handle('vision:camera', async (event, payload) => {
+    if (!fromApp(event)) return { ok: false, error: 'forbidden' };
+    const p = payload && typeof payload === 'object' ? payload : {};
+    const image = typeof p.image === 'string' ? p.image : '';
+    const mode = p.mode === 'look' ? 'look' : 'solve';
+    if (!/^[A-Za-z0-9+/=]{100,8000000}$/.test(image)) return { ok: false, error: 'bad_image' };
+    let res;
+    if (secrets.brain) {
+      const fetchFn = (url, init) => net.fetch(url, init);
+      const chain = chainAgents([
+        secrets.data.claude ? new ClaudeAgent({ key: secrets.claudeKey, fetchFn }) : null,
+        secrets.data.gemini ? new GeminiAgent({ key: secrets.geminiKey, fetchFn }) : null,
+      ]);
+      res = await chain.vision(image, { mime: 'image/jpeg', mode });
+    } else if (chat && visionModel && settings.chatEnabled !== false) {
+      res = await chat.vision({ mode: mode === 'look' ? 'describe' : 'solve', image, model: visionModel, kidsMode: !!settings.kidsMode });
+      if (res.ok) res.service = visionModel;
+    } else {
+      return { ok: false, error: 'no_cloud' };
+    }
+    diag.write('camera', mode, '→', res.ok ? `${res.text.length} chars (${res.service || ''}, ${((res.ms || 0) / 1000).toFixed(1)} s)` : `failed: ${res.error}`);
+    if (!res.ok) return res;
+    let saved = false;
+    if (mode === 'solve') {
+      try {
+        const d = new Date();
+        const q = (/السؤال:\s*(.+)/.exec(res.text)?.[1] || '').slice(0, 60);
+        await addNotebookNote(stores.notebook, `حل من الكاميرا ${q ? `— ${q}` : ''} (${d.getDate()}/${d.getMonth() + 1})`.trim(), res.text);
+        openTool('notebook');
+        saved = true;
+      } catch (err) { diag.write('camera note failed', String(err?.message || err)); }
+    }
+    return { ok: true, text: res.text, saved };
+  });
+
+  // The reading-aloud check: the student's recording becomes text, compared on the page.
+  ipcMain.handle('rd:transcribe', async (event, wav) => {
+    if (!fromReading(event)) return { ok: false, error: 'forbidden' };
+    const bytes = wav instanceof Uint8Array ? wav : new Uint8Array(wav || []);
+    if (bytes.length < 1000 || bytes.length > 4 * 1024 * 1024) return { ok: false, error: 'bad_audio' };
+    const t0 = Date.now();
+    let res;
+    if (secrets.azure && secrets.data.use?.hear !== false) {
+      res = await transcribeAzure(secrets.azure, bytes, { timeoutMs: 30000 });
+      if (res.ok) res.service = 'azure';
+    }
+    if ((!res || !res.ok) && secrets.data.gemini) {
+      if (!geminiEars) geminiEars = new GeminiAgent({ key: secrets.geminiKey, fetchFn: (url, init) => net.fetch(url, init) });
+      res = await geminiEars.transcribe(bytes, { timeoutMs: 45000, reading: true });
+      if (res.ok) res.service = 'gemini';
+    }
+    if ((!res || !res.ok) && whisper.available) {
+      res = await transcribe(whisper, bytes, { purpose: 'reading', threads: Math.min(8, Math.max(2, cpus().length - 1)) });
+      if (res.ok) res.service = 'whisper';
+    }
+    if (!res) return { ok: false, error: 'no_hearing' };
+    diag.write('reading', `${wavSeconds(bytes).toFixed(0)} s →`, res.ok ? `${res.text.split(/\s+/).length} words (${res.service}, ${((Date.now() - t0) / 1000).toFixed(1)} s)` : `failed: ${res.error}`);
+    return res.ok ? { ok: true, text: res.text, service: res.service } : { ok: false, error: res.error };
+  });
+  ipcMain.handle('rd:info', (event) => {
+    if (!fromReading(event)) return null;
+    return { cloud: Boolean(secrets.azure || secrets.data.gemini), azure: Boolean(secrets.azure), whisper: whisper.available, kidsMode: !!settings.kidsMode };
+  });
+  ipcMain.on('rd:tell', (event, what, data) => {
+    if (!fromReading(event)) return;
+    if (!['reading_done', 'reading_started'].includes(what)) return;
+    const d = data && typeof data === 'object' ? data : {};
+    send('tool-event', { tool: 'reading', what, count: Math.max(0, Math.min(100, Math.round(Number(d.count) || 0))) });
+  });
+
   ipcMain.handle('chat:task', async (event, payload) => {
     if (!fromApp(event)) return { ok: false, error: 'forbidden' };
     if (!chat || settings.chatEnabled === false) return { ok: false, error: 'chat_unavailable' };
@@ -841,8 +930,9 @@ function setupPermissions() {
   const ses = session.defaultSession;
   ses.setPermissionRequestHandler((wc, permission, callback, details) => {
     const own = (details.requestingUrl || '').startsWith(`${ORIGIN}/`);
-    const audioOnly = permission === 'media' && (details.mediaTypes || []).every((t) => t === 'audio');
-    callback(own && audioOnly);
+    // The microphone, and the camera for «حل من الكاميرا»; only for our own pages.
+    const media = permission === 'media' && (details.mediaTypes || []).every((t) => t === 'audio' || t === 'video');
+    callback(own && media);
   });
   ses.setPermissionCheckHandler((wc, permission, origin) => permission === 'media' && origin === ORIGIN);
 }
@@ -1034,6 +1124,8 @@ async function start() {
     writePdf: (text, position, page) => writePdf(text, position, [downloadsDir, app.getPath('documents')], page),
     openTool,
     closeTool,
+    documentsDir: SMOKE ? downloadsDir : app.getPath('documents'),
+    openSaved: !SMOKE,
   });
   try {
     const font = await readFile(join(ROOT, 'assets', 'fonts', 'Tajawal-700-arabic.woff2'));

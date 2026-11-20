@@ -310,4 +310,14 @@ window.addEventListener('beforeunload', () => { if ($('saved').textContent === '
   const first = nb.list()[0];
   if (first) openNote(first.id);
   window.__notebookReady = true;
+  // A note Khalfoun added from outside (the camera solve): merge it in, keep any unsaved edits here.
+  host.onRefresh?.(async ({ id }) => {
+    const fresh = new Notebook((await host.load())?.data || undefined);
+    const have = new Set(nb.data.notes.map((n) => n.id));
+    for (const n of fresh.data.notes) if (!have.has(n.id)) nb.data.notes.push(n);
+    await saveNow();
+    renderList();
+    if (id && nb.data.notes.some((n) => n.id === id)) openNote(id);
+    toast('خلفون ضاف ملاحظة جديدة.');
+  });
 })();

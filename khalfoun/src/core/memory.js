@@ -27,6 +27,9 @@ export function defaultMemory(now = Date.now()) {
     commands: {},
     aliases: {}, // phrases the person taught: normalized phrase -> command
     classroom: { students: [], points: {}, picked: [] }, // class list, points, who already had a turn
+    attendance: { days: {} }, // absent/late per school day
+    classStars: 0, // stars the whole class earned; unlock outfits and dances
+    riddlesSeen: [],
     schedule: [], // timetable: {id, days, hour, minute, subject, command, notified}
     log: [],
   };

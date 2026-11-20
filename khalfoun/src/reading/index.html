@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; font-src 'self'; script-src 'self'; media-src 'self' blob:; worker-src 'self'">
+  <title>اختبار القراءة — خلفون</title>
+  <link rel="stylesheet" href="../../assets/fonts/fonts.css">
+  <link rel="stylesheet" href="reading.css">
+</head>
+<body>
+  <header class="top">
+    <img class="logo" src="../../assets/icon.png" alt="">
+    <div class="brand">
+      <h1>اختبار القراءة الجهرية</h1>
+      <p id="status" class="status">خلفون يسمع الطالب ويحسب الكلمات الصحيحة وسرعة القراءة.</p>
+    </div>
+  </header>
+
+  <div class="layout">
+    <main class="main">
+      <!-- 1. the passage -->
+      <section id="step-setup" class="card">
+        <h2><span class="num">١</span> النص اللي بيقراه الطالب</h2>
+        <div class="row">
+          <label class="field grow">
+            <span>اسم الطالب (اختياري)</span>
+            <input id="student" type="text" maxlength="40" placeholder="مثلاً: مريم">
+          </label>
+          <label class="field">
+            <span>نصوص جاهزة</span>
+            <select id="samples" aria-label="نصوص جاهزة"><option value="">— اختر —</option></select>
+          </label>
+        </div>
+        <textarea id="passage" class="passage-input" rows="6" maxlength="3000" placeholder="اكتب أو الصق فقرة القراءة هنا…"></textarea>
+        <p id="passage-info" class="hint"></p>
+        <button id="go" class="btn primary big" type="button" disabled>ابدأ القراءة</button>
+      </section>
+
+      <!-- 2. reading -->
+      <section id="step-read" class="card" hidden>
+        <div class="read-head">
+          <h2><span class="num">٢</span> <span id="read-title">اقرأ النص بصوت واضح</span></h2>
+          <span id="clock" class="clock" aria-live="off">٠:٠٠</span>
+        </div>
+        <p id="passage-show" class="passage-show"></p>
+        <div class="rec-row">
+          <button id="rec" class="rec" type="button" aria-label="سجّل">
+            <span class="dot"></span><span id="rec-label">ابدأ التسجيل</span>
+          </button>
+          <div class="meter" aria-hidden="true"><span id="level"></span></div>
+          <button id="back" class="btn ghost" type="button">رجوع</button>
+        </div>
+        <p id="rec-hint" class="hint">اضغط «ابدأ التسجيل» وخل الطالب يقرأ، ثم اضغط «خلصت». (حد أقصى دقيقة)</p>
+      </section>
+
+      <!-- 3. result -->
+      <section id="step-result" class="card" hidden>
+        <h2><span class="num">٣</span> النتيجة <span id="res-name" class="res-name"></span></h2>
+        <div class="scores">
+          <div class="score main-score"><b id="res-acc">٠٪</b><span>دقة القراءة</span></div>
+          <div class="score"><b id="res-wpm">٠</b><span>كلمة في الدقيقة</span></div>
+          <div class="score"><b id="res-correct">٠/٠</b><span>كلمات صحيحة</span></div>
+          <div class="score"><b id="res-time">٠</b><span>ثانية</span></div>
+        </div>
+        <p id="res-verdict" class="verdict"></p>
+        <p id="res-words" class="passage-show marked" aria-label="النص مع الكلمات الصحيحة والخاطئة"></p>
+        <p class="legend"><span class="ok">كلمة صحيحة</span> <span class="bad">تحتاج تدريب</span></p>
+        <details class="heard"><summary>شو سمع خلفون؟</summary><p id="res-heard"></p></details>
+        <div class="row">
+          <button id="again" class="btn primary" type="button">نفس الطالب مرة ثانية</button>
+          <button id="next" class="btn ghost" type="button">طالب جديد</button>
+        </div>
+      </section>
+
+      <p id="error" class="error" hidden role="alert"></p>
+    </main>
+
+    <aside class="side">
+      <h2>السجل</h2>
+      <ul id="history" class="history"></ul>
+      <p id="history-empty" class="hint">ما فيه قراءات بعد.</p>
+      <button id="clear-history" class="btn ghost small" type="button" hidden>امسح السجل</button>
+    </aside>
+  </div>
+
+  <script type="module" src="reading.js"></script>
+</body>
+</html>
