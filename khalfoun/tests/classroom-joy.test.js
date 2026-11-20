@@ -352,3 +352,22 @@ test('every new situation has a reply, and the replies follow the template rules
     }
   }
 });
+
+test('a riddle guess that is also a word Khalfoun knows still counts as a guess', () => {
+  const { brain } = makeBrain();
+  brain.hear('لغز');
+  brain.riddle.index = RIDDLES.findIndex((r) => r.show === 'الساعة');
+  assert.equal(brain.hear('الساعه').situation, 'riddle_right');
+  brain.hear('لغز');
+  brain.riddle.index = RIDDLES.findIndex((r) => r.show === 'المشط');
+  assert.equal(brain.hear('الحاسبه').situation, 'riddle_wrong');
+  assert.equal(brain.hear('افتح الحاسبه').action.type, 'open_app');
+});
+
+test('the cloud brain may chain classroom commands: attendance then a star', () => {
+  const { brain } = withClass();
+  const first = brain.hear('غايب أحمد وبعدين نجمة للصف');
+  assert.equal(first.situation, 'attendance_absent');
+  assert.equal(first.more, true);
+  assert.equal(brain.continueQueue().situation, 'star_added');
+});

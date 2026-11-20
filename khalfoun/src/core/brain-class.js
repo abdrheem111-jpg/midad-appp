@@ -3,13 +3,14 @@
 // solving from the camera and the voice test. Kept apart from brain.js so each stays
 // readable; the brain calls these with itself as `b`.
 
-import { toArabicDigits } from './arabic.js';
+import { toArabicDigits, normalize } from './arabic.js';
 import { Attendance, dayKey, namesIn, toCsv } from './attendance.js';
 import {
   RIDDLES, checkRiddle, nextRiddle, CamelRace, TEAM_NAMES, crossedMilestones, nextMilestone, unlockedAt, wheelSpin,
 } from './classfun.js';
 
 const RIDDLE_TTL = 4 * 60000;
+const COMMAND_START = /^(?:يا خلفون |خلفون )?(?:افتح|فج|سكر|اقفل|شغل|دور|ابحث|اكتب|ذكرني|ارفع|وطي|اكتم|وقف|صور|اختار|اختر|لف|ابدا|قسم|اعط|عط|سجل|صدر|نجمه|احتفل|غايب|كم|شو|متى|وين|قول|تعال|روح|نام|ارقص|حل)(?:\s|$)/u;
 const EFFECT_NAMES = new Set(['confetti', 'fireworks', 'national', 'rain', 'snow', 'lanterns', 'balloons', 'stars', 'hearts', 'bubbles']);
 
 /** «أحمد ومريم وسالم» for a list of names. */
@@ -236,8 +237,11 @@ export function riddleTurn(b, r, raw, now) {
     b.emotions.feel('joke', now);
     return b.reply('riddle_answer', { vars: { answer: riddle.show } });
   }
-  // A command or a question is not a guess: leave the riddle and do it.
-  if (!['unknown', 'open_unknown', 'no', 'yes', 'dont_know'].includes(r.intent)) { b.riddle = null; return null; }
+  // A command is not a guess: leave the riddle and do it. A bare word that happens to be an
+  // app or a phrase («الساعه», «الكمبيوتر») is still a guess.
+  const guessable = ['unknown', 'open_unknown', 'no', 'yes', 'dont_know'].includes(r.intent);
+  const commandLike = COMMAND_START.test(normalize(raw)) || String(raw).trim().split(/\s+/).length > 4;
+  if (!guessable && commandLike) { b.riddle = null; return null; }
   rid.tries += 1;
   rid.at = now;
   if (rid.tries >= 3) {
