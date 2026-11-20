@@ -62,6 +62,7 @@ let classMode = false;
 let bubbleTimer = null;
 let typeTimer = null;
 let bubbleUntil = 0;
+let bubbleShownAt = -1e9; // his little chatter sounds follow a new bubble for a moment
 
 let framesThisSecond = 0; // drawing health, reported in the diagnostics log
 
@@ -87,6 +88,7 @@ function showBubble(text, mood, long = false) {
   reveal();
   typeTimer = setInterval(reveal, 30);
   setTimeout(() => { if (els.bubbleText.textContent !== full && !els.bubble.hidden && els.bubble.getAttribute('aria-label') === full) { clearInterval(typeTimer); els.bubbleText.textContent = full; } }, chars.length * 15 + 400);
+  bubbleShownAt = performance.now();
   if (!voiceOut.enabled) sounds.babble(full, mood);
   // Long answers (summaries, questions) stay up longer; a click on the bubble closes it.
   const ms = Math.min(long ? 60000 : 10000, 2200 + chars.length * 65);
@@ -214,7 +216,7 @@ async function startNoise() {
       else handle(brain.event('noise_loud', { level: e }));
     },
     // His own voice and his little sounds must not count as the class.
-    paused: () => voiceOut.speaking || performance.now() < bubbleUntil - 8000 || recorder.active,
+    paused: () => voiceOut.speaking || recorder.active || (sounds.enabled && performance.now() - bubbleShownAt < 2500),
     onClose: () => { brain.noiseOn = false; },
   });
   if (!ok) { brain.noiseOn = false; handle(brain.event('mic_error')); }
@@ -520,6 +522,8 @@ function hear(text, opts = {}) {
   const reply = brain.hear(t);
   bridge.note?.(`heard «${t}» → ${reply?.situation || 'nothing'}${reply?.action ? ` (action ${reply.action.type})` : ''}${reply?.awaitingConfirm ? ' (asks to confirm)' : ''}`);
   followUntil = Date.now() + 9000;
+  // A joke told to him: the cloud brain gets the joke and answers it; without it, he laughs.
+  if (reply?.situation === 'user_joke' && agentOn() && !opts.viaAgent && !chatting) { askAgent(t, reply, opts); return; }
   if (reply?.situation === 'not_understood' && reply.unknownText && !opts.viaAgent && !chatting) {
     // Claude first (fast and clever, with the person's key), then the local model.
     if (agentOn()) { askAgent(t, reply, opts); return; }
@@ -558,7 +562,10 @@ async function askAgent(text, fallback, opts = {}) {
       hear(res.commands.join(' وبعدين '), { viaAgent: true });
       return;
     }
-    if (res.say) handle(brain.chatReply(text, res.say));
+    if (res.say) {
+      handle(brain.chatReply(text, res.say));
+      if (fallback?.situation === 'user_joke') { animator.play('laugh'); sounds.effect('giggle'); }
+    }
   } catch {
     clearTimeout(thinking);
     handle(opts.quietIfUnknown ? null : fallback);
