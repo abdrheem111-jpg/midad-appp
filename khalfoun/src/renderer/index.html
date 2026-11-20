@@ -17,6 +17,8 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
   </div>
 
+  <div id="heard" class="heard" hidden role="status" aria-live="polite"></div>
+
   <div id="bubble" class="bubble" role="status" aria-live="polite" hidden>
     <p id="bubble-text"></p>
   </div>
@@ -101,6 +103,16 @@
       <label class="check"><input id="cl-use-brain" type="checkbox"> يفهم ويرد بالسحابة (Claude أو Gemini)</label>
       <label class="check"><input id="cl-use-voice" type="checkbox"> صوته من السحابة (Azure)</label>
     </section>
+    <section class="setup class-tools" aria-labelledby="ct-title">
+      <h3 id="ct-title">الصف</h3>
+      <p class="fine">نجوم الصف: <b id="ct-stars">٠</b> <span id="ct-next"></span></p>
+      <div class="setup-controls">
+        <button id="ct-voicetest" type="button" class="small-btn">🎤 اختبار السمع</button>
+        <button id="ct-guide" type="button" class="ghost">📖 دليل خلفون</button>
+        <button id="ct-reading" type="button" class="ghost">📚 اختبار القراءة</button>
+        <button id="ct-stars-reset" type="button" class="ghost">صفّر النجوم</button>
+      </div>
+    </section>
     <section class="setup" aria-labelledby="su-title">
       <h3 id="su-title">تجهيز خلفون</h3>
       <div class="setup-card" id="su-voice">
@@ -135,6 +147,15 @@
       <button id="st-forget" type="button" class="ghost">انسَ كل شي</button>
       <button id="st-quit" type="button" class="ghost danger">إغلاق خلفون</button>
     </div>
+  </section>
+
+  <section id="guide" class="panel guide" hidden aria-labelledby="gd-title">
+    <div class="panel-head">
+      <h2 id="gd-title">دليل خلفون</h2>
+      <button id="gd-close" type="button" class="icon-btn" aria-label="إغلاق">✕</button>
+    </div>
+    <p class="fine">قول «يا خلفون» وبعدها الأمر، أو اضغط على الأمر هنا وجربه بالكتابة.</p>
+    <div id="guide-list" class="guide-list"></div>
   </section>
 
   <script type="module" src="overlay.js"></script>

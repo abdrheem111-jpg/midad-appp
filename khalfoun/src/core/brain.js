@@ -121,7 +121,10 @@ export class Brain {
     if (occasion && this.memory.data.occasionSeen !== `${occasion.id}:${today}`) {
       this.memory.set({ occasionSeen: `${occasion.id}:${today}` });
       this.emotions.feel(occasion.id === 'friday' ? 'greet' : 'celebrate', now);
-      return this.reply(`occasion_${occasion.id}`, { costume: occasion.costume });
+      // The screen dresses up too: flags and fireworks on National Day, lanterns in Ramadan, balloons at Eid.
+      const effect = { national_day: 'national', ramadan: 'lanterns', eid_fitr: 'balloons', eid_adha: 'balloons', new_year: 'fireworks', hijri_new_year: 'stars' }[occasion.id];
+      const rep = this.reply(`occasion_${occasion.id}`, { costume: occasion.costume });
+      return effect ? { ...rep, effect } : rep;
     }
     if (days >= 2) {
       this.emotions.feel('return_after_days', now);

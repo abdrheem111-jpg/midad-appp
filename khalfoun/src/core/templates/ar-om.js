@@ -814,7 +814,7 @@ export const TEMPLATES = [
   { id: 'camn1', s: 'camera_no_cloud', t: 'قراءة الصور تحتاج مفتاح Gemini أو Claude من الإعدادات ← السرعة والذكاء.', a: 'think' },
   { id: 'camc1', s: 'camera_none', t: 'ما لقيت كاميرا في الجهاز، أو ما عندي إذن لها.', a: 'shrug' },
   { id: 'camf1', s: 'camera_failed', t: 'ما قدرت أقرا الصورة. قرّبها شوي وخل الإضاءة زينة وجرب مرة ثانية.', a: 'confused' },
-  { id: 'cams1', s: 'camera_solved', t: 'هذا الحل:', a: 'idea' },
+  { id: 'cams1', s: 'camera_solved', t: 'خلصت! الجواب قدامك في نافذة الكاميرا.', a: 'idea' },
   { id: 'camss1', s: 'camera_solved_saved', t: 'حليتها! الحل في دفتري، فتحته لك.', a: 'proud' },
 
   // ---------- voice test ----------
@@ -824,6 +824,8 @@ export const TEMPLATES = [
   { id: 'vtb1', s: 'voice_test_bad', t: 'فهمت {score}٪ بس. جرّب سماعة بمايك، أو فعّل Azure من الإعدادات.', a: 'sad' },
 
   // ---------- desktop life & jokes ----------
+  { id: 'gdo1', s: 'guide_open', t: 'هذا دليلي! كل اللي تقدر تقوله لي، مقسّم حسب الشغل.', a: 'point' },
+  { id: 'gdo2', s: 'guide_open', t: 'تفضل الدليل. اضغط على أي أمر وأنا أسويه.', a: 'read' },
   { id: 'wlk1', s: 'walk_windows', t: 'بتمشى فوق النوافذ! لا تحركها وأنا فوقها. 😅', a: 'tiptoe' },
   { id: 'wlk2', s: 'walk_windows', t: 'رحلة استكشاف فوق الشاشة!', a: 'look_around' },
   { id: 'ujk1', s: 'user_joke', t: 'هههههه! هذي حلوة والله! 😂', a: 'laugh' },

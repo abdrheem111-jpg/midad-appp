@@ -16,6 +16,10 @@ import { DesktopWatcher } from '../core/desktop.js';
 import { VoiceOut } from './voice-out.js';
 import { getBridge } from './bridge.js';
 import { SoundPlayer, ANIMATION_SOUND } from './sounds.js';
+import { Effects } from './effects.js';
+import { NameWheel, RaceBoard, NoiseGauge, CameraPanel, VoiceTestPanel } from './classroom-ui.js';
+import { GUIDE } from '../core/guide.js';
+import { STAR_MILESTONES as STAR_STEPS } from '../core/classfun.js';
 
 const CHAR_W = 170;
 const CHAR_H = 209;
@@ -45,6 +49,13 @@ const animator = new Animator();
 const motion = new Motion(workArea(), { width: CHAR_W, height: CHAR_H });
 const recorder = new Recorder();
 const sounds = new SoundPlayer({ enabled: false });
+// Classroom joy: screen effects, the name wheel, the camel race and the noise meter.
+const effects = new Effects(document.body);
+const wheel = new NameWheel(document.body);
+const raceBoard = new RaceBoard(document.body);
+const noise = new NoiseGauge(document.body);
+const CLASS_SCALE = 1.9; // «وضع الصف»: big enough for the back row on a projector
+let classMode = false;
 
 // ------------------------------------------------------------------ bubble
 
@@ -102,6 +113,15 @@ const recentSituations = []; // for automated checks
 
 function handle(reply) {
   if (!reply) return;
+  // The wheel spins first; the name is said when it stops.
+  if (reply.wheel) {
+    const spinning = reply.wheel;
+    animator.play('spin');
+    sounds.effect('giggle');
+    wheel.spin(spinning, { reduced: effects.reduced }).then(() => handle({ ...reply, wheel: null, effect: reply.effect || 'confetti' }));
+    lastReply = reply;
+    return;
+  }
   lastReply = reply;
   recentSituations.push(reply.situation);
   if (recentSituations.length > 20) recentSituations.shift();
@@ -150,10 +170,19 @@ function handle(reply) {
     case 'dictation_on': els.dictation.hidden = false; updateWake(); break;
     case 'dictation_off': els.dictation.hidden = true; updateWake(); break;
     case 'open_settings': openSettings(String(reply.situation || '').startsWith('setup_hint') ? 'setup' : null); break;
+    case 'voice_test': openVoiceTest(); break;
+    case 'walk_windows': walkTour(); break;
+    case 'guide': openGuide(); break;
     default:
       if (String(reply.behavior || '').startsWith('timer:')) startTimer(Number(reply.behavior.slice(6)));
       break;
   }
+  if (reply.effect) playEffect(reply.effect);
+  if (reply.race !== undefined) raceBoard.show(reply.race, () => { brain.race = null; });
+  if (reply.noise === true) startNoise();
+  else if (reply.noise === false) noise.stop();
+  if (reply.classMode !== undefined) setClassMode(reply.classMode);
+  if (reply.camera) { closeSettings(); closeCommand(); hideGuide(); voiceTest.close(); cameraPanel.show(reply.camera.mode); }
   if (reply.action) runAction(reply.action);
   if (reply.ask) runTask(reply.ask);
   if (reply.look) runLook(reply.look);
@@ -167,6 +196,129 @@ const voiceOut = new VoiceOut();
 // While he speaks, the always-on listener pauses so he does not hear himself.
 voiceOut.onStart = () => { if (wake.active) wake.pause(); };
 voiceOut.onEnd = () => { if (wake.active) wake.resume(); };
+
+// -------------------------------------------------------- classroom joy
+
+function playEffect(name) {
+  if (!effects.play(name)) return;
+  if (name === 'none') return;
+  if (name === 'fireworks' || name === 'national') { sounds.effect('gasp'); setTimeout(() => sounds.effect('sparkle'), 900); }
+  else if (name === 'confetti' || name === 'balloons') sounds.effect('yay');
+  else sounds.effect('sparkle');
+}
+
+async function startNoise() {
+  const ok = await noise.start({
+    onEvent: (e) => {
+      if (e === 'quiet') handle(brain.event('noise_quiet', {}));
+      else handle(brain.event('noise_loud', { level: e }));
+    },
+    // His own voice and his little sounds must not count as the class.
+    paused: () => voiceOut.speaking || performance.now() < bubbleUntil - 8000 || recorder.active,
+    onClose: () => { brain.noiseOn = false; },
+  });
+  if (!ok) { brain.noiseOn = false; handle(brain.event('mic_error')); }
+}
+
+/** «وضع الصف»: Khalfoun grows and stands in the middle where the whole class sees him. */
+function setClassMode(on) {
+  classMode = Boolean(on);
+  document.documentElement.classList.toggle('classmode', classMode);
+  clearTimeout(setClassMode.timer);
+  if (classMode) {
+    motion.come();
+    setClassMode.timer = setTimeout(() => { if (classMode) motion.stay(); }, 2600);
+  } else {
+    motion.free();
+  }
+}
+
+/** «تمشى»: a little tour on top of the open windows, then back to the floor. */
+function walkTour() {
+  clearInterval(walkTour.timer);
+  motion.free();
+  let steps = 0;
+  const go = () => {
+    steps += 1;
+    if (steps > 8 || motion.mode === 'drag') { clearInterval(walkTour.timer); if (motion.support) motion.climbDown(); return; }
+    if (steps % 3 === 0 && motion.support) motion.climbDown();
+    else if (!motion.climbUp()) motion.step((Math.random() < 0.5 ? -1 : 1) * (180 + Math.random() * 220));
+  };
+  go();
+  walkTour.timer = setInterval(go, 4200);
+}
+
+const cameraPanel = new CameraPanel({
+  solve: (image, mode) => (typeof bridge.camera === 'function' ? bridge.camera({ image, mode }) : Promise.resolve({ ok: false, error: 'no_cloud' })),
+  onResult: (res) => handle(brain.event('camera_result', res)),
+  onOpen: () => setInteractive(true),
+  onClose: () => {},
+});
+
+const voiceTest = new VoiceTestPanel({
+  record: () => recorder.record((level) => els.micLevel.style.setProperty('--level', String(1 + level * 0.6))),
+  transcribe: (wav) => bridge.transcribe(wav, 'command'),
+  recognize: (text) => recognize(text),
+  onDone: (score) => handle(brain.event('voice_test_done', { score })),
+  onOpen: () => setInteractive(true),
+  onClose: () => {},
+  note: (t) => bridge.note?.(t),
+});
+
+function openVoiceTest() {
+  closeSettings();
+  closeCommand();
+  hideGuide();
+  cameraPanel.close();
+  voiceOut.stop();
+  if (!voiceAvailable) { handle(brain.event('stt_unavailable')); return; }
+  voiceTest.show();
+}
+
+/** «الدليل»: every command, grouped; a click puts it in the command box to try or edit. */
+function openGuide() {
+  const box = $('guide-list');
+  if (!box.childElementCount) {
+    for (const group of GUIDE) {
+      const sec = document.createElement('section');
+      sec.className = 'guide-group';
+      const h = document.createElement('h3');
+      h.textContent = `${group.icon} ${group.title}`;
+      sec.append(h);
+      const ul = document.createElement('ul');
+      for (const [cmd, what] of group.items) {
+        const li = document.createElement('li');
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'guide-cmd';
+        b.textContent = `«${cmd}»`;
+        b.addEventListener('click', () => { hideGuide(); openCommand(); els.input.value = cmd; els.input.focus(); });
+        const sm = document.createElement('small');
+        sm.textContent = what;
+        li.append(b, sm);
+        ul.append(li);
+      }
+      sec.append(ul);
+      box.append(sec);
+    }
+  }
+  closeSettings();
+  cameraPanel.close();
+  voiceTest.close();
+  $('guide').hidden = false;
+  setInteractive(true);
+  stepAsideFrom($('guide'));
+}
+function hideGuide() { $('guide').hidden = true; }
+
+/** A small «سمعتك: ...» note under Khalfoun, so the person sees what was heard. */
+function showHeard(text, secs) {
+  const chip = $('heard');
+  chip.textContent = `سمعتك: «${text}»${secs ? ` · ${toArabicDigits(secs.toFixed(1))} ث` : ''}`;
+  chip.hidden = false;
+  clearTimeout(showHeard.timer);
+  showHeard.timer = setTimeout(() => { chip.hidden = true; }, 4500);
+}
 
 // ------------------------------------------------- living Khalfoun: desktop
 
@@ -484,12 +636,16 @@ async function listen() {
   if (els.command.hidden) openCommand();
   handle(brain.event('listening'));
   els.mic.classList.add('recording');
+  sounds.cue('start');
   try {
     const { wav, spoke } = await recorder.record((level) => els.micLevel.style.setProperty('--level', String(1 + level * 0.6)));
     els.mic.classList.remove('recording');
+    sounds.cue('stop');
     if (!spoke) { bridge.note?.(`mic: no speech detected (${wav?.length || 0} bytes recorded)`); handle(brain.event('stt_empty')); return; }
     showBubble('…', 'focused');
+    const t0 = performance.now();
     const res = await bridge.transcribe(wav, 'command');
+    if (res?.ok && res.text) showHeard(res.text, (performance.now() - t0) / 1000);
     if (!res?.ok) { handle(brain.event(res?.error === 'stt_unavailable' ? 'stt_unavailable' : /^stt_failed/.test(res?.error || '') ? 'stt_failed' : 'stt_empty')); return; }
     if (!res.text) { bridge.note?.('mic: speech recorded but whisper heard no words'); handle(brain.event('stt_empty')); return; }
     els.input.value = res.text;
@@ -597,12 +753,12 @@ function setInteractive(on) {
   bridge.setInteractive(on);
 }
 
-const panelsOpen = () => !els.onboarding.hidden || !els.settings.hidden;
+const panelsOpen = () => !els.onboarding.hidden || !els.settings.hidden || !$('guide').hidden || cameraPanel.open || voiceTest.open;
 
 let lastMouseX = null;
 document.addEventListener('mousemove', (e) => {
   lastMouseX = e.clientX;
-  const over = e.target instanceof Element && e.target.closest('.stage, .bubble, .command, .panel');
+  const over = e.target instanceof Element && e.target.closest('.stage, .bubble, .command, .panel, .fx-ui');
   setInteractive(Boolean(over) || panelsOpen() || !els.command.hidden && document.activeElement === els.input);
   if (motion.mode !== 'drag') {
     const hx = motion.x + CHAR_W / 2;
@@ -657,10 +813,14 @@ els.stage.addEventListener('pointercancel', endPress);
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (!els.settings.hidden) closeSettings();
+    if (cameraPanel.open) cameraPanel.close();
+    else if (voiceTest.open) voiceTest.close();
+    else if (!$('guide').hidden) hideGuide();
+    else if (!els.settings.hidden) closeSettings();
     else closeCommand();
   }
 });
+$('gd-close').addEventListener('click', hideGuide);
 
 // -------------------------------------------------------------- onboarding
 
@@ -754,7 +914,9 @@ function openSettings(focus = null) {
   refreshSetup().then(() => { if (focus === 'setup') $('su-title').scrollIntoView({ block: 'start', behavior: 'smooth' }); });
   renderLog();
   renderAliases();
+  renderClassTools();
   closeCommand();
+  hideGuide();
   els.settings.hidden = false;
   setInteractive(true);
   stepAsideFrom(els.settings);
@@ -989,31 +1151,53 @@ $('st-forget').addEventListener('click', () => {
   }
 });
 $('st-quit').addEventListener('click', () => bridge.quit());
+$('ct-voicetest').addEventListener('click', () => openVoiceTest());
+$('ct-guide').addEventListener('click', () => openGuide());
+$('ct-reading').addEventListener('click', () => { closeSettings(); handle(brain.hear('افتح اختبار القراءة')); });
+$('ct-stars-reset').addEventListener('click', () => {
+  // eslint-disable-next-line no-alert
+  if (window.confirm('أصفّر نجوم الصف؟')) { brain.memory.set({ classStars: 0 }); renderClassTools(); }
+});
+
+function renderClassTools() {
+  const stars = Number(brain.memory.data.classStars) || 0;
+  $('ct-stars').textContent = toArabicDigits(stars);
+  const next = STAR_STEPS.find((m) => m.at > stars);
+  $('ct-next').textContent = next ? `(باقي ${toArabicDigits(next.at - stars)} على ${next.label})` : '(كل الجوايز مفتوحة)';
+}
 
 // ------------------------------------------------------------------ layout
 
 function layout() {
   const x = motion.x;
   const y = motion.y;
-  els.stage.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+  els.stage.style.transform = classMode
+    ? `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${CLASS_SCALE})`
+    : `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+  const headY = classMode ? y - CHAR_H * (CLASS_SCALE - 1) : y;
+  const heard = $('heard');
+  if (!heard.hidden) {
+    const w = heard.offsetWidth;
+    heard.style.transform = `translate(${Math.min(Math.max(4, x + CHAR_W / 2 - w / 2), window.innerWidth - w - 4).toFixed(1)}px, ${Math.min(window.innerHeight - 30, y + CHAR_H + 2).toFixed(1)}px)`;
+  }
   const cx = x + CHAR_W / 2;
   if (!els.ear.hidden) els.ear.style.transform = `translate(${(x + 6).toFixed(1)}px, ${(y + 100).toFixed(1)}px)`;
   if (!els.dictation.hidden) {
     const w = els.dictation.offsetWidth;
     els.dictation.style.transform = `translate(${Math.min(Math.max(4, x + CHAR_W / 2 - w / 2), window.innerWidth - w - 4).toFixed(1)}px, ${(y + CHAR_H - 28).toFixed(1)}px)`;
   }
-  let top = y + 4;
+  let top = headY + 4;
   if (!els.command.hidden) {
     const w = els.command.offsetWidth;
     const left = Math.min(Math.max(8, cx - w / 2), window.innerWidth - w - 8);
-    top = Math.max(8, y - els.command.offsetHeight + 6);
+    top = Math.max(8, headY - els.command.offsetHeight + 6);
     els.command.style.transform = `translate(${left.toFixed(1)}px, ${top.toFixed(1)}px)`;
   }
   if (!els.bubble.hidden) {
     const w = els.bubble.offsetWidth;
     const h = els.bubble.offsetHeight;
     // Keep clear of an open panel: the bubble stays on Khalfoun's side of it.
-    const panel = !els.onboarding.hidden ? els.onboarding : !els.settings.hidden ? els.settings : null;
+    const panel = !els.onboarding.hidden ? els.onboarding : !els.settings.hidden ? els.settings : !$('guide').hidden ? $('guide') : null;
     let maxRight = window.innerWidth - 8;
     if (panel) {
       const r = panel.getBoundingClientRect();
@@ -1157,7 +1341,7 @@ async function start() {
   else handle(brain.start());
 
   // Hooks for automated UI tests and debugging.
-  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut };
+  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut };
   document.documentElement.dataset.ready = '1';
 }
 

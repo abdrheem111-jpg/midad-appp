@@ -74,6 +74,7 @@ let whisper = { available: false, bin: null, model: null, wakeModel: null };
 let watcher = null;
 let chat = null; // ChatClient when a local model is found
 let chatInfo = null;
+let downloadsDirForSmoke = ''; // the smoke test's own Downloads/Documents folder
 let visionModel = null; // a local model that understands images (gemma3, qwen2.5vl, llava...)
 let voiceDirs = [];
 let diag = { write() {} }; // DiagLog once the profile folder is known
@@ -1053,8 +1054,41 @@ async function runSmokeTest(stores) {
       const summary = await toolJs('notebook', "document.getElementById('result-body').textContent");
       step('offline summary works without a model', /الكسور|العشري/.test(summary), { summary: summary.slice(0, 80) });
     }
+    // Khalfoun X: the camera solve lands in the notebook, the reading window, and the attendance sheet.
+    if (nbReady) {
+      await addNotebookNote(stores.notebook, 'حل من الكاميرا (فحص)', 'السؤال: ٢+٣\nالجواب: ٥');
+      const merged = await waitTool('notebook', "[...document.querySelectorAll('#notes .note-title')].some((n) => /حل من الكاميرا/.test(n.textContent))", 6000);
+      const onDisk = await stores.notebook.read();
+      step('a camera answer appears in the open notebook and is kept with the old note', merged && onDisk.notes?.length === 2, { notes: onDisk.notes?.length });
+    }
+    const badCam = await js("window.khalfoun.camera({ image: 'not an image', mode: 'solve' })");
+    step('the camera IPC refuses a bad image', badCam && badCam.ok === false && badCam.error === 'bad_image', badCam);
+    const noCloud = await js(`window.khalfoun.camera({ image: '${'A'.repeat(400)}', mode: 'solve' })`);
+    step('the camera IPC says when no cloud brain is set', noCloud && noCloud.ok === false && ['no_cloud', 'bad_key', 'offline', 'timeout'].includes(noCloud.error), noCloud);
+    const rdSaid = await hear('افتح اختبار القراءة');
+    const rdReady = await waitTool('reading', 'window.__readingReady === true');
+    step('«افتح اختبار القراءة» opens the reading window', rdReady, { said: rdSaid });
+    if (rdReady) {
+      const info = await toolJs('reading', 'window.readingHost.info()');
+      step('the reading window can ask what hearing is ready', info && typeof info.cloud === 'boolean', info);
+      const tooSmall = await toolJs('reading', 'window.readingHost.transcribe(new Uint8Array(10))');
+      step('the reading IPC refuses a recording that is too short', tooSmall && tooSmall.ok === false && tooSmall.error === 'bad_audio', tooSmall);
+      const blocked = await js("typeof window.readingHost === 'undefined'");
+      step('the overlay page has no reading bridge', blocked);
+    }
+    await hear('أسماء الطلاب: أحمد، مريم، سالم');
+    await hear('غايب أحمد ومريم');
+    const sheetSaid = await hear('صدر كشف الغياب');
+    let sheet = '';
+    for (let i = 0; i < 20 && !sheet; i += 1) {
+      await new Promise((r) => setTimeout(r, 200));
+      const d = new Date();
+      const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      sheet = await readFile(join(downloadsDirForSmoke, 'خلفون', `الغياب ${day}.csv`), 'utf8').catch(() => '');
+    }
+    step('«صدر كشف الغياب» writes a spreadsheet Excel can read', sheet.startsWith('\uFEFF') && /أحمد,غائب/.test(sheet) && /سالم,حاضر/.test(sheet), { said: sheetSaid, head: sheet.slice(0, 60) });
     if (process.env.KHALFOUN_SMOKE_TOOLSHOTS) {
-      for (const tool of ['board', 'notebook']) {
+      for (const tool of ['board', 'notebook', 'reading']) {
         if (!toolWindows[tool]) continue;
         const img = await toolWindows[tool].webContents.capturePage();
         await writeFile(join(process.env.KHALFOUN_SMOKE_TOOLSHOTS, `${tool}.png`), img.toPNG());
@@ -1062,6 +1096,7 @@ async function runSmokeTest(stores) {
     }
     closeTool('board');
     closeTool('notebook');
+    closeTool('reading');
     if (process.env.KHALFOUN_SMOKE_SHOT) {
       await hear('قول نكتة');
       await new Promise((r) => setTimeout(r, 1800));
@@ -1097,6 +1132,7 @@ async function start() {
   let downloadsDir = app.getPath('downloads');
   if (SMOKE) {
     downloadsDir = await mkdtemp(join(tmpdir(), 'khalfoun-dl-'));
+    downloadsDirForSmoke = downloadsDir;
     await mkdir(downloadsDir, { recursive: true });
     for (const f of ['صورة.jpg', 'اغنية.mp3', 'ملف.unknown']) await writeFile(join(downloadsDir, f), 'x');
     const { default: lib } = await import('pdf-lib');

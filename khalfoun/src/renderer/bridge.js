@@ -149,6 +149,11 @@ function createPreviewBridge() {
       return queue.length ? { ok: true, ms: 150, ...queue.shift() } : { ok: false, error: 'timeout' };
     },
     async speak() { return { ok: false, error: 'not_configured' }; },
+    async camera(payload) {
+      chatCalls.push({ camera: payload.mode, bytes: payload.image.length });
+      await new Promise((r) => setTimeout(r, 200));
+      return window.__fakeCamera || { ok: false, error: 'no_cloud' };
+    },
     cloud: {
       async status() { return { claude: fakeAgent, azure: false, azureRegion: '', use: { hear: true, brain: true, voice: true }, encryption: true }; },
       async set(patch) { return { ok: true, status: { claude: fakeAgent || Boolean(patch?.claudeKey), azure: Boolean(patch?.azureKey), azureRegion: patch?.azureRegion || '', use: { hear: true, brain: true, voice: true }, encryption: true } }; },

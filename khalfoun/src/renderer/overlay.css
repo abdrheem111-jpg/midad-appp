@@ -386,3 +386,110 @@ html.preview body {
 @media (prefers-reduced-motion: reduce) {
   .bubble, .ear::after { animation: none; }
 }
+
+/* ------------------------------------------------------------ Khalfoun X: classroom joy */
+
+/* Screen effects: one canvas over the desktop; clicks pass through. */
+.fx-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 3; pointer-events: none; display: none; }
+.fx-canvas.on { display: block; }
+
+/* «سمعتك: ...» under Khalfoun after push-to-talk. */
+.heard {
+  position: absolute; left: 0; top: 0; z-index: 6;
+  max-width: 360px; padding: 4px 12px; border-radius: 999px;
+  background: rgba(255, 253, 247, 0.96); border: 1.5px solid var(--accent); color: var(--ink);
+  font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  box-shadow: 0 4px 12px rgba(42, 26, 16, 0.15); unicode-bidi: plaintext;
+}
+
+/* «وضع الصف»: Khalfoun grows from his feet; the bubble grows with him. */
+.classmode .stage { transform-origin: 50% 100%; }
+.classmode .bubble { max-width: 620px; font-size: 30px; padding: 16px 24px; border-width: 3px; }
+.classmode .heard { font-size: 20px; max-width: 640px; }
+
+/* The name wheel. */
+.wheel-box {
+  position: fixed; z-index: 9; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(460px, 80vmin); display: grid; justify-items: center; gap: 10px; cursor: pointer;
+  filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.3));
+}
+.wheel-svg { width: 100%; height: auto; overflow: visible; }
+.wheel-disc { transform-origin: 0 0; }
+.wheel-name { fill: #fff; font-family: 'Tajawal', 'Segoe UI', sans-serif; font-weight: 700; text-anchor: middle; dominant-baseline: middle; paint-order: stroke; stroke: rgba(0, 0, 0, 0.35); stroke-width: 3px; }
+.wheel-label {
+  min-width: 180px; padding: 8px 26px; border-radius: 999px; background: var(--paper); border: 3px solid var(--ink);
+  font-size: 34px; font-weight: 700; text-align: center; box-shadow: var(--shadow);
+}
+.wheel-box.done .wheel-label { animation: winner 0.9s ease-in-out 3; border-color: var(--gold); }
+@keyframes winner { 50% { transform: scale(1.15); } }
+
+/* The camel race. */
+.race-board {
+  position: fixed; z-index: 8; top: 12px; left: 50%; transform: translateX(-50%);
+  width: min(880px, calc(100vw - 24px)); padding: 10px 16px 12px; border-radius: 20px;
+  background: linear-gradient(#fff7e6, #f6e3bd); border: 3px solid #7a4e1d; box-shadow: var(--shadow);
+}
+.race-head { display: flex; justify-content: space-between; align-items: center; font-size: 20px; margin-bottom: 6px; }
+.race-close { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--ink); background: var(--paper); font: inherit; font-size: 18px; line-height: 1; cursor: pointer; color: var(--ink); }
+.race-lane { display: grid; grid-template-columns: 110px 1fr 40px; align-items: center; gap: 10px; margin: 6px 0; }
+.race-team { font-weight: 700; font-size: 16px; color: hsl(var(--hue), 55%, 32%); }
+.race-track { position: relative; height: 42px; border-radius: 12px; background: repeating-linear-gradient(90deg, #e9c98f 0 26px, #e2bd7c 26px 52px); border: 2px solid #b98a45; overflow: visible; }
+.race-camel { position: absolute; inset-inline-start: 0; top: -6px; font-size: 40px; line-height: 1; transition: inset-inline-start 0.9s cubic-bezier(0.3, 1.4, 0.5, 1); transform: scaleX(1); }
+.race-camel.hop { animation: camel-hop 0.9s ease-out; }
+@keyframes camel-hop { 30% { translate: 0 -12px; } 60% { translate: 0 0; } }
+.race-finish { position: absolute; inset-inline-end: 4px; top: 4px; font-size: 26px; }
+.race-score { font-size: 22px; font-weight: 700; text-align: center; }
+.race-lane.winner .race-track { box-shadow: 0 0 0 4px var(--gold); }
+.race-lane.winner .race-team::after { content: ' 🏆'; }
+
+/* The noise meter. */
+.noise-box {
+  position: fixed; z-index: 8; top: 90px; inset-inline-end: 18px; width: 120px; padding: 12px 10px;
+  display: grid; justify-items: center; gap: 8px; border-radius: 20px; background: var(--paper); border: 3px solid var(--ink); box-shadow: var(--shadow);
+}
+.noise-box .race-close { position: absolute; top: 6px; inset-inline-start: 6px; width: 24px; height: 24px; font-size: 14px; }
+.noise-face { font-size: 44px; line-height: 1; }
+.noise-bar { position: relative; width: 34px; height: 170px; border-radius: 18px; background: linear-gradient(to top, #43aa8b 0 35%, #e9c46a 35% 65%, #e76f51 65% 100%); opacity: 0.25; overflow: hidden; }
+.noise-fill { position: absolute; bottom: 0; left: 0; right: 0; height: 0; background: linear-gradient(to top, #43aa8b, #e9c46a 60%, #e63946); transition: height 0.12s linear; }
+.noise-box .noise-bar { opacity: 1; background: #efe7d6; }
+.noise-label { font-size: 12px; text-align: center; line-height: 1.4; color: var(--ink-soft); font-weight: 700; }
+.noise-quiet { width: 46px; height: 46px; border-radius: 50%; background: conic-gradient(var(--gold) calc(var(--p, 0) * 360deg), #efe7d6 0); position: relative; }
+.noise-quiet::after { content: '⭐'; position: absolute; inset: 6px; display: grid; place-items: center; border-radius: 50%; background: var(--paper); font-size: 18px; }
+.noise-box[data-state='loud'] { border-color: #e9a23b; }
+.noise-box[data-state='very'] { border-color: var(--red); animation: timer-shake 0.4s linear infinite; }
+@keyframes timer-shake { 25% { translate: -2px 0; } 75% { translate: 2px 0; } }
+
+/* Camera and voice test panels. */
+.camera-panel { width: min(720px, calc(100vw - 32px)); }
+.camera-video, .camera-still { width: 100%; max-height: 52vh; border-radius: 14px; background: #1d1d1d; object-fit: contain; display: block; margin: 12px 0; }
+.camera-status { color: var(--ink-soft); margin: 6px 0; font-weight: 700; }
+.camera-answer { white-space: pre-wrap; line-height: 1.8; font-size: 18px; background: #fff; border: 2px solid var(--line); border-radius: 14px; padding: 12px 16px; max-height: 34vh; overflow: auto; unicode-bidi: plaintext; }
+.camera-panel.busy .camera-status::after { content: ' ⏳'; }
+.camera-panel .row, .voice-test .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.camera-panel button, .voice-test button { font: inherit; font-weight: 700; padding: 9px 18px; border-radius: 999px; border: 2px solid var(--ink); background: var(--paper); color: var(--ink); cursor: pointer; }
+.camera-panel button.primary, .voice-test button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.camera-panel button:disabled, .voice-test button:disabled { opacity: 0.5; cursor: progress; }
+.voice-test { width: min(560px, calc(100vw - 32px)); }
+.vt-count { margin: 4px 0; color: var(--ink-soft); font-weight: 700; }
+.vt-phrase { font-size: 30px; font-weight: 700; text-align: center; margin: 14px 0 6px; }
+.vt-heard { text-align: center; min-height: 24px; color: var(--ink-soft); }
+.vt-list { margin: 12px 0 0; padding-inline-start: 22px; display: grid; gap: 4px; font-size: 15px; }
+.vt-list .ok { color: var(--accent); }
+.vt-list .bad { color: var(--red); }
+.vt-list .skip { color: var(--ink-soft); }
+
+/* The guide. */
+.guide { width: min(640px, calc(100vw - 32px)); }
+.guide-list { display: grid; gap: 4px; }
+.guide-group h3 { margin: 14px 0 6px; }
+.guide-group ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.guide-group li { display: grid; gap: 2px; }
+.guide-cmd { justify-self: start; font: inherit; font-weight: 700; font-size: 16px; padding: 4px 12px; border-radius: 10px; border: 1.5px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; text-align: start; }
+.guide-cmd:hover, .guide-cmd:focus-visible { border-color: var(--accent); background: var(--accent-soft); outline: none; }
+.guide-group small { color: var(--ink-soft); font-size: 13px; padding-inline-start: 8px; }
+.class-tools .setup-controls { flex-wrap: wrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  .race-camel, .noise-fill { transition: none; }
+  .wheel-box.done .wheel-label, .noise-box[data-state='very'], .race-camel.hop { animation: none; }
+}

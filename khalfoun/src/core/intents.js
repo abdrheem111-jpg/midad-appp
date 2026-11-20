@@ -311,7 +311,7 @@ const THEN = new Set(N(['وبعدين', 'بعدين', 'وبعدها', 'بعده�
 const SPLIT_INTENTS = new Set(['open', 'close', 'search', 'type_text', 'pdf_write', 'volume', 'reminder', 'screenshot', 'time', 'date',
   'joke', 'dance', 'jump', 'come', 'away', 'sleep', 'organize_downloads', 'cancel_reminders', 'quiz', 'sounds',
   'timer', 'open_tool', 'close_tool', 'pick_student', 'wheel', 'celebrate', 'effect', 'effect_stop', 'noise', 'class_mode', 'race_start', 'riddle',
-  'class_star', 'attendance_today', 'speak', 'points_board', 'schedule_today', 'schedule_next']);
+  'class_star', 'attendance_today', 'guide', 'speak', 'points_board', 'schedule_today', 'schedule_next']);
 const LEAD_VERBS = new Set(N(['افتح', 'فج', 'شغل', 'سكر', 'اقفل', 'طفي', 'دور', 'ابحث', 'اكتب', 'ذكرني', 'ارفع', 'وطي', 'نزل', 'اكتم', 'رتب', 'صور', 'قول', 'ارقص', 'تعال', 'روح', 'اختار', 'اختر', 'لف', 'احتفل', 'سو', 'سوي', 'ابدا', 'حط']));
 
 /**

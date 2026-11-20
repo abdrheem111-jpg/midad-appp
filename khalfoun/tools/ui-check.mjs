@@ -634,6 +634,196 @@ await check('the brain is pulled through Ollama, and a download can be stopped',
   await spage.screenshot({ path: `${outDir}/12-setup-ready.png` });
 });
 
+// ------------------------------------------------------------------ Khalfoun X: classroom joy
+const xpage = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+xpage.on('pageerror', (e) => problems.push(`X page error: ${e.message}`));
+xpage.on('console', (m) => { if (m.type() === 'error') problems.push(`X console: ${m.text()}`); });
+await xpage.goto(`${base}?fakevoice=1`);
+await xpage.evaluate(() => {
+  localStorage.setItem('khalfoun.settings', JSON.stringify({ onboarded: true, level: 3, kidsMode: false }));
+  localStorage.setItem('khalfoun.memory', JSON.stringify({ name: 'عبدالرحيم', humor: 1, classroom: { students: ['أحمد', 'مريم', 'سالم', 'فاطمة', 'خالد', 'نورة'], points: {}, picked: [] } }));
+});
+await xpage.reload();
+await xpage.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 15000 });
+const xbubble = () => xpage.locator('#bubble-text').textContent();
+const xhear = async (t, wait = 600) => { await xpage.evaluate((s) => window.__khalfoun.hear(s), t); await xpage.waitForTimeout(wait); };
+
+await check('X: «احتفل» covers the screen with confetti and the canvas lets clicks through', async () => {
+  await xhear('احتفل', 1200);
+  const st = await xpage.evaluate(() => ({ on: document.querySelector('.fx-canvas').classList.contains('on'), parts: window.__khalfoun.effects.parts.length, pe: getComputedStyle(document.querySelector('.fx-canvas')).pointerEvents }));
+  assert(st.on && st.parts > 50, JSON.stringify(st));
+  assert(st.pe === 'none', st.pe);
+  await xpage.screenshot({ path: `${outDir}/x1-confetti.png` });
+});
+
+await check('X: National Day flags and fireworks, then «شيل الزينة» clears the screen', async () => {
+  await xhear('زينة العيد الوطني', 2600);
+  const flags = await xpage.evaluate(() => window.__khalfoun.effects.parts.filter((p) => p.kind === 'flag').length);
+  assert(flags === 7, `flags: ${flags}`);
+  await xpage.screenshot({ path: `${outDir}/x2-national.png` });
+  await xhear('شيل الزينة', 400);
+  assert(await xpage.evaluate(() => !document.querySelector('.fx-canvas').classList.contains('on')), 'effects still on');
+});
+
+await check('X: every effect starts and draws without errors', async () => {
+  for (const name of ['fireworks', 'rain', 'snow', 'lanterns', 'balloons', 'stars', 'hearts', 'bubbles']) {
+    const ok = await xpage.evaluate((n) => window.__khalfoun.effects.play(n), name);
+    assert(ok, name);
+    await xpage.waitForTimeout(700);
+    if (name === 'lanterns') await xpage.screenshot({ path: `${outDir}/x3-lanterns.png` });
+  }
+  await xpage.evaluate(() => window.__khalfoun.effects.stop());
+});
+
+await check('X: the name wheel spins and names the student only when it stops', async () => {
+  await xhear('لف العجلة', 300);
+  assert(await xpage.locator('.wheel-box').isVisible(), 'no wheel');
+  const early = await xpage.evaluate(() => document.getElementById('bubble').hidden || !/العجلة|الدور|الحظ/.test(document.getElementById('bubble-text').textContent));
+  assert(early, 'name said before the wheel stopped');
+  await xpage.waitForTimeout(2600);
+  await xpage.screenshot({ path: `${outDir}/x4-wheel-spinning.png` });
+  await xpage.waitForTimeout(3400);
+  const label = await xpage.locator('.wheel-label').textContent();
+  const said = await xbubble();
+  assert(said.includes(label), `wheel ${label} vs bubble ${said}`);
+  await xpage.screenshot({ path: `${outDir}/x5-wheel-done.png` });
+  // The slice under the pointer is the chosen name.
+  const under = await xpage.evaluate(() => {
+    const disc = document.querySelector('.wheel-disc');
+    const m = /rotate\(([-\d.]+)deg\)/.exec(disc.style.transform);
+    const names = [...disc.querySelectorAll('.wheel-name')].map((t) => t.textContent);
+    const deg = ((360 - (Number(m[1]) % 360)) % 360);
+    return names[Math.floor(deg / (360 / names.length))];
+  });
+  assert(under === label, `pointer at ${under}, label ${label}`);
+  await xpage.click('.wheel-box');
+});
+
+await check('X: the camel race board moves the right camel and crowns the winner', async () => {
+  await xhear('ابدأ سباق الهجن', 500);
+  assert(await xpage.locator('.race-board').isVisible(), 'no race board');
+  await xhear('نقطة للفريق الثاني', 300);
+  await xhear('نقطة للفريق الثاني', 300);
+  const scores = await xpage.locator('.race-score').allTextContents();
+  assert(scores.join(',') === '٠,٢', scores.join(','));
+  await xpage.waitForTimeout(900);
+  await xpage.screenshot({ path: `${outDir}/x6-race.png` });
+  for (let i = 0; i < 8; i += 1) await xpage.evaluate(() => window.__khalfoun.hear('نقطة للفريق الثاني'));
+  await xpage.waitForTimeout(800);
+  assert(await xpage.locator('.race-lane.winner').count() === 1, 'no winner lane');
+  assert(/فاز|أبطال/.test(await xbubble()), await xbubble());
+  await xpage.click('.race-board .race-close');
+  assert(await xpage.locator('.race-board').count() === 0, 'race board still there');
+  await xpage.evaluate(() => window.__khalfoun.effects.stop());
+});
+
+await check('X: «وضع الصف» makes Khalfoun big and the bubble bigger, «صغر نفسك» undoes it', async () => {
+  await xhear('وضع الصف', 3000);
+  const big = await xpage.evaluate(() => ({ cls: document.documentElement.classList.contains('classmode'), tf: document.getElementById('stage').style.transform, h: document.getElementById('stage').getBoundingClientRect().height }));
+  assert(big.cls && /scale\(1\.9\)/.test(big.tf) && big.h > 350, JSON.stringify(big));
+  await xpage.screenshot({ path: `${outDir}/x7-classmode.png` });
+  await xhear('صغر نفسك', 500);
+  assert(await xpage.evaluate(() => !document.documentElement.classList.contains('classmode')), 'still class mode');
+});
+
+await check('X: the guide lists the commands and a click puts one in the command box', async () => {
+  await xhear('الدليل', 500);
+  assert(await xpage.locator('#guide').isVisible(), 'guide hidden');
+  const n = await xpage.locator('.guide-cmd').count();
+  assert(n > 30, `only ${n} commands`);
+  await xpage.screenshot({ path: `${outDir}/x8-guide.png` });
+  await xpage.locator('.guide-cmd', { hasText: 'لف العجلة' }).click();
+  assert(await xpage.locator('#guide').isHidden(), 'guide still open');
+  assert((await xpage.inputValue('#command-input')) === 'لف العجلة', await xpage.inputValue('#command-input'));
+  await xpage.keyboard.press('Escape');
+});
+
+await check('X: «حل من الكاميرا» opens the camera, sends a photo, shows the answer', async () => {
+  await xpage.evaluate(() => { window.__fakeCamera = { ok: true, text: 'السؤال: ٢ + ٣\nالحل:\n١. نجمع ٢ و ٣\nالجواب: ٥', saved: true }; });
+  await xhear('حل من الكاميرا', 1800);
+  assert(await xpage.locator('.camera-panel').isVisible(), 'no camera panel');
+  await untilOn(xpage, () => document.querySelector('.camera-video')?.videoWidth > 0, 8000);
+  await xpage.click('.camera-panel button.primary');
+  await untilOn(xpage, () => document.querySelector('.camera-answer') && !document.querySelector('.camera-answer').hidden, 5000);
+  assert(/الجواب: ٥/.test(await xpage.locator('.camera-answer').textContent()), 'no answer');
+  const sent = await xpage.evaluate(() => window.__khalfoun.bridge._chatCalls.find((c) => c.camera));
+  assert(sent && sent.bytes > 1000, JSON.stringify(sent));
+  await xpage.waitForTimeout(1200);
+  assert(/دفتر/.test(await xbubble()), await xbubble());
+  await xpage.screenshot({ path: `${outDir}/x9-camera.png` });
+  await xpage.keyboard.press('Escape');
+  assert(await xpage.locator('.camera-panel').count() === 0, 'camera panel still open');
+  // The camera is released.
+  assert(await xpage.evaluate(() => !window.__khalfoun.cameraPanel.stream), 'camera still on');
+});
+
+await check('X: the voice test runs sentence by sentence and scores what was understood', async () => {
+  await xpage.evaluate(() => { window.__fakeTranscripts = ['افتح الحاسبة', 'ارفع الصوت', 'شي ثاني']; });
+  await xhear('اختبر السمع', 600);
+  assert(await xpage.locator('.voice-test').isVisible(), 'no voice test');
+  for (let i = 0; i < 3; i += 1) {
+    await xpage.click('.voice-test button.primary');
+    await untilOn(xpage, new Function(`return document.querySelectorAll('.vt-list li').length >= ${i + 1}`), 20000);
+  }
+  const items = await xpage.locator('.vt-list li').allTextContents();
+  assert(items[0].startsWith('✓') && items[1].startsWith('✓') && items[2].startsWith('✗'), items.join(' | '));
+  for (let i = 3; i < 12; i += 1) await xpage.click('.voice-test button:has-text("تخطّ")');
+  await xpage.waitForTimeout(400);
+  assert(/فهمت ٦٧٪/.test(await xpage.locator('.vt-phrase').textContent()), await xpage.locator('.vt-phrase').textContent());
+  await xpage.screenshot({ path: `${outDir}/x10-voicetest.png` });
+  await xpage.keyboard.press('Escape');
+});
+
+await check('X: push-to-talk beeps and shows «سمعتك» with what was heard', async () => {
+  await xpage.evaluate(() => { window.__fakeTranscripts = ['كم الساعة']; window.__khalfoun.sounds.setEnabled(true); window.__khalfoun.sounds.played = 0; });
+  await xpage.click('#stage', { position: { x: 85, y: 100 } }).catch(() => {});
+  await xpage.evaluate(() => document.getElementById('mic').click());
+  await untilOn(xpage, () => !document.getElementById('heard').hidden, 20000);
+  assert(/سمعتك: «كم الساعة»/.test(await xpage.locator('#heard').textContent()), await xpage.locator('#heard').textContent());
+  assert(await xpage.evaluate(() => window.__khalfoun.sounds.played) >= 4, 'no beeps');
+});
+
+await check('X: the noise meter listens, shows a gauge and stops', async () => {
+  await xhear('مقياس الهدوء', 1500);
+  assert(await xpage.locator('.noise-box').isVisible(), 'no meter');
+  assert(await xpage.evaluate(() => window.__khalfoun.noise.active), 'meter not active');
+  await xpage.screenshot({ path: `${outDir}/x11-noise.png` });
+  await xhear('وقف مقياس الهدوء', 300);
+  assert(await xpage.locator('.noise-box').count() === 0, 'meter still shown');
+});
+
+await check('X: attendance by voice and the day list', async () => {
+  await xhear('غايب أحمد ومريم', 400);
+  assert(/أحمد/.test(await xbubble()) && /مريم/.test(await xbubble()), await xbubble());
+  await xhear('منو غايب اليوم', 400);
+  assert(/الغياب \(٢\)/.test(await xbubble()), await xbubble());
+});
+
+// The reading-aloud window (its own page).
+const rpage = await browser.newPage({ viewport: { width: 1180, height: 780 } });
+rpage.on('pageerror', (e) => problems.push(`reading page error: ${e.message}`));
+rpage.on('console', (m) => { if (m.type() === 'error') problems.push(`reading console: ${m.text()}`); });
+await rpage.goto(`${base}src/reading/index.html`);
+await rpage.waitForFunction(() => window.__readingReady === true, null, { timeout: 10000 });
+
+await check('X: the reading check records a student and marks the words', async () => {
+  await rpage.selectOption('#samples', '1');
+  await rpage.fill('#student', 'مريم');
+  assert(!(await rpage.isDisabled('#go')), 'start disabled with a passage');
+  await rpage.click('#go');
+  assert(await rpage.locator('#step-read').isVisible(), 'reading step hidden');
+  await rpage.click('#rec');
+  await rpage.waitForTimeout(3500);
+  await rpage.screenshot({ path: `${outDir}/x12-reading-rec.png` });
+  await rpage.click('#rec');
+  await rpage.waitForFunction(() => !document.getElementById('step-result').hidden, null, { timeout: 10000 });
+  const r = await rpage.evaluate(() => window.__rdResult);
+  assert(r.total > 20 && r.accuracy < 100 && r.accuracy > 80, JSON.stringify({ total: r.total, acc: r.accuracy }));
+  assert(await rpage.locator('#res-words .w.bad').count() >= 2, 'no marked words');
+  assert(/مريم/.test(await rpage.locator('#history').textContent()), 'no history');
+  await rpage.screenshot({ path: `${outDir}/x13-reading-result.png`, fullPage: true });
+});
+
 await browser.close();
 server.close();
 if (problems.length) {

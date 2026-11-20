@@ -32,6 +32,9 @@ export function soundPlan(name, emotion = 'calm') {
     case 'snore': return [tone(0, 0.8, 0, { noise: true, gain: 0.05 }), tone(0, 0.8, 90, { to: 70, type: 'sine', gain: 0.06 })];
     case 'gasp': return [tone(0, 0.12, p * 1.3, { to: p * 2, type: 'triangle', gain: 0.2 })];
     case 'ding': return [tone(0, 0.4, 1046, { gain: 0.18 })];
+    // Push-to-talk: a rising beep when he starts listening, a falling one when he stops.
+    case 'cue_start': return [tone(0, 0.08, 660, { gain: 0.16 }), tone(0.09, 0.1, 990, { gain: 0.16 })];
+    case 'cue_stop': return [tone(0, 0.08, 880, { gain: 0.14 }), tone(0.09, 0.12, 587, { gain: 0.14 })];
     default: return [];
   }
 }
@@ -127,4 +130,7 @@ export class SoundPlayer {
   }
 
   babble(text, emotion) { return this.playPlan(babblePlan(text, emotion)); }
+
+  /** The listening beeps: never skipped by the effect spacing, so start and stop are always heard. */
+  cue(which) { return this.playPlan(soundPlan(which === 'stop' ? 'cue_stop' : 'cue_start')); }
 }

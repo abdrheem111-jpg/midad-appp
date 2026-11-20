@@ -205,6 +205,9 @@ export function routeClassroom(b, r, raw, now) {
     case 'walk_windows':
       b.emotions.feel('curious', now);
       return b.reply('walk_windows', { behavior: 'walk_windows' });
+    case 'guide':
+      b.emotions.feel('curious', now);
+      return b.reply('guide_open', { behavior: 'guide' });
     case 'user_joke':
       b.emotions.feel('joke', now);
       return b.reply('user_joke');

@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('khalfoun', {
   chat: (payload) => ipcRenderer.invoke('chat:reply', payload),
   chatTask: (payload) => ipcRenderer.invoke('chat:task', payload),
   visionLook: (payload) => ipcRenderer.invoke('vision:look', payload),
+  camera: (payload) => ipcRenderer.invoke('vision:camera', { image: String(payload?.image || ''), mode: payload?.mode === 'look' ? 'look' : 'solve' }),
   agent: (payload) => ipcRenderer.invoke('agent:respond', payload),
   speak: (text) => ipcRenderer.invoke('voice:speak', String(text || '').slice(0, 600)),
   cloud: {
