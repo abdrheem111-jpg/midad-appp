@@ -104,6 +104,7 @@ function createPreviewBridge() {
         setTimeout(() => emit({ type: 'reminder', note: action.params.note }), action.params.minutes * 1000);
       }
       if (action.type === 'read_selection') return { ok: true, data: { text: window.__fakeSelection || '' } };
+      if (action.type === 'find_on_screen') return { ok: true, data: { boxes: (window.__fakeWords || []).filter((w) => w.text.includes(action.params.text)) } };
       if (action.type === 'read_screen') return window.__fakeScreen === undefined ? { ok: false, error: 'unsupported' } : { ok: true, data: { text: window.__fakeScreen } };
       if (action.type === 'active_window') return window.__fakeWindow ? { ok: true, data: window.__fakeWindow } : { ok: false, error: 'unsupported' };
       if (action.type === 'cancel_reminders') return { ok: true, data: { cancelled: 1 } };

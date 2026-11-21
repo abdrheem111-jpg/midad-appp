@@ -37,6 +37,8 @@ export const ANIMATIONS = {
   dust: { loop: false, dur: 1.4, pose: (t) => ({ armL: -20 - S(t * 20) * 15, armR: -20 + S(t * 20) * 15, bodyRot: S(t * 10) * 2, headRot: 6, fx: t < 0.7 ? 'dust' : null, eyeMode: t < 0.6 ? 'spiral' : null }) },
   dangle: { loop: true, dur: 1, pose: (t) => ({ legL: S(t * 7) * 18, legR: S(t * 7 + 1.2) * 18, armL: 112 + S(t * 6) * 14, armR: 112 - S(t * 6) * 14, rot: S(t * 4) * 6, sy: 1.04, mouth: 'o' }) },
   freeze: { loop: false, dur: 1, pose: () => ({ armL: 12, armR: 12, sy: 1.02, mouth: 'flat' }) },
+  // Holding a marker and writing on the board (the screen): arm out, small strokes, eyes on the work.
+  write: { loop: false, dur: 2.4, pose: (t) => { const u = clamp01(t / 2.4); const up = clamp01(u / 0.15) * (1 - clamp01((u - 0.88) / 0.12)); return { armL: up * (72 + S(t * 17) * 5 + S(t * 5.3) * 3), armR: up * -6, headRot: up * -9, bodyRot: up * -3, pen: true, mouth: 'small', legL: up * 2 }; } },
   coffee: { loop: false, dur: 2.4, pose: (t) => { const u = clamp01(t / 2.4); const lift = hop(clamp01((u - 0.1) / 0.8)); return { armL: -150 * lift, headRot: -6 * lift, cup: true, eyesClosed: lift > 0.7, mouth: lift > 0.4 ? 'small' : null }; } },
   adjust: { loop: false, dur: 1.4, pose: (t) => { const u = hop(clamp01(t / 1.4)); return { armL: 160 * u, armR: 160 * u, kummaRot: S(t * 9) * 6 * u, headRot: 3 * u }; } },
   point: { loop: false, dur: 1.4, pose: () => ({ armR: 85, cane: -40, bodyRot: 4, headRot: -6 }) },

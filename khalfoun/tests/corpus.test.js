@@ -6,6 +6,18 @@ import assert from 'node:assert/strict';
 import { recognize } from '../src/core/intents.js';
 
 const CORPUS = [
+  // ---- heard on the teacher's PC with version 1.1 (Azure ar-OM), and the Word tests
+  ['افتتاح المستند الفارغ', 'key', { key: 'new_file' }],
+  ['افتح المستند الفارغ', 'key', { key: 'new_file' }],
+  ['أريدك تكتب اللي أقوله', 'dictate', {}],
+  ['هل تشوف الملف اللي قدامك؟', 'see', { source: 'screen' }],
+  ['ما تدور على الشاشة؟', 'see', { source: 'screen' }],
+  ['تصور الشاشة', 'screenshot', {}],
+  ['اريدك تحل ذي المعادلة اللي مكتوبة توه هنا قدامك', 'see', { op: 'solve', source: 'screen' }],
+  ['ما تشوف المسلق اللي قدامك يربح لها', 'see', { source: 'screen' }],
+  ['حط دايرة على المحدد', 'office_circle', {}],
+  ['ارسم دائرة حمراء حول الكلام المحدد', 'office_circle', {}],
+  ['حوط المحدد', 'office_circle', {}],
   // ---- opening apps, many ways
   ['افتح الحاسبة', 'open', { app: 'calculator' }],
   ['افتح لي الحاسبه لو سمحت', 'open', { app: 'calculator' }],

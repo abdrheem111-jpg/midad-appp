@@ -19,7 +19,7 @@ import { JsonStore } from './storage.js';
 import { createPlatform } from './actions/platform.js';
 import { createExecutor } from './actions/index.js';
 import { findWhisper, transcribe, wavSeconds } from './stt.js';
-import { transcribeAzure, speakAzure, verifyAzure, ClaudeAgent, GeminiAgent, chainAgents } from './cloud.js';
+import { transcribeAzure, speakAzure, verifyAzure, ClaudeAgent, GeminiAgent, chainAgents, screenPrompt } from './cloud.js';
 import { CloudSecrets, DEFAULT_CLOUD } from './secrets.js';
 import { WindowWatcher } from './windows-watcher.js';
 import { ChatClient, findLocalModel, pickVisionModel } from './chat.js';
@@ -28,7 +28,8 @@ import { writeIntoLatestPdf } from './actions/pdf.js';
 import { LEVEL_INFO } from '../core/permissions.js';
 import { DiagLog } from './diag.js';
 import { ocrImage } from './ocr.js';
-import { TASK_MODES, LOOK_MODES } from '../core/chat-prompt.js';
+import { TASK_MODES, LOOK_MODES, lookTask } from '../core/chat-prompt.js';
+import { findOnScreen, layoutHint } from '../core/screen-find.js';
 import { Notebook } from '../core/notebook.js';
 import { OfficeHost } from './office/office-host.js';
 import { createOfficeActions } from './office/index.js';
@@ -159,6 +160,10 @@ function getAgent() {
   const gemini = secrets.data.gemini ? new GeminiAgent({ key: secrets.geminiKey, fetchFn }) : null;
   agent = {
     respond: (p) => chainAgents([claude, gemini]).respond(p),
+    // Writing: Gemini first (free and usually there); the same agent object keeps what it
+    // learned about busy models between requests.
+    write: (p) => chainAgents([gemini, claude]).write(p),
+    vision: (image, opts) => chainAgents([gemini, claude]).vision(image, opts),
     async verifyAll() {
       const out = {};
       if (claude) out.claude = await claude.verify();
@@ -436,25 +441,36 @@ function releaseFocus() {
 }
 
 /**
+ * The command box closed: the focus goes back to exactly the program the person was in.
+ * (blur alone lets Windows pick the next window, often a folder left open behind.)
+ */
+function giveFocusBack() {
+  const pid = releaseFocus();
+  if (pid && process.platform === 'win32') foregroundInfo(`act ${pid}`).catch(() => {});
+}
+
+/**
  * The program in front right now (Windows): {pid, process, title}, or null.
  * A small PowerShell helper stays running so the answer comes back in milliseconds.
  */
 let fgHelper = null;
 const FG_SCRIPT = `
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
+$ws = New-Object -ComObject WScript.Shell
 Add-Type -Name F -Namespace K -MemberDefinition @'
 [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
 '@
 while ($null -ne ($line = [Console]::In.ReadLine())) {
+  if ($line -match '^act (\\d+)$') { try { [void]$ws.AppActivate([int]$Matches[1]); Start-Sleep -Milliseconds 120 } catch {} }
   $h = [K.F]::GetForegroundWindow(); $p = 0; [void][K.F]::GetWindowThreadProcessId($h, [ref]$p)
   $sb = New-Object System.Text.StringBuilder 512; [void][K.F]::GetWindowText($h, $sb, 512)
   $n = ''; try { $n = (Get-Process -Id $p -ErrorAction Stop).ProcessName } catch {}
   [Console]::Out.WriteLine("$p\t$n\t" + ($sb.ToString() -replace '[\r\n\t]', ' ')); [Console]::Out.Flush()
 }
 `;
-function foregroundInfo() {
+function foregroundInfo(request = 'fg') {
   if (process.platform !== 'win32') return Promise.resolve(null);
   if (!fgHelper) {
     const encoded = Buffer.from(FG_SCRIPT, 'utf16le').toString('base64');
@@ -481,7 +497,7 @@ function foregroundInfo() {
     const timer = setTimeout(() => { const k = helper.waiting.indexOf(done); if (k >= 0) helper.waiting.splice(k, 1); resolve(null); }, 2500);
     function done(info) { clearTimeout(timer); resolve(info); }
     helper.waiting.push(done);
-    try { helper.child.stdin.write('fg\n'); } catch { done(null); }
+    try { helper.child.stdin.write(`${/^act \d+$/.test(request) ? request : 'fg'}\n`); } catch { done(null); }
   });
 }
 const foregroundPid = async () => (await foregroundInfo())?.pid ?? null;
@@ -512,6 +528,36 @@ async function readScreen() {
   }
   try {
     return await ocrImage(file);
+  } finally {
+    rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * «حط دايرة على كلمة الماء»: reads the whole screen at full resolution with word positions
+ * and returns where the words are, in the overlay window's own coordinates.
+ */
+async function findOnScreenWords(text) {
+  if (process.platform !== 'win32') return { ok: false, error: 'unsupported' };
+  const dir = await mkdtemp(join(tmpdir(), 'khalfoun-find-'));
+  const file = join(dir, 'screen.png');
+  const display = screen.getPrimaryDisplay();
+  try {
+    if (win && !win.isDestroyed()) win.setOpacity(0);
+    await new Promise((r) => setTimeout(r, 180));
+    await writeFile(file, await captureScreen());
+  } finally {
+    if (win && !win.isDestroyed()) win.setOpacity(1);
+  }
+  try {
+    const res = await ocrImage(file, { words: true });
+    if (!res.ok) return res;
+    const scale = display.scaleFactor || 1;
+    const wa = display.workArea; const bd = display.bounds;
+    const boxes = findOnScreen(res.data.words || [], text, { scale })
+      .map((b) => ({ ...b, x: b.x - (wa.x - bd.x), y: b.y - (wa.y - bd.y) }));
+    diag.write('find on screen', `«${String(text).slice(0, 40)}» →`, `${boxes.length} found among ${(res.data.words || []).length} words (${res.data.language || '?'})`);
+    return { ok: true, data: { boxes, language: res.data.language } };
   } finally {
     rm(dir, { recursive: true, force: true }).catch(() => {});
   }
@@ -608,11 +654,7 @@ function setupIpc(stores, executor) {
     const t0 = Date.now();
     let res;
     if (secrets.brain) {
-      const fetchFn = (url, init) => net.fetch(url, init);
-      res = await chainAgents([
-        secrets.data.gemini ? new GeminiAgent({ key: secrets.geminiKey, fetchFn }) : null,
-        secrets.data.claude ? new ClaudeAgent({ key: secrets.claudeKey, fetchFn }) : null,
-      ]).write({ system, user: prompt.user });
+      res = await getAgent().write({ system, user: prompt.user, timeoutMs: 40000 });
     } else if (chat && settings.chatEnabled !== false) {
       res = await chat.compose({ system, user: prompt.user });
     } else {
@@ -729,6 +771,7 @@ function setupIpc(stores, executor) {
   });
 
   ipcMain.on('ui:focus', (event) => { if (fromApp(event)) focusOverlay(); });
+  ipcMain.on('ui:give-back', (event) => { if (fromApp(event)) giveFocusBack(); });
 
   ipcMain.on('ui:interactive', (event, on) => {
     if (!fromApp(event) || !win) return;
@@ -851,10 +894,13 @@ function setupIpc(stores, executor) {
 
   ipcMain.handle('vision:look', async (event, payload) => {
     if (!fromApp(event)) return { ok: false, error: 'forbidden' };
-    if (!chat || !visionModel || settings.chatEnabled === false) return { ok: false, error: 'vision_unavailable' };
+    const cloud = cloudThinks();
+    if (!cloud && (!chat || !visionModel || settings.chatEnabled === false)) return { ok: false, error: 'vision_unavailable' };
     if (!settings.level || settings.level < 2) return { ok: false, error: 'level_too_low' };
     const mode = LOOK_MODES.includes(payload?.mode) ? payload.mode : 'describe';
-    let image;
+    const t0 = Date.now();
+    let shot;
+    let png = null;
     try {
       if (win && !win.isDestroyed()) win.setOpacity(0);
       await new Promise((r) => setTimeout(r, 180));
@@ -863,14 +909,37 @@ function setupIpc(stores, executor) {
       const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size });
       const source = sources.find((s) => s.display_id === String(display.id)) || sources[0];
       if (!source) return { ok: false, error: 'no_screen' };
-      // Smaller pictures keep the local model fast; 1280 px wide is enough to read a worksheet.
-      const shot = source.thumbnail;
-      const small = shot.getSize().width > 1280 ? shot.resize({ width: 1280, quality: 'good' }) : shot;
-      image = small.toJPEG(82).toString('base64');
+      shot = source.thumbnail;
+      if (cloud && process.platform === 'win32') png = shot.toPNG();
     } finally {
       if (win && !win.isDestroyed()) win.setOpacity(1);
     }
-    const res = await chat.vision({ mode, image, model: visionModel, kidsMode: !!settings.kidsMode });
+    let res = null;
+    if (cloud) {
+      // The cloud eyes get the screen at its real resolution (up to 2560 px wide) and the
+      // words Windows read with their places, for exact reading of small text and numbers.
+      const full = shot.getSize();
+      const big = full.width > 2560 ? shot.resize({ width: 2560, quality: 'best' }) : shot;
+      let layout = '';
+      if (png) {
+        const dir = await mkdtemp(join(tmpdir(), 'khalfoun-look-'));
+        try {
+          await writeFile(join(dir, 'screen.png'), png);
+          const ocr = await ocrImage(join(dir, 'screen.png'), { words: true });
+          if (ocr.ok) layout = layoutHint(ocr.data.words || [], { scale: full.width / big.getSize().width });
+        } catch { /* the picture alone */ } finally { rm(dir, { recursive: true, force: true }).catch(() => {}); }
+      }
+      const { width, height } = big.getSize();
+      res = await getAgent().vision(big.toJPEG(90).toString('base64'), {
+        mime: 'image/jpeg', timeoutMs: 40000, prompt: screenPrompt(lookTask(mode), { width, height, layout, kidsMode: !!settings.kidsMode }),
+      });
+      diag.write('vision (cloud)', mode, `${width}x${height}${layout ? ` +${layout.split('\n').length} lines` : ''}`, '→', res.ok ? `${res.text.length} chars ${((Date.now() - t0) / 1000).toFixed(1)} s` : `failed: ${res.error}`);
+      if (res.ok) return res;
+    }
+    if (!chat || !visionModel || settings.chatEnabled === false) return res || { ok: false, error: 'vision_unavailable' };
+    // Smaller pictures keep the local model fast; 1280 px wide is enough to read a worksheet.
+    const small = shot.getSize().width > 1280 ? shot.resize({ width: 1280, quality: 'good' }) : shot;
+    res = await chat.vision({ mode, image: small.toJPEG(82).toString('base64'), model: visionModel, kidsMode: !!settings.kidsMode });
     diag.write('vision', mode, visionModel, '→', res.ok ? `${res.text.length} chars` : `failed: ${res.error}`);
     return res;
   });
@@ -1241,6 +1310,7 @@ async function start() {
     platform, getSettings: () => settings, downloadsDir, journal: stores.journal, scheduleReminder, office,
     cancelReminders: () => reminderScheduler.cancelAll(),
     readScreen,
+    findOnScreen: findOnScreenWords,
     activeWindow,
     writePdf: (text, position, page) => writePdf(text, position, [downloadsDir, app.getPath('documents')], page),
     openTool,

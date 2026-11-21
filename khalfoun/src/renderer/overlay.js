@@ -21,6 +21,7 @@ import { NameWheel, RaceBoard, NoiseGauge, CameraPanel, VoiceTestPanel } from '.
 import { GUIDE } from '../core/guide.js';
 import { STAR_MILESTONES as STAR_STEPS } from '../core/classfun.js';
 import { InkLayer } from './ink.js';
+import { COLORS } from '../core/office-plan.js';
 import { normalize } from '../core/arabic.js';
 
 const CHAR_W = 170;
@@ -187,12 +188,24 @@ function handle(reply) {
       break;
   }
   if (reply.effect) playEffect(reply.effect);
+  // He picks up his marker when he writes or draws (on the screen or into a document).
+  const writing = (reply.ink && !reply.ink.clear) || /^office_(put|equation|draw|circle)$/.test(reply.action?.type || '');
+  if (writing) {
+    character.setPenColor(reply.ink?.marks || reply.ink?.shape ? `#${COLORS[reply.ink.color]?.hex || COLORS.red.hex}` : '#1D70B8');
+    animator.play('write');
+  }
+  if (reply.penStyle?.color) character.setPenColor(`#${COLORS[reply.penStyle.color]?.hex || '1D70B8'}`);
   if (reply.ink) {
     if (reply.ink.clear) ink.clear();
+    else if (reply.ink.marks) ink.mark(reply.ink.marks, reply.ink);
     else if (reply.ink.text) ink.write(reply.ink.text);
     else if (reply.ink.shape) ink.draw(reply.ink);
   }
-  if (reply.pen !== undefined) { ink.setPen(reply.pen); if (reply.pen) { closeCommand(); setInteractive(true); } }
+  if (reply.pen !== undefined) {
+    if (reply.pen && !ink.pen) ink.setPen(true); else if (!reply.pen) ink.setPen(false);
+    if (reply.penStyle) ink.setStyle(reply.penStyle);
+    if (reply.pen) { closeCommand(); setInteractive(true); }
+  }
   if (reply.compose) runCompose(reply.compose);
   if (reply.race !== undefined) raceBoard.show(reply.race, () => { brain.race = null; });
   if (reply.noise === true) startNoise();
@@ -556,9 +569,14 @@ async function runCompose(req) {
 let chatting = false;
 const chatOn = () => chatInfo.available && brain.memory.data.chatEnabled !== false && typeof bridge.chat === 'function';
 
+// Every sentence the person says counts: an answer that comes back for an older one
+// (a slow cloud or model) is dropped instead of interrupting the newer command.
+let heardSeq = 0;
+
 function hear(text, opts = {}) {
   const t = String(text || '').trim();
   if (!t) return;
+  if (!opts.viaAgent) heardSeq += 1;
   const reply = brain.hear(t);
   bridge.note?.(`heard «${t}» → ${reply?.situation || 'nothing'}${reply?.action ? ` (action ${reply.action.type})` : ''}${reply?.awaitingConfirm ? ' (asks to confirm)' : ''}`);
   followUntil = Date.now() + 9000;
@@ -582,9 +600,11 @@ async function askAgent(text, fallback, opts = {}) {
   chatting = true;
   // Only show «thinking» if the answer is not almost instant.
   const thinking = setTimeout(() => { if (chatting) handle(brain.reply('thinking')); }, 700);
+  const seq = heardSeq;
   try {
     const d = brain.memory.data;
     const res = await bridge.agent({ text, history: brain.chatHistory, name: d.name, context: brain.chatContext() });
+    if (seq !== heardSeq) { clearTimeout(thinking); bridge.note?.(`late answer for «${text}» dropped (a newer command came)`); return; }
     if (!res?.ok) {
       bridge.note?.(`claude for «${text}» → failed: ${res?.error}`);
       clearTimeout(thinking);
@@ -621,9 +641,11 @@ async function askModel(text, fallback) {
   handle(brain.reply('thinking'));
   // A model loading from disk can take a while: say so instead of going quiet.
   const slow = setTimeout(() => { if (chatting) handle(brain.reply('thinking_long')); }, 9000);
+  const seq = heardSeq;
   try {
     const d = brain.memory.data;
     const res = await bridge.chat({ text, history: brain.chatHistory, name: d.name, humor: d.humor, context: brain.chatContext() });
+    if (seq !== heardSeq) { bridge.note?.(`late model answer for «${text}» dropped (a newer command came)`); return; }
     const asCommand = res?.ok && res.command ? brain.modelCommand(text, res.command) : null;
     bridge.note?.(`model for «${text}» → ${res?.command ? `command «${res.command}»` : res?.text ? 'chat' : `failed: ${res?.error}`}`);
     handle(asCommand || (res?.ok && res.text ? brain.chatReply(text, res.text) : fallback));
@@ -649,8 +671,12 @@ function openCommand() {
 }
 
 function closeCommand() {
+  const hadFocus = !els.command.hidden && document.activeElement === els.input;
   els.command.hidden = true;
   clearTimeout(commandTimer);
+  if (hadFocus && els.settings.hidden) bridge.giveBack?.();
+  // Clicks pass through again at once (not only after the next mouse move).
+  if (!ink.pen && !panelsOpen()) setInteractive(false);
 }
 
 function armCommandTimeout() {
@@ -1004,6 +1030,7 @@ async function saveCloud(patch) {
   if (r?.status) cloudInfo = r.status;
   applyCloud();
   brain.setChatAvailable(chatOn() || agentOn());
+  brain.setVisionAvailable((Boolean(chatInfo.vision) && chatOn()) || agentOn());
   renderCloud();
   $('cl-result').textContent = r?.ok ? 'انحفظ.' : (CLOUD_ERRORS[r?.error] || `ما انحفظ: ${r?.error}`);
   // Fast hearing is ready: «يا خلفون» without a button, once (the person can still turn it off).
@@ -1405,7 +1432,7 @@ async function start() {
 
   voiceOut.setEnabled(!!brain.memory.data.speak);
   brain.setChatAvailable(chatOn() || agentOn());
-  brain.setVisionAvailable(Boolean(chatInfo.vision) && chatOn());
+  brain.setVisionAvailable((Boolean(chatInfo.vision) && chatOn()) || agentOn());
   bridge.onEvent((ev) => {
     switch (ev?.type) {
       case 'reminder': sounds.effect('chime'); handle(brain.event('reminder_fire', { note: ev.note })); motion.come(); break;
@@ -1430,7 +1457,7 @@ async function start() {
         chatInfo = { available: !!ev.available, model: ev.model || null, vision: ev.vision || null };
         $('st-chat').disabled = !chatInfo.available;
         brain.setChatAvailable(chatOn());
-        brain.setVisionAvailable(Boolean(ev.vision) && chatOn());
+        brain.setVisionAvailable((Boolean(ev.vision) && chatOn()) || agentOn());
         break;
       default: break;
     }

@@ -6,7 +6,7 @@
 import { execFile } from 'node:child_process';
 
 /** PowerShell (Windows PowerShell 5.1, which can reach WinRT) that prints one line of text per OCR line. */
-export function ocrScript(imagePath) {
+export function ocrScript(imagePath, { words = false } = {}) {
   const path = String(imagePath).replace(/'/g, "''");
   return `
 $ErrorActionPreference = 'Stop'
@@ -29,6 +29,11 @@ if (-not $engine) { Write-Output '#NOENGINE'; exit 0 }
 Write-Output ('#LANG ' + $engine.RecognizerLanguage.LanguageTag)
 $result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
 foreach ($line in $result.Lines) { Write-Output $line.Text }
+${words ? `$n = 0
+foreach ($line in $result.Lines) {
+  foreach ($w in $line.Words) { $r = $w.BoundingRect; Write-Output ('#W ' + $n + ' ' + [int]$r.X + ' ' + [int]$r.Y + ' ' + [int]$r.Width + ' ' + [int]$r.Height + ' ' + $w.Text) }
+  $n++
+}` : ''}
 `;
 }
 
@@ -38,7 +43,13 @@ export function parseOcrOutput(stdout) {
   if (lines.some((l) => l.trim() === '#NOENGINE')) return { ok: false, error: 'no_ocr_language' };
   const lang = (lines.find((l) => l.startsWith('#LANG ')) || '').slice(6).trim() || null;
   const text = lines.filter((l) => !l.startsWith('#')).map((l) => l.trim()).filter(Boolean).join('\n');
-  return { ok: true, data: { text: text.slice(0, 6000), language: lang } };
+  // «#W line x y w h word»: where each word is, in the picture's pixels.
+  const words = [];
+  for (const l of lines) {
+    const m = /^#W (\d+) (-?\d+) (-?\d+) (\d+) (\d+) (.+)$/.exec(l.trim());
+    if (m) words.push({ line: Number(m[1]), x: Number(m[2]), y: Number(m[3]), w: Number(m[4]), h: Number(m[5]), text: m[6] });
+  }
+  return { ok: true, data: { text: text.slice(0, 6000), language: lang, ...(words.length ? { words: words.slice(0, 4000) } : {}) } };
 }
 
 /**
@@ -48,7 +59,7 @@ export function parseOcrOutput(stdout) {
 export function ocrImage(imagePath, opts = {}) {
   if ((opts.platform || process.platform) !== 'win32') return Promise.resolve({ ok: false, error: 'unsupported' });
   const run = opts.run || execFile;
-  const encoded = Buffer.from(ocrScript(imagePath), 'utf16le').toString('base64');
+  const encoded = Buffer.from(ocrScript(imagePath, { words: Boolean(opts.words) }), 'utf16le').toString('base64');
   return new Promise((resolve) => {
     run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
       { windowsHide: true, timeout: 45000, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' }, (err, stdout) => {

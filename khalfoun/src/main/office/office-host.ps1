@@ -66,12 +66,12 @@ function Word-Line($w, [string]$text, [int]$style, [hashtable]$opt) {
   $sel.Style = $doc.Styles.Item($style)
   $sel.ParagraphFormat.ReadingOrder = 0   # right to left
   if ($opt.center) { $sel.ParagraphFormat.Alignment = 1 }
-  if ($opt.bold) { $sel.Font.Bold = 1 }
+  if ($opt.bold) { $sel.Font.Bold = 1; $sel.Font.BoldBi = 1 }
   if ($opt.color) { $sel.Font.Color = [int]$opt.color }
-  if ($opt.size) { $sel.Font.Size = [int]$opt.size }
+  if ($opt.size) { Word-Size $sel.Font ([double]$opt.size) }
   $sel.TypeText($text)
   $sel.TypeParagraph()
-  $sel.Font.Bold = 0
+  $sel.Font.Bold = 0; $sel.Font.BoldBi = 0
   $sel.Font.Color = -16777216   # automatic
   $sel.Style = $doc.Styles.Item($wdStyleNormal)
 }
@@ -94,7 +94,7 @@ function Word-Table($w, $columns, $rows, [int]$headColor) {
   for ($c = 0; $c -lt $columns.Count; $c++) {
     $cell = $t.Cell(1, $c + 1).Range
     $cell.Text = [string]$columns[$c]
-    $cell.Font.Bold = 1
+    $cell.Font.Bold = 1; $cell.Font.BoldBi = 1
     $cell.Font.Color = 16777215
     $cell.Shading.BackgroundPatternColor = $headColor
     $cell.ParagraphFormat.Alignment = 1
@@ -252,7 +252,9 @@ function Draw-On($pres, $shapes, $items, [bool]$underTitle) {
       $ln.Line.ForeColor.RGB = [int]$it.fill
       $ln.Line.Weight = 4
     } else {
-      $sh = $shapes.AddShape([int]$it.type, $X0 + $it.x * $W, $Y0 + $it.y * $H, $it.w * $W, $it.h * $H)
+      $w0 = $it.w * $W; $h0 = $it.h * $H; $x0 = $X0 + $it.x * $W; $y0 = $Y0 + $it.y * $H
+      if ($it.square) { $d = [Math]::Min($w0, $h0); $x0 += ($w0 - $d) / 2; $y0 += ($h0 - $d) / 2; $w0 = $d; $h0 = $d }
+      $sh = $shapes.AddShape([int]$it.type, $x0, $y0, $w0, $h0)
       $sh.Fill.ForeColor.RGB = [int]$it.fill
       $sh.Line.ForeColor.RGB = [int]$it.line
       if ($it.text) {
@@ -266,6 +268,54 @@ function Draw-On($pres, $shapes, $items, [bool]$underTitle) {
     }
     $made++
   }
+  return $made
+}
+
+# Word: the drawing gets its own empty lines under the text the person is at, so it never
+# splits a sentence; shapes float on those lines, a fixed size, and the cursor goes after them.
+function Draw-Word($w, $items) {
+  $doc = Word-Doc $w
+  $sel = $w.Selection
+  $sel.Collapse(0)
+  $sel.EndKey(5) | Out-Null
+  $sel.TypeParagraph()
+  $anchor = $sel.Range
+  $ps = $doc.PageSetup
+  $W = [double]($ps.PageWidth - $ps.LeftMargin - $ps.RightMargin); $H = 150
+  $made = 0
+  foreach ($it in $items) {
+    if ($it.kind -eq 'line') {
+      $sh = $doc.Shapes.AddLine($it.x * $W, $it.y * $H, ($it.x + $it.w) * $W, $it.y * $H, $anchor)
+      $sh.Line.ForeColor.RGB = [int]$it.fill; $sh.Line.Weight = 4
+    } elseif ($it.kind -eq 'arrow') {
+      $sh = $doc.Shapes.AddLine($it.x1 * $W, $it.y1 * $H, $it.x2 * $W, $it.y2 * $H, $anchor)
+      $sh.Line.ForeColor.RGB = [int]$it.line; $sh.Line.Weight = 2.5; $sh.Line.EndArrowheadStyle = 2
+    } else {
+      $w0 = $it.w * $W; $h0 = $it.h * $H; $x0 = $it.x * $W; $y0 = $it.y * $H
+      if ($it.square) { $d = [Math]::Min($w0, $h0); $x0 += ($w0 - $d) / 2; $y0 += ($h0 - $d) / 2; $w0 = $d; $h0 = $d }
+      $sh = $doc.Shapes.AddShape([int]$it.type, $x0, $y0, $w0, $h0, $anchor)
+      $sh.Fill.ForeColor.RGB = [int]$it.fill
+      $sh.Line.ForeColor.RGB = [int]$it.line
+      if ($it.text) {
+        $tr = $sh.TextFrame.TextRange
+        $tr.Text = [string]$it.text
+        $tr.Font.Color = [int]$it.textColor; $tr.Font.Bold = 1; $tr.Font.BoldBi = 1
+        $tr.ParagraphFormat.Alignment = 1
+        $tr.ParagraphFormat.ReadingOrder = 0
+      }
+    }
+    try {
+      $sh.RelativeHorizontalPosition = 0   # the margin
+      $sh.RelativeVerticalPosition = 2     # the paragraph
+      $sh.WrapFormat.Type = 4              # text above and below only
+    } catch { }
+    if ($sh.Type -ne 9) {
+      $sh.Left = $x0; $sh.Top = $y0
+    }
+    $made++
+  }
+  # room for the drawing, then the cursor under it
+  $sel.TypeParagraph()
   return $made
 }
 
@@ -297,16 +347,37 @@ function Excel-Insert($x, $p, $c) {
 
 # ---------------------------------------------------------------- formatting
 
+# Word keeps Arabic (complex script) bold, italic and size apart from the Latin ones:
+# set both or Arabic text does not change.
+function Word-Flip($font, [string]$name) {
+  $on = -not ([int]$font.($name + 'Bi') -eq -1 -or [int]$font.($name + 'Bi') -eq 1)
+  $v = 0; if ($on) { $v = 1 }
+  $font.$name = $v; $font.($name + 'Bi') = $v
+}
+
+function Word-Size($font, [double]$size) {
+  $size = [Math]::Max(8, [Math]::Min(96, $size))
+  $font.Size = $size; $font.SizeBi = $size
+}
+
+function Word-CurrentSize($font) {
+  $s = [double]$font.SizeBi
+  if ($s -le 0 -or $s -gt 1000) { $s = [double]$font.Size }
+  if ($s -le 0 -or $s -gt 1000) { $s = 12 }
+  return $s
+}
+
 function Format-Word($w, $a) {
   $sel = $w.Selection
+  $f = $sel.Font
   switch ([string]$a.op) {
-    'bold' { $sel.Font.Bold = $wdToggle }
-    'italic' { $sel.Font.Italic = $wdToggle }
-    'underline' { $sel.Font.Underline = $wdToggle }
-    'grow' { $sel.Font.Grow() }
-    'shrink' { $sel.Font.Shrink() }
-    'size' { $sel.Font.Size = [int]$a.value }
-    'color' { $sel.Font.Color = [int]$a.rgb }
+    'bold' { Word-Flip $f 'Bold' }
+    'italic' { Word-Flip $f 'Italic' }
+    'underline' { $f.Underline = $wdToggle }
+    'grow' { Word-Size $f ((Word-CurrentSize $f) + 4) }
+    'shrink' { Word-Size $f ((Word-CurrentSize $f) - 4) }
+    'size' { Word-Size $f ([double]$a.value) }
+    'color' { $f.Color = [int]$a.rgb }
     'center' { $sel.ParagraphFormat.Alignment = 1 }
     'right' { $sel.ParagraphFormat.Alignment = 2 }
     'left' { $sel.ParagraphFormat.Alignment = 0 }
@@ -401,9 +472,23 @@ function Circle-Ppt($pp, [int]$red) {
 
 # ---------------------------------------------------------------- equations
 
+# Arabic maths (Arabic letters or digits) reads right to left: Word's equation editor lays
+# it out left to right, so it goes in as a large centred right-to-left line instead.
 function Equation-Word($w, [string]$linear, [string]$shown) {
   [void](Word-Doc $w)
   $sel = $w.Selection
+  $sel.Collapse(0)
+  if ($sel.Start -gt $sel.Paragraphs.Item(1).Range.Start) { $sel.TypeParagraph() }
+  if ($shown -match '[\u0600-\u06FF]') {
+    $sel.ParagraphFormat.ReadingOrder = 0
+    $sel.ParagraphFormat.Alignment = 1
+    Word-Size $sel.Font 20
+    $sel.TypeText($shown)
+    $sel.TypeParagraph()
+    Word-Size $sel.Font 12
+    $sel.ParagraphFormat.Alignment = 2
+    return
+  }
   $r = $sel.Range
   $r.Text = $linear
   try { $m = $w.ActiveDocument.OMaths.Add($r); $m.OMaths.Item(1).BuildUp() } catch { $r.Text = $shown }
@@ -453,10 +538,7 @@ while ($true) {
           $slide = $t.obj.ActiveWindow.View.Slide
           $n = Draw-On $t.obj.ActivePresentation $slide.Shapes $a.items $false
         } elseif ($t.app -eq 'word') {
-          $doc = Word-Doc $t.obj
-          $canvas = $doc.Shapes.AddCanvas(0, 0, 440, 260, $t.obj.Selection.Range)
-          try { $canvas.WrapFormat.Type = 7 } catch { }
-          $n = Draw-On $null $canvas.CanvasItems $a.items $false
+          $n = Draw-Word $t.obj $a.items
         } else {
           $ws = $t.obj.ActiveSheet
           $n = Draw-On $null $ws.Shapes $a.items $false

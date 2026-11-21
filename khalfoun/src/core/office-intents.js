@@ -71,10 +71,45 @@ const PEN_ON = S(['قلم', 'القلم', 'شغل القلم', 'قلم الشا�
 const PEN_OFF = S(['وقف القلم', 'سكر القلم', 'طفي القلم', 'خلاص القلم', 'اقفل القلم', 'اطلع من القلم', 'شيل القلم']);
 const SCREEN_CLEAR = S(['امسح الشاشه', 'امسح الرسم', 'امسح الكتابه', 'امسح اللي على الشاشه', 'نظف الشاشه', 'امسح كل شي على الشاشه', 'امسح الخطوط', 'شيل الرسم', 'شيل الكتابه', 'امسح سطح المكتب']);
 const CIRCLE_SEL = S(['دور عليه', 'دور عليها', 'حط دايره عليه', 'حط دايره عليها', 'حط عليه دايره', 'حط عليها دايره', 'حوطه بدايره', 'حوطها بدايره', 'دايره حول المحدد', 'دايره على المحدد', 'ارسم دايره حوله', 'ارسم دايره حولها', 'ارسم دايره على المحدد', 'ارسم دايره حول المحدد', 'علم عليه', 'علم عليها', 'حط دايره حوله', 'حط دايره حولها', 'سو دايره عليه', 'سو دايره حوله']);
+// «حط دايرة على المحدد», «ارسم دايرة حمرا حول الكلام المحدد», «حوط المحدد».
+const CIRCLE_RE = /^(?:(?:حط|ارسم|سو|سوي|ضع|دير|اعمل|ابي|ابغي|اريد)\s+)?(?:لي\s+)?(?:(?:دايره|دوايره|حلقه|اطار)(?:\s+(?:حمرا|حمراء|احمر|حمره))?\s+(?:علي|عل|حول|حوالين|ع)|حوط|حوط علي)\s+(?:الشي\s+|الكلام\s+|النص\s+|الجمله\s+|الكلمه\s+)?(?:المحدد|المحدده|المختار|المختاره|المظلل|المظلله|اللي محدد|اللي محدده|اللي حددته|اللي حددتها|اللي اخترته|المحددين)$/u;
 const DIGITS_AR = S(['الارقام بالعربي', 'اكتب الارقام بالعربي', 'خل الارقام عربي', 'الارقام عربي', 'ارقام عربيه', 'استخدم الارقام العربيه', 'خلي الارقام عربي', 'الارقام الهنديه']);
 const DIGITS_EN = S(['الارقام بالانجليزي', 'اكتب الارقام بالانجليزي', 'خل الارقام انجليزي', 'الارقام انجليزي', 'ارقام انجليزيه', 'استخدم الارقام الانجليزيه', 'خلي الارقام انجليزي', 'ارقام لاتينيه']);
 const SLIDE_NEW = S(['شريحه جديده', 'سلايد جديد', 'ضيف شريحه', 'اضف شريحه', 'زيد شريحه', 'شريحه ثانيه جديده', 'سو شريحه جديده', 'سوي شريحه جديده', 'افتح شريحه جديده', 'ضيف سلايد', 'اضف سلايد']);
 const EXPORT_PDF = S(['حوله pdf', 'حوله بي دي اف', 'حولها pdf', 'حولها بي دي اف', 'احفظه pdf', 'احفظه بي دي اف', 'احفظها pdf', 'احفظها بي دي اف', 'صدره pdf', 'صدره بي دي اف', 'طلع منه pdf', 'طلعه pdf', 'طلعه بي دي اف', 'حول الملف pdf', 'حول الملف بي دي اف', 'سو منه pdf', 'سو منه بي دي اف', 'احفظ الملف pdf', 'احفظ كبي دي اف', 'صدر pdf', 'صدر بي دي اف']);
+
+// «لون القلم أخضر», «خلي القلم أحمر», «غير لون القلم للأزرق», «قلم أصفر», «قلم عريض», «القلم رفيع».
+const PEN_COLOR = /^(?:(?:خلي|خل|غير|بدل|حط|اختار|اختر|ابي|ابغي|ابغا|اريد|سو|سوي)\s+)?(?:لون\s+)?(?:ال)?قلم\s+(?:(?:لونه|لون|الي|علي|عل|يكون|يصير)\s+)?(?:اللون\s+)?(\S+)$/u;
+const PEN_WIDTH = { عريض: 10, اعرض: 12, غليظ: 12, ثخين: 12, سميك: 12, كبير: 10, رفيع: 3, ارفع: 2, رقيق: 3, دقيق: 3, صغير: 3, عادي: 5, وسط: 6 };
+function penStyleOf(text) {
+  const m = PEN_COLOR.exec(text);
+  if (!m) return null;
+  const word = m[1].replace(/^(?:بال|لل|ال|ب|ل)(?=\S{3,})/u, '');
+  if (PEN_WIDTH[word]) return { width: PEN_WIDTH[word] };
+  const color = colorFromWord(word) || colorFromWord(m[1]);
+  return color ? { color } : null;
+}
+
+// Finding a word on the screen and marking it where it is:
+// «حط دايرة على كلمة الماء», «حط خط تحت كلمة النخلة», «ظلل كلمة الكسور», «وين كلمة ٢٥ في الشاشة».
+const WORD_NOUN = '(?:كلمه|الكلمه|جمله|الجمله|عباره|العباره|رقم|الرقم|اسم|كلمة)';
+const ON_SCREEN_TAIL = /\s+(?:في|علي|عل|ع)\s+(?:ال)?شاشه$/u;
+const FIND_MARK = new RegExp(`^(?:(?:حط|ارسم|سو|سوي|دير|اعمل|ابي|ابغي|اريد)\\s+)?(?:لي\\s+)?(دايره|دوايره|حلقه|اطار|خط|سطر)(?:\\s+(?:حمرا|حمراء|احمر|زرقا|ازرق|خضرا|اخضر))?\\s+(علي|عل|حول|حوالين|تحت)\\s+${WORD_NOUN}\\s+(.+)$`, 'u');
+const FIND_ACT = new RegExp(`^(?:(ظلل|ظلللي|لون|علم|علم علي|اشر علي|اشر|حوط|حوط علي|دور|دور علي|ابحث عن|ابحث|وين|فين|اين|طلعلي|بين لي|بين|لقيلي|شوف وين)\\s+)(?:لي\\s+)?${WORD_NOUN}\\s+(.+)$`, 'u');
+function screenFindOf(text, raw) {
+  const t = text.replace(ON_SCREEN_TAIL, '');
+  let mark = null;
+  let said = null;
+  const m = FIND_MARK.exec(t);
+  if (m) { mark = m[2] === 'تحت' || /^(?:خط|سطر)$/.test(m[1]) ? 'underline' : 'circle'; said = m[3]; }
+  const a = !m && FIND_ACT.exec(t);
+  if (a) { mark = /^ظلل|^لون/.test(a[1]) ? 'highlight' : 'circle'; said = a[2]; }
+  if (!said) return null;
+  const words = said.split(' ');
+  if (words.length > 5) return null;
+  const color = /حمرا|احمر/.test(t) ? 'red' : /زرقا|ازرق/.test(t) ? 'blue' : /خضرا|اخضر/.test(t) ? 'green' : mark === 'highlight' ? 'yellow' : 'red';
+  return { text: fromRaw(text, raw, said).replace(/[«»"“”.؟?!،]/gu, '').trim().slice(0, 60), mark, color };
+}
 
 /** «لون الخط احمر», «خلي الكلام ازرق», «لونه اخضر» → {op:'color', value}; «حجم الخط ٢٠» → {op:'size'}. */
 function formatValue(text) {
@@ -97,9 +132,13 @@ export function recognizeOffice(text, raw) {
   if (!text) return null;
   // ---- writing and drawing on the screen itself (like a pen on a Samsung tablet)
   if (PEN_ON.has(text)) return ['screen_pen', { on: true }, 0.95];
+  const penStyle = penStyleOf(text);
+  if (penStyle) return ['screen_pen', { on: true, ...penStyle }, 0.94];
   if (PEN_OFF.has(text)) return ['screen_pen', { on: false }, 0.95];
   if (SCREEN_CLEAR.has(text)) return ['screen_clear', {}, 0.95];
-  if (CIRCLE_SEL.has(text)) return ['office_circle', {}, 0.92];
+  if (CIRCLE_SEL.has(text) || CIRCLE_RE.test(text)) return ['office_circle', {}, 0.92];
+  const find = screenFindOf(text, raw);
+  if (find) return ['screen_find', find, 0.93];
   if (DIGITS_AR.has(text)) return ['set_digits', { digits: 'arabic' }, 0.95];
   if (DIGITS_EN.has(text)) return ['set_digits', { digits: 'latin' }, 0.95];
   const onScreen = /^(?:اكتب|اكتبي|اكتبلي|كتب)\s+(?:لي\s+)?(?:علي|عل|في|ع)\s+(?:الشاشه|سطح المكتب|الديسكتوب)\s*[:：]?\s*(.+)$/u.exec(text)
@@ -173,7 +212,9 @@ export function recognizeOffice(text, raw) {
       const unit = countM[0].trim().split(' ').at(-1);
       kindHit = { kind: /شرايح|شريحه|سلايد/.test(unit) ? 'slides' : /اسيله|سوال|تمارين|مسايل/.test(unit) ? 'quiz' : 'text', word: '', rest: body };
     }
-    const topicFrom = (s) => s.replace(ABOUT, '').trim();
+    // «فقرة قصيرة عن النخلة»: the describing word is how to write it (the prompt keeps the whole sentence), not the topic.
+    const STYLE = /^(?:(?:قصيره|قصير|طويله|طويل|مختصره|مختصر|بسيطه|بسيط|سهله|سهل|صغيره|صغير|كبيره|كبير|جميله|جميل|حلوه|حلو|مفصله|مفصل|ممتعه|ممتع|شامله|شامل|واضحه|واضح|جدا|شوي|مره)\s+)+/u;
+    const topicFrom = (s) => s.replace(STYLE, '').replace(ABOUT, '').trim();
     // «سولي اختبار رياضيات» is the quick maths game; a written quiz names its topic («عن ...»), an app or a count.
     if (kindHit && kindHit.kind === 'quiz' && !where && !countM && !ABOUT.test(kindHit.rest)) return null;
     if (kindHit) {

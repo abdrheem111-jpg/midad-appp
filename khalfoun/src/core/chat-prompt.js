@@ -144,6 +144,8 @@ const LOOK = {
   summarize: 'لخّص المحتوى الظاهر في لقطة الشاشة في ثلاث نقاط قصيرة، كل نقطة في سطر يبدأ بـ «-».',
 };
 export const LOOK_MODES = Object.keys(LOOK);
+/** What the eyes are asked to do with a screenshot. */
+export const lookTask = (mode) => LOOK[mode] || LOOK.describe;
 
 /** OpenAI-style vision messages (Ollama accepts base64 data URLs). */
 export function buildVisionMessages(ctx) {

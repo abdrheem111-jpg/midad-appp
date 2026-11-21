@@ -59,6 +59,11 @@ export function routeOffice(b, r, raw, now) {
       return b.plan({ type: 'office_equation', params: { app: s.app || null, text } },
         { situation: 'office_equation_done', sayOn: 'result', vars: { eq: text }, screenText: text, summary: 'كتابة معادلة', confirmWhat: 'أكتب المعادلة' }, now);
     }
+    case 'screen_find':
+      b.emotions.feel('focus_mode', now);
+      return b.plan({ type: 'find_on_screen', params: { text: s.text } },
+        { situation: 'screen_finding', sayOn: 'start', vars: { word: s.text }, find: { text: s.text, mark: s.mark || 'circle', color: s.color || 'red' },
+          summary: `البحث عن «${s.text}» في الشاشة`, confirmWhat: `أقرأ الشاشة وأعلّم على «${s.text}»` }, now);
     case 'office_circle':
       return b.plan({ type: 'office_circle', params: {} }, { situation: 'office_circled', sayOn: 'result', summary: 'دائرة حول المحدد', confirmWhat: 'أرسم دائرة حول المحدد' }, now);
     case 'screen_write': {
@@ -70,6 +75,11 @@ export function routeOffice(b, r, raw, now) {
       b.emotions.feel('focus_mode', now);
       return { ...b.reply('screen_drawn', { vars: { shape: SHAPES[s.shape].ar } }), ink: { shape: s.shape, color: s.color, count: s.count || 1, text: s.text || '' } };
     case 'screen_pen':
+      if (s.color || s.width) {
+        b.emotions.feel('curious', now);
+        const r = s.color ? b.reply('pen_color', { vars: { color: COLORS[s.color]?.ar || '' } }) : b.reply(s.width >= 8 ? 'pen_thick' : 'pen_thin');
+        return { ...r, pen: true, penStyle: { color: s.color || null, width: s.width || null } };
+      }
       b.emotions.feel(s.on ? 'curious' : 'success', now);
       return { ...b.reply(s.on ? 'pen_on' : 'pen_off'), pen: Boolean(s.on) };
     case 'screen_clear':
@@ -119,6 +129,21 @@ export function composed(b, req, res, now) {
  */
 export function officeResult(b, spec, result, now) {
   const type = spec.action.type;
+  if (type === 'find_on_screen') {
+    const word = spec.find?.text || '';
+    if (!result?.ok) {
+      b.emotions.feel('error', now);
+      if (result?.error === 'unsupported') return b.reply('screen_unsupported');
+      if (result?.error === 'no_ocr_language') return b.reply('screen_no_language');
+      return b.reply('screen_failed');
+    }
+    const boxes = result.data?.boxes || [];
+    if (!boxes.length) { b.emotions.feel('not_understood', now); return b.reply('screen_find_none', { vars: { word } }); }
+    b.markSuccess(now);
+    b.emotions.feel('success', now);
+    return { ...b.reply(boxes.length === 1 ? 'screen_found' : 'screen_found_many', { vars: { word, count: String(boxes.length) } }),
+      ink: { marks: boxes, mark: spec.find.mark, color: spec.find.color } };
+  }
   if (!/^office_/.test(type)) return undefined;
   if (!result?.ok) {
     // No Office app in front: draw or write on the screen instead.

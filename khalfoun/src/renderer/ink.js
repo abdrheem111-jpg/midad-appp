@@ -91,6 +91,24 @@ export class InkLayer {
     return added;
   }
 
+  /**
+   * Marks words found on the screen exactly where they are: a hand-drawn oval around them,
+   * a line under them, or a highlighter stroke over them. Boxes are in overlay pixels.
+   */
+  mark(boxes, { mark = 'circle', color = 'red' } = {}) {
+    const hex = `#${COLORS[color]?.hex || COLORS.red.hex}`;
+    const added = [];
+    for (const b of (boxes || []).slice(0, 8)) {
+      if (!(b.w > 0 && b.h > 0)) continue;
+      const item = { kind: 'mark', mark, x: b.x, y: b.y, w: b.w, h: b.h, color: hex, seed: Math.floor(Math.random() * 1e6), reveal: 0 };
+      this.items.push(item);
+      added.push(item);
+      this.animate(item);
+    }
+    if (added.length) this.show();
+    return added;
+  }
+
   clear() {
     this.items = [];
     this.nextY = 0.18;
@@ -126,6 +144,13 @@ export class InkLayer {
     this.onChange(this.pen);
   }
 
+  /** «لون القلم أزرق», «قلم عريض»: the pen changes by voice; the toolbar shows the choice. */
+  setStyle({ color, width } = {}) {
+    if (color && COLORS[color]) { this.color = `#${COLORS[color].hex}`; this.tool = 'pen'; if (this.width > 12) this.width = 5; }
+    if (width) this.width = Math.max(2, Math.min(40, width));
+    if (this.bar) { this.bar.remove(); this.bar = null; if (this.pen) this.toolbar(); }
+  }
+
   toolbar() {
     if (this.bar) return;
     const bar = document.createElement('div');
@@ -144,10 +169,12 @@ export class InkLayer {
       return b;
     };
     const pick = (b) => { for (const x of bar.querySelectorAll('.ink-btn.sel')) x.classList.remove('sel'); b.classList.add('sel'); };
-    for (const [name, hex] of PEN_COLORS) {
-      const b = btn('', name, () => { this.color = hex; this.tool = 'pen'; this.width = 5; pick(b); }, 'swatch');
+    const colors = PEN_COLORS.some(([, hex]) => hex.toUpperCase() === this.color.toUpperCase())
+      ? PEN_COLORS : [...PEN_COLORS, ['', this.color]]; // a colour asked by voice gets its own swatch
+    for (const [name, hex] of colors) {
+      const b = btn('', name || 'اللون المختار', () => { this.color = hex; this.tool = 'pen'; this.width = 5; pick(b); }, 'swatch');
       b.style.setProperty('--c', hex);
-      if (hex === this.color) b.classList.add('sel');
+      if (this.tool === 'pen' && hex.toUpperCase() === this.color.toUpperCase()) b.classList.add('sel');
     }
     const marker = btn('🖍', 'قلم تظليل', () => { this.tool = 'marker'; this.width = 26; pick(marker); });
     const eraser = btn('🧽', 'ممحاة', () => { this.tool = 'eraser'; this.width = 34; pick(eraser); });
@@ -186,7 +213,47 @@ export class InkLayer {
       if (it.kind === 'stroke') this.drawStroke(it);
       else if (it.kind === 'text') this.drawText(it);
       else if (it.kind === 'shape') this.drawShape(it);
+      else if (it.kind === 'mark') this.drawMark(it);
     }
+  }
+
+  drawMark(m) {
+    const { ctx } = this;
+    const rnd = jitter(m.seed);
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (m.mark === 'highlight') {
+      ctx.globalAlpha = 0.38;
+      ctx.fillStyle = m.color;
+      const pad = Math.max(3, m.h * 0.15);
+      ctx.fillRect(m.x + m.w + pad - (m.w + pad * 2) * m.reveal, m.y - pad, (m.w + pad * 2) * m.reveal, m.h + pad * 2); // right to left
+    } else if (m.mark === 'underline') {
+      ctx.strokeStyle = m.color;
+      ctx.lineWidth = Math.max(3, m.h * 0.14);
+      const y = m.y + m.h + Math.max(3, m.h * 0.2);
+      const x0 = m.x + m.w + 4; const x1 = x0 - (m.w + 8) * m.reveal;
+      ctx.beginPath();
+      ctx.moveTo(x0, y + rnd() * 2);
+      ctx.quadraticCurveTo((x0 + x1) / 2, y + 3 + rnd() * 2, x1, y + rnd() * 2);
+      ctx.stroke();
+    } else {
+      // An oval a little bigger than the words, drawn in one go like a teacher's pen.
+      ctx.strokeStyle = m.color;
+      ctx.lineWidth = Math.max(3, Math.min(7, m.h * 0.13));
+      const cx = m.x + m.w / 2; const cy = m.y + m.h / 2;
+      const rx = m.w / 2 + Math.max(10, m.h * 0.45); const ry = m.h / 2 + Math.max(8, m.h * 0.4);
+      const steps = 48; const total = Math.max(2, Math.round((steps + 6) * m.reveal));
+      ctx.beginPath();
+      for (let i = 0; i < total; i += 1) {
+        const a = -Math.PI / 2 + (i / steps) * Math.PI * 2;
+        const wob = 1 + rnd() * 0.04;
+        const x = cx + Math.cos(a) * rx * wob; const y = cy + Math.sin(a) * ry * wob;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   drawStroke(s) {

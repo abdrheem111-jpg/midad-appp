@@ -36,6 +36,7 @@ export function validateAction(action) {
     case 'open_folder': return FOLDERS.has(p.folder) ? null : 'bad_folder';
     case 'search': return str(p.query, 300) && ['google', 'youtube', 'translate', 'meaning'].includes(p.engine) ? null : 'bad_search';
     case 'read_selection': case 'read_screen': case 'active_window': return null;
+    case 'find_on_screen': return str(p.text, 60) ? null : 'bad_text';
     case 'open_download': return str(p.name, 255) && !/[\\/]|^\.\.?$/.test(p.name) ? null : 'bad_file';
     case 'volume': return ['up', 'down', 'mute'].includes(p.direction) ? null : 'bad_volume';
     case 'screenshot': return null;
@@ -109,6 +110,7 @@ export function createExecutor(deps) {
           return err ? { ok: false, error: err } : { ok: true };
         }
         case 'read_screen': return deps.readScreen ? await deps.readScreen() : { ok: false, error: 'unsupported' };
+        case 'find_on_screen': return deps.findOnScreen ? await deps.findOnScreen(p.text) : { ok: false, error: 'unsupported' };
         case 'active_window': return deps.activeWindow ? await deps.activeWindow() : { ok: false, error: 'unsupported' };
         case 'open_tool': return deps.openTool ? deps.openTool(p.tool) : { ok: false, error: 'unsupported' };
         case 'office_put': case 'office_draw': case 'office_format': case 'office_slide': case 'office_equation': case 'office_circle': case 'office_pdf': {

@@ -324,6 +324,13 @@ export function createCharacter(container) {
       <g data-part="armL">
         <path data-part="sleeveL" d="M-24 -119 C-40 -114 -48 -98 -50 -76 L-52 -68 Q-44 -63.5 -35 -66.5 L-34 -76 C-33 -96 -27 -106 -20 -110 Z" fill="url(#${uid}-sleeve)" stroke="${C.clothLine}" stroke-width="2"/>
         <path d="M-51.5 -71 Q-44 -66.5 -35.5 -69.5" fill="none" stroke="${C.clothLine}" stroke-width="1.3"/>
+        <g data-part="pen" opacity="0">
+          <rect x="-48.5" y="-72" width="9.5" height="9" rx="2.6" fill="#0E2F4F"/>
+          <rect data-part="penBody" x="-48.5" y="-64" width="9.5" height="30" rx="3" fill="#1D70B8" stroke="#0E2F4F" stroke-width="1.2"/>
+          <rect x="-46.6" y="-60" width="2.2" height="20" rx="1.1" fill="#FFFFFF" opacity="0.45"/>
+          <path d="M-47.5 -34.5 L-40 -34.5 L-43.75 -26 Z" fill="#F3EEE1" stroke="#0E2F4F" stroke-width="1.1" stroke-linejoin="round"/>
+          <path data-part="penTip" d="M-45.2 -29.2 L-42.3 -29.2 L-43.75 -25.5 Z" fill="#1D70B8"/>
+        </g>
         <path d="M-50.5 -66 C-54 -59 -51 -51 -43.5 -50.5 C-36 -50.5 -33 -57 -35.5 -65 Z" fill="url(#${uid}-hand)" stroke="${C.skinLine}" stroke-width="1.5"/>
         <path d="M-36.5 -63 Q-31 -62 -32 -56.5 Q-34 -55 -36 -57" fill="url(#${uid}-hand)" stroke="${C.skinLine}" stroke-width="1.3"/>
         <g data-part="flag" opacity="0">
@@ -463,6 +470,13 @@ export function createCharacter(container) {
     P.sleeveR.setAttribute('fill', sleeve);
   }
 
+  /** The marker he holds takes the colour of the screen pen. */
+  function setPenColor(hex) {
+    if (!/^#[0-9a-f]{6}$/i.test(String(hex))) return;
+    P.penBody.setAttribute('fill', hex);
+    P.penTip.setAttribute('fill', hex);
+  }
+
   /** Horizontal speed in px/s, drives the tassel swing. */
   function setVelocity(vx) { velocity = Number.isFinite(vx) ? vx : 0; }
 
@@ -592,6 +606,8 @@ export function createCharacter(container) {
     P.sweat.setAttribute('opacity', fxName === 'sweat' ? 0.95 : 0);
     if (fxName === 'sweat') P.sweat.setAttribute('transform', `translate(0 ${f2((clock * 6) % 5)})`);
     P.cup.setAttribute('opacity', pose.cup ? 1 : 0);
+    P.pen.setAttribute('opacity', pose.pen ? 1 : 0);
+    if (costume === 'flag') P.flag.setAttribute('opacity', pose.pen || pose.cup ? 0 : 1);
     if (pose.cup) P.steam.setAttribute('transform', `translate(0 ${f2(-((clock * 6) % 4))})`);
     P.glasses.setAttribute('opacity', pose.glasses ? 1 : 0);
     // the flag pole stays upright whatever the arm does
@@ -630,7 +646,7 @@ export function createCharacter(container) {
     P.kumma.setAttribute('transform', `translate(0 ${f2(pose.kummaY || 0)}) rotate(${f2((pose.kummaRot || 0) + spring.kumma)} 0 -205)`);
   }
 
-  return { el: svg, setEmotion, lookAt, setFacing, setVelocity, setCostume, render, get emotion() { return emotion; }, get costume() { return costume; } };
+  return { el: svg, setEmotion, lookAt, setFacing, setVelocity, setCostume, setPenColor, render, get emotion() { return emotion; }, get costume() { return costume; } };
 }
 
 export const MOUTH_SHAPES = Object.keys(MOUTHS);

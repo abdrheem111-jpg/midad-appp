@@ -34,7 +34,7 @@ export function shapeItems({ shape, color, count = 1, text = '' }) {
     const x = start + i * (size + gap);
     const h = spec.square || shape === 'circle' ? size * 1.6 : size * 1.2; // the area is wider than tall
     if (spec.line) { items.push({ kind: 'line', x, y: 0.5, w: size, fill: bgr(fill) }); continue; }
-    items.push({ kind: 'shape', type: spec.ppt, x, y: (1 - h) / 2, w: size, h, fill: bgr(fill), line: bgr(fill === 'FFFFFF' ? '999999' : fill), text, textColor: bgr(textOn(fill)) });
+    items.push({ kind: 'shape', type: spec.ppt, square: Boolean(spec.square || shape === 'circle'), x, y: (1 - h) / 2, w: size, h, fill: bgr(fill), line: bgr(fill === 'FFFFFF' ? '999999' : fill), text, textColor: bgr(textOn(fill)) });
   }
   return items;
 }

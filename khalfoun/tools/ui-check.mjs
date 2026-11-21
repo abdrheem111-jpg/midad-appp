@@ -892,6 +892,34 @@ await check('W: pen mode: the teacher draws with the mouse, then «امسح ال
   assert(await opage.evaluate(() => window.__khalfoun.ink.items.length === 0), 'ink not cleared');
 });
 
+await check('W: «لون القلم أخضر» turns the pen green; he holds his marker while writing', async () => {
+  await ohear('لون القلم أخضر', 700);
+  assert(await opage.locator('.ink-bar').isVisible(), 'no pen toolbar');
+  const color = await opage.evaluate(() => window.__khalfoun.ink.color);
+  assert(color.toUpperCase() === '#2A9D5C', color);
+  const sel = await opage.evaluate(() => getComputedStyle(document.querySelector('.ink-btn.swatch.sel')).getPropertyValue('--c').trim());
+  assert(sel.toUpperCase() === '#2A9D5C', `selected swatch ${sel}`);
+  await opage.keyboard.press('Escape');
+  await opage.waitForTimeout(300);
+  await ohear('اكتب على الشاشة السلام عليكم', 500);
+  const pen = await opage.evaluate(() => document.querySelector('[data-part="pen"]').getAttribute('opacity'));
+  assert(pen === '1', `marker opacity ${pen}`);
+  await opage.screenshot({ path: `${outDir}/w3-marker.png` });
+  await ohear('امسح الشاشة', 400);
+});
+
+await check('W: «حط دايرة على كلمة الماء» circles the word where it is on the screen', async () => {
+  await opage.evaluate(() => { window.__fakeWords = [{ x: 400, y: 260, w: 120, h: 40, text: 'الماء' }, { x: 300, y: 500, w: 90, h: 40, text: 'النخلة' }]; });
+  await ohear('حط دايرة على كلمة الماء', 1400);
+  const m = await opage.evaluate(() => window.__khalfoun.ink.items.filter((i) => i.kind === 'mark'));
+  assert(m.length === 1 && m[0].x === 400 && m[0].y === 260 && m[0].mark === 'circle', JSON.stringify(m));
+  await ohear('ظلل كلمة النخلة', 1400);
+  const h = await opage.evaluate(() => window.__khalfoun.ink.items.filter((i) => i.kind === 'mark').at(-1));
+  assert(h.mark === 'highlight' && h.x === 300, JSON.stringify(h));
+  await opage.screenshot({ path: `${outDir}/w4-marks.png` });
+  await ohear('امسح الشاشة', 400);
+});
+
 await check('W: «يا خلفون» opens a voice session: commands follow without his name until «خلاص»', async () => {
   await opage.evaluate(() => { window.__khalfoun.bridge._actions.length = 0; window.__fakeTranscripts = ['يا خلفون', 'افتح الحاسبة', 'ارسم دايرة زرقا', 'خلاص']; });
   const wav = () => opage.evaluate(() => window.__khalfoun.onWakeSentence(new Uint8Array(3200)));

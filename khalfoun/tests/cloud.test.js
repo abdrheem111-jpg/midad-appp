@@ -244,3 +244,34 @@ test('from the teacher\'s log: Gemini asks for minimal thinking (it timed out), 
   const off = new GeminiAgent({ key: 'k', fetchFn: async () => reply(403, { error: { message: 'Generative Language API has not been used in project 1 before or it is disabled.' } }) });
   assert.equal((await off.verify()).error, 'api_disabled');
 });
+
+test('Gemini busy or too slow (as on the teacher\'s PC): the next model answers, and is kept', async () => {
+  const { GeminiAgent, geminiPool, GEMINI_ALIAS, GEMINI_LITE_ALIAS } = await import('../src/main/cloud.js');
+  assert.deepEqual(geminiPool(['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.8-flash-lite-tts', 'gemini-3.5-flash', 'gemini-3.0-flash', 'gemini-4-argon']),
+    [GEMINI_ALIAS, GEMINI_LITE_ALIAS, 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite']);
+  const asked = [];
+  const ok = (text) => reply(200, { candidates: [{ content: { parts: [{ text }] } }] });
+  const fetchFn = async (url, init) => {
+    if (url.endsWith('/models?pageSize=200')) return reply(200, { models: [{ name: 'models/gemini-3.5-flash-lite', supportedGenerationMethods: ['generateContent'] }] });
+    const model = /models\/([^:]+):/.exec(url)[1];
+    asked.push(model);
+    if (model === GEMINI_ALIAS) return reply(503, {});
+    if (model === GEMINI_LITE_ALIAS) {
+      // too slow: wait until the call is cut
+      return new Promise((_, rej) => init.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+    }
+    return ok('{"addressed":true,"say":"تم","commands":[]}');
+  };
+  const g = new GeminiAgent({ key: 'k', fetchFn, timeoutMs: 50 });
+  const r = await g.respond({ text: 'هلا' });
+  assert.deepEqual([r.ok, r.say, r.model], [true, 'تم', 'gemini-3.5-flash-lite']);
+  assert.deepEqual(asked, [GEMINI_ALIAS, GEMINI_LITE_ALIAS, 'gemini-3.5-flash-lite']);
+  // the working model is used straight away next time
+  asked.length = 0;
+  assert.equal((await g.respond({ text: 'هلا' })).ok, true);
+  assert.deepEqual(asked, ['gemini-3.5-flash-lite']);
+  // writing goes through the same switch
+  asked.length = 0;
+  const w = await new GeminiAgent({ key: 'k', fetchFn, timeoutMs: 50 }).write({ system: 's', user: 'u', timeoutMs: 50 });
+  assert.deepEqual([w.ok, asked.at(-1)], [true, 'gemini-3.5-flash-lite']);
+});

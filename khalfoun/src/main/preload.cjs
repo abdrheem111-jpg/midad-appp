@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('khalfoun', {
   },
   note: (text) => ipcRenderer.send('diag:note', String(text).slice(0, 600)),
   focus: () => ipcRenderer.send('ui:focus'),
+  giveBack: () => ipcRenderer.send('ui:give-back'),
   setInteractive: (on) => ipcRenderer.send('ui:interactive', Boolean(on)),
   watchWindows: (on) => ipcRenderer.send('ui:watch-windows', Boolean(on)),
   onEvent: (callback) => {

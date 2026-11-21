@@ -215,3 +215,12 @@ test('«افتح» alone guesses the usual app from habits; phrases can be forgo
   assert.deepEqual(brain.taughtPhrases(), []);
   assert.equal(brain.hear('انس كلمة شغلي').situation, 'forget_none');
 });
+
+test('an unrelated office command after a sentence he did not get is not offered as its meaning', () => {
+  const { brain } = makeBrain();
+  assert.equal(brain.hear('لون الغيمه بنفسجي فاتح').situation, 'not_understood');
+  const r = brain.hear('حوله pdf');
+  assert.equal(r.action.type, 'office_pdf');
+  const follow = brain.actionResult(r.action.id, { ok: true, data: { mode: 'inserted', file: 'x.pdf' } });
+  assert.notEqual(follow?.situation, 'learn_offer');
+});

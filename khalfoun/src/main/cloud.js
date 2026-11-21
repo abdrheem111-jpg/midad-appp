@@ -237,6 +237,7 @@ export function cleanAgentAnswer(input) {
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 /** Google keeps renaming its models; this alias follows the newest Flash. */
 export const GEMINI_ALIAS = 'gemini-flash-latest';
+export const GEMINI_LITE_ALIAS = 'gemini-flash-lite-latest';
 
 const GEMINI_SCHEMA = {
   type: 'OBJECT',
@@ -268,13 +269,26 @@ export function pickGeminiModel(models) {
   return ok.sort((a, b) => ver(b) - ver(a))[0] || null;
 }
 
+/**
+ * The models to fall back on, lightest last: the Flash and Flash-Lite aliases, then the two
+ * newest Flash and Flash-Lite versions the key lists (no previews, voices or images).
+ */
+export function geminiPool(names = []) {
+  const plain = names.filter((n) => /^gemini-\d+(\.\d+)?-flash(-lite)?$/.test(n));
+  const ver = (n) => Number(/^gemini-(\d+(?:\.\d+)?)/.exec(n)[1]);
+  const byNew = (a, b) => ver(b) - ver(a);
+  const flash = plain.filter((n) => !n.endsWith('-lite')).sort(byNew).slice(0, 2);
+  const lite = plain.filter((n) => n.endsWith('-lite')).sort(byNew).slice(0, 2);
+  return [...new Set([GEMINI_ALIAS, GEMINI_LITE_ALIAS, ...flash, ...lite])];
+}
+
 export class GeminiAgent {
   /** @param {{key: string, model?: string, fetchFn?: typeof fetch, timeoutMs?: number, now?: () => number}} opts */
   constructor(opts) {
     this.key = opts.key;
     this.model = opts.model || null;
     this.fetchFn = opts.fetchFn || fetch;
-    this.timeoutMs = opts.timeoutMs || 15000;
+    this.timeoutMs = opts.timeoutMs || 12000;
     this.now = opts.now || (() => Date.now());
     // How to ask for little thinking: newer models take «thinkingLevel», older «thinkingBudget»;
     // if a model refuses both, ask without.
@@ -296,9 +310,77 @@ export class GeminiAgent {
 
   /** The model to call: the alias first; if Google rejects it, the newest Flash in the key's list. */
   async resolveModel() {
-    if (this.model) return this.model;
+    // After a switch to a lighter model, the usual one is tried again a while later.
+    if (this.model && this.switchedAt && this.now() - this.switchedAt > 20 * 60000 && this.preferred && !this.isResting(this.preferred)) {
+      this.model = this.preferred; this.switchedAt = 0;
+    }
+    if (this.model) { this.preferred = this.preferred || this.model; return this.model; }
     this.model = GEMINI_ALIAS;
+    this.preferred = GEMINI_ALIAS;
     return this.model;
+  }
+
+  /**
+   * One generateContent call that moves to another model when this one is busy, out of
+   * quota or too slow (Google's free models are often overloaded): the newest Flash, the
+   * Flash-Lite alias, then the versions this key lists. A model that worked is kept; a
+   * failing one rests for a few minutes. Returns the last answer when every model failed.
+   */
+  async generate(model, init, timeoutMs) {
+    const tried = new Set();
+    let current = model;
+    let last = null;
+    let lastErr = null;
+    for (let i = 0; i < 3; i += 1) {
+      tried.add(current);
+      const ms = i === 0 ? timeoutMs : Math.max(6000, Math.round(timeoutMs * 0.7));
+      try {
+        const res = await withTimeout(this.fetchFn, `${GEMINI_BASE}/models/${encodeURIComponent(current)}:generateContent`, init, ms);
+        if (res.status !== 429 && res.status < 500) {
+          if (res.ok && current !== this.model) { this.model = current; this.switchedAt = this.now(); }
+          return { res, model: current };
+        }
+        last = res; lastErr = null;
+        this.rest(current, res.status === 429 ? 30 * 60000 : 3 * 60000);
+      } catch (err) {
+        if (errorName(err) !== 'timeout') throw err;
+        lastErr = err; last = null;
+        this.rest(current, 3 * 60000);
+      }
+      const next = await this.nextModel(tried);
+      if (!next) break;
+      current = next;
+    }
+    if (last) return { res: last, model: current };
+    throw lastErr;
+  }
+
+  rest(model, ms) {
+    this.resting = this.resting || new Map();
+    this.resting.set(model, this.now() + ms);
+  }
+
+  isResting(model) {
+    const until = this.resting?.get(model);
+    return Boolean(until && until > this.now());
+  }
+
+  /** The next model to try after a failure, or null. */
+  async nextModel(tried) {
+    if (!this.pool) {
+      const listed = await this.listModels();
+      this.pool = geminiPool(listed);
+    }
+    return this.pool.find((m) => !tried.has(m) && !this.isResting(m)) || null;
+  }
+
+  async listModels() {
+    try {
+      const res = await withTimeout(this.fetchFn, `${GEMINI_BASE}/models?pageSize=200`, { headers: { 'x-goog-api-key': this.key } }, 6000);
+      if (!res.ok) return [];
+      return ((await res.json())?.models || []).filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+        .map((m) => String(m.name || '').replace(/^models\//, ''));
+    } catch { return []; }
   }
 
   async discoverModel() {
@@ -340,11 +422,11 @@ export class GeminiAgent {
     for (let attempt = 0; attempt < 4; attempt += 1) {
       let res;
       try {
-        res = await withTimeout(this.fetchFn, `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`, {
+        ({ res, model } = await this.generate(model, {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-goog-api-key': this.key },
           body: JSON.stringify(this.body(p)),
-        }, this.timeoutMs);
+        }, this.timeoutMs));
       } catch (err) {
         return { ok: false, error: errorName(err) };
       }
@@ -411,7 +493,7 @@ export class GeminiAgent {
       if (thinking) generationConfig.thinkingConfig = thinking;
       let res;
       try {
-        res = await withTimeout(this.fetchFn, `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`, {
+        ({ res, model } = await this.generate(model, {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-goog-api-key': this.key },
           body: JSON.stringify({
@@ -421,7 +503,7 @@ export class GeminiAgent {
             ] }],
             generationConfig,
           }),
-        }, timeoutMs);
+        }, timeoutMs));
       } catch (err) {
         return { ok: false, error: errorName(err) };
       }
@@ -458,6 +540,20 @@ export function visionPrompt(mode = 'solve') {
   ].join('\n');
 }
 
+/**
+ * Looking at the whole screen at full resolution: what to do, the screen's size, and the
+ * words Windows read with where they are (so numbers and Arabic words are read exactly).
+ */
+export function screenPrompt(task, { width = 0, height = 0, layout = '', kidsMode = false } = {}) {
+  return [
+    'أنت خلفون، مساعد معلم عُماني ذكي. هذه لقطة كاملة لشاشة المعلم الآن' + (width ? ` بدقة ${width}×${height} بكسل.` : '.'),
+    task,
+    layout ? `للدقة: هذا النص كما قرأه قارئ ويندوز مع موقع كل سطر (س,ص العرض×الارتفاع بالبكسل). اعتمد على الصورة، واستعمله للتأكد من الكلمات والأرقام:\n${layout.slice(0, 3500)}` : '',
+    'أجب بالعربية الواضحة، بدون رموز تنسيق ولا نجوم. لا تذكر الإحداثيات إلا إذا طُلبت.',
+    kidsMode ? 'القارئ طفل: كلمات بسيطة جداً.' : '',
+  ].filter(Boolean).join('\n');
+}
+
 /** Cleans a vision answer; null when the model could not read the photo. */
 export function cleanVision(text) {
   const t = String(text || '').replace(/\*\*/g, '').replace(/^#+\s*/gm, '').replace(/\n{3,}/g, '\n\n').trim();
@@ -466,7 +562,7 @@ export function cleanVision(text) {
 }
 
 /** Gemini looks at a photo (base64 JPEG/PNG) and answers in Arabic. */
-GeminiAgent.prototype.vision = async function vision(image, { mime = 'image/jpeg', mode = 'solve', timeoutMs = 30000 } = {}) {
+GeminiAgent.prototype.vision = async function vision(image, { mime = 'image/jpeg', mode = 'solve', timeoutMs = 30000, prompt = '' } = {}) {
   const t0 = this.now();
   let model = await this.resolveModel();
   for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -475,11 +571,11 @@ GeminiAgent.prototype.vision = async function vision(image, { mime = 'image/jpeg
     if (thinking) generationConfig.thinkingConfig = thinking;
     let res;
     try {
-      res = await withTimeout(this.fetchFn, `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`, {
+      ({ res, model } = await this.generate(model, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-goog-api-key': this.key },
-        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ inline_data: { mime_type: mime, data: image } }, { text: visionPrompt(mode) }] }], generationConfig }),
-      }, timeoutMs);
+        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ inline_data: { mime_type: mime, data: image } }, { text: prompt || visionPrompt(mode) }] }], generationConfig }),
+      }, timeoutMs));
     } catch (err) {
       return { ok: false, error: errorName(err) };
     }
@@ -503,7 +599,7 @@ GeminiAgent.prototype.vision = async function vision(image, { mime = 'image/jpeg
 };
 
 /** Claude looks at a photo and answers in Arabic. */
-ClaudeAgent.prototype.vision = async function vision(image, { mime = 'image/jpeg', mode = 'solve', timeoutMs = 30000 } = {}) {
+ClaudeAgent.prototype.vision = async function vision(image, { mime = 'image/jpeg', mode = 'solve', timeoutMs = 30000, prompt = '' } = {}) {
   const t0 = this.now();
   try {
     const res = await withTimeout(this.fetchFn, CLAUDE_URL, {
@@ -512,7 +608,7 @@ ClaudeAgent.prototype.vision = async function vision(image, { mime = 'image/jpeg
       body: JSON.stringify({
         model: this.model,
         max_tokens: 1200,
-        messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: mime, data: image } }, { type: 'text', text: visionPrompt(mode) }] }],
+        messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: mime, data: image } }, { type: 'text', text: prompt || visionPrompt(mode) }] }],
       }),
     }, timeoutMs);
     if (res.status === 401 || res.status === 403) return { ok: false, error: 'bad_key' };
@@ -564,11 +660,11 @@ GeminiAgent.prototype.write = async function write({ system, user, maxTokens = 4
     if (thinking) generationConfig.thinkingConfig = thinking;
     let res;
     try {
-      res = await withTimeout(this.fetchFn, `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`, {
+      ({ res, model } = await this.generate(model, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-goog-api-key': this.key },
         body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text: user }] }], generationConfig }),
-      }, timeoutMs);
+      }, timeoutMs));
     } catch (err) {
       return { ok: false, error: errorName(err) };
     }

@@ -38,6 +38,7 @@ export const ACTION_RISK = {
   open_download: 'open', // a file that just arrived in the Downloads folder
   read_selection: 'system', // copies the selected text; the clipboard is put back
   read_screen: 'system', // a screenshot read on this computer, never sent anywhere
+  find_on_screen: 'system', // the same reading, to mark a word where it is
   active_window: 'none',
   close_app: 'modify', // an app may hold unsaved work; it still gets to ask to save
   search: 'open',

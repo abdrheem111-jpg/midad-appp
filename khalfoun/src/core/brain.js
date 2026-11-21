@@ -69,6 +69,22 @@ export const COUNTED = {
   student: ['طالب واحد', 'طالبين', 'طلاب', 'طالب'],
 };
 
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j += 1) d[0][j] = j;
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  }
+  return d[a.length][b.length];
+}
+
+/** Two sentences share a word, or a word one or two letters apart (three letters or more). */
+export function looksAlike(a, b) {
+  const words = (t) => normalize(t).split(' ').filter((w) => w.length >= 3);
+  const wb = words(b);
+  return words(a).some((x) => wb.some((y) => x === y || editDistance(x, y) <= (Math.max(x.length, y.length) >= 6 ? 2 : 1)));
+}
+
 export class Brain {
   /**
    * @param {{memory?: Memory, memoryData?: object, onMemoryChange?: (d: object) => void,
@@ -450,7 +466,10 @@ export class Brain {
       const unknown = this.context.lastUnknown;
       this.context.lastUnknown = null;
       // A rephrase that worked right after something he did not get: offer to remember it.
-      if (now - unknown.at < 60000 && unknown.raw.length <= 40 && out.action.id && !normalize(raw).includes(normalize(unknown.raw))) {
+      // Only when the new words look like the old ones (a misheard or misspelled word), so
+      // «لون القلم أخضر» followed by an unrelated «حوله pdf» is not offered as the same thing.
+      if (now - unknown.at < 60000 && unknown.raw.length <= 40 && out.action.id && !normalize(raw).includes(normalize(unknown.raw))
+        && (looksAlike(unknown.raw, raw) || !/^(office_|key$|type_text|save_sheet)/.test(out.action.type))) {
         const spec = this.inflight.get(out.action.id);
         if (spec) spec.learnFrom = { phrase: unknown.raw, command: raw };
       }
