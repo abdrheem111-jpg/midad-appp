@@ -1134,6 +1134,31 @@ async function runSmokeTest(stores) {
       sheet = await readFile(join(downloadsDirForSmoke, 'خلفون', `الغياب ${day}.csv`), 'utf8').catch(() => '');
     }
     step('«صدر كشف الغياب» writes a spreadsheet Excel can read', sheet.startsWith('\uFEFF') && /أحمد,غائب/.test(sheet) && /سالم,حاضر/.test(sheet), { said: sheetSaid, head: sheet.slice(0, 60) });
+    // Writing into Office: with no Office here, the words go into a new designed Word file.
+    // (Kids mode was switched on by an earlier step and rightly blocks editing; this part is for the teacher.)
+    settings = { ...settings, kidsMode: false, level: 3 };
+    await js('window.__khalfoun.brain.memory.set({ kidsMode: false, level: 3 })');
+    const wroteSaid = await hear('اكتب في الوورد: السلام عليكم يا طلاب الصف 5');
+    let docx = null;
+    for (let i = 0; i < 25 && !docx; i += 1) {
+      await new Promise((r) => setTimeout(r, 200));
+      docx = await readFile(join(downloadsDirForSmoke, 'خلفون', 'الفقرة.docx')).catch(() => null);
+    }
+    let docText = '';
+    if (docx) { try { const { default: Zip } = await import('jszip'); docText = await (await Zip.loadAsync(docx)).file('word/document.xml').async('string'); } catch { docText = ''; } }
+    step('«اكتب في الوورد: ...» makes a right-to-left Word file with the words (Arabic digits)', /السلام عليكم يا طلاب الصف ٥/.test(docText) && /<w:bidi\/>/.test(docText), { said: wroteSaid, bytes: docx?.length || 0 });
+    const pdfRes = await js(`window.khalfoun.runAction({ id: 9001, type: 'office_put', params: { app: 'pdf', plan: { kind: 'worksheet', title: 'ورقة فحص', blocks: [{ type: 'questions', items: [{ q: 'كم ٢ + ٢؟', choices: ['٣', '٤'], answer: '٤', lines: 0 }] }] } } })`);
+    const pdfBytes = pdfRes?.data?.file ? await readFile(pdfRes.data.file).catch(() => null) : null;
+    step('a worksheet prints to a PDF file', Boolean(pdfBytes && pdfBytes.slice(0, 5).toString() === '%PDF-' && pdfBytes.length > 3000), { res: pdfRes, bytes: pdfBytes?.length || 0 });
+    const badPut = await js(`window.khalfoun.runAction({ id: 9002, type: 'office_put', params: { app: 'notepad', plan: { kind: 'text', blocks: [] } } })`);
+    step('a malformed office action is refused in the main process', badPut && badPut.ok === false, badPut);
+    const drawSaid = await hear('ارسم دايرة حمرا');
+    await new Promise((r) => setTimeout(r, 800));
+    const inked = await js('window.__khalfoun.ink.items.length');
+    step('«ارسم دايرة حمرا» with no Office draws on the screen', inked >= 1, { said: drawSaid, inked });
+    await hear('امسح الشاشة');
+    const compose = await js("window.khalfoun.compose({ kind: 'text', topic: 'النخلة', raw: 'اكتب عن النخلة' })");
+    step('composing without a cloud key says so (no crash, no hang)', compose && compose.ok === false, compose);
     if (process.env.KHALFOUN_SMOKE_TOOLSHOTS) {
       for (const tool of ['board', 'notebook', 'reading']) {
         if (!toolWindows[tool]) continue;

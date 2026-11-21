@@ -2,7 +2,11 @@
 // with gold accents, cream content slides with the title on the right, Arabic right-to-left
 // text, slide numbers, teacher notes, tables, and diagrams laid out by layoutDiagram.
 
-import PptxGenJS from 'pptxgenjs';
+import { createRequire } from 'node:module';
+
+// pptxgenjs's ES build is a .js file without "type": "module", which Electron's Node reads as
+// CommonJS; its CommonJS build loads everywhere.
+const PptxGenJS = createRequire(import.meta.url)('pptxgenjs');
 import { THEME } from './theme.js';
 import { layoutDiagram, COLORS, SHAPES, textOn } from '../../core/office-plan.js';
 import { toArabicDigitsAll } from '../../core/office-math.js';

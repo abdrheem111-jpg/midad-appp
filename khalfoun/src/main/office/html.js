@@ -69,7 +69,7 @@ hr { border: 0; border-top: 2.5px solid #${THEME.accent}; margin: 10px 0 18px; }
 h2 { color: #${THEME.primary}; font-size: 17pt; margin: 18px 0 6px; break-after: avoid; }
 p { margin: 0 0 10px; text-align: justify; } p.soft { color: #${THEME.inkSoft}; }
 ul { list-style: none; padding-inline-start: 18px; } ul li::before { content: '◆'; color: #${THEME.accent}; margin-inline-end: 8px; font-size: 10pt; }
-ol { padding-inline-start: 26px; } ol li::marker { color: #${THEME.primary}; font-weight: 700; }
+ol { padding-inline-start: 26px; } body.arabic ol { list-style-type: arabic-indic; } ol li::marker { color: #${THEME.primary}; font-weight: 700; }
 .q { margin: 12px 0; break-inside: avoid; } .qt b { color: #${THEME.primary}; }
 .choices { display: flex; flex-wrap: wrap; gap: 8px 36px; margin: 4px 22px 0 0; } .choices b { color: #${THEME.accent}; }
 .line { border-bottom: 1.5px dotted #B8A88F; height: 26px; margin: 0 22px 0 0; }
@@ -77,5 +77,5 @@ ol { padding-inline-start: 26px; } ol li::marker { color: #${THEME.primary}; fon
 table { width: 100%; border-collapse: collapse; } th { background: #${THEME.primary}; color: #fff; } th, td { border: 1px solid #${THEME.sandDark}; padding: 6px 8px; text-align: center; } tr:nth-child(even) td { background: #FBF7EE; }
 .diagram { width: 100%; height: auto; margin-top: 20px; }
 .key { break-before: page; } .key h2 { color: #${THEME.accent}; }
-</style></head><body>${body.join('\n')}</body></html>`;
+</style></head><body class="${digits === 'arabic' ? 'arabic' : 'latin'}">${body.join('\n')}</body></html>`;
 }

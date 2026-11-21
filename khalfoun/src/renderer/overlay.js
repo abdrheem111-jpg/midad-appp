@@ -769,7 +769,8 @@ setInterval(() => { if (sessionUntil && !inSession()) endSession('timeout'); }, 
 // Sentences heard while the previous one is still being read wait their turn (two at most).
 const wakeQueue = [];
 async function onWakeSentence(wav) {
-  if (recorder.active || panelsOpen()) return;
+  // His own voice coming back through the speakers is not a command.
+  if (recorder.active || panelsOpen() || voiceOut.speaking) return;
   if (wakeBusy) { if (wakeQueue.length < 2 && (inSession() || brain.dictation)) wakeQueue.push(wav); return; }
   wakeBusy = true;
   try {
