@@ -797,6 +797,8 @@ await check('X: attendance by voice and the day list', async () => {
   await xhear('غايب أحمد ومريم', 400);
   assert(/أحمد/.test(await xbubble()) && /مريم/.test(await xbubble()), await xbubble());
   await xhear('منو غايب اليوم', 400);
+  // the bubble types its text out: wait for the whole line
+  for (let i = 0; i < 20 && !/الغياب \(٢\)/.test(await xbubble()); i += 1) await new Promise((r) => setTimeout(r, 150));
   assert(/الغياب \(٢\)/.test(await xbubble()), await xbubble());
 });
 
