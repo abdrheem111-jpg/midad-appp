@@ -8,6 +8,7 @@ import { calculate } from './calc.js';
 import { keyFor } from './keys.js';
 import { parseClassEntry } from './schedule.js';
 import { recognizeClassroom } from './class-intents.js';
+import { recognizeOffice } from './office-intents.js';
 
 const N = (list) => list.map(normalize).sort((a, b) => b.length - a.length);
 
@@ -311,8 +312,8 @@ const THEN = new Set(N(['وبعدين', 'بعدين', 'وبعدها', 'بعده�
 const SPLIT_INTENTS = new Set(['open', 'close', 'search', 'type_text', 'pdf_write', 'volume', 'reminder', 'screenshot', 'time', 'date',
   'joke', 'dance', 'jump', 'come', 'away', 'sleep', 'organize_downloads', 'cancel_reminders', 'quiz', 'sounds',
   'timer', 'open_tool', 'close_tool', 'pick_student', 'wheel', 'celebrate', 'effect', 'effect_stop', 'noise', 'class_mode', 'race_start', 'riddle',
-  'class_star', 'attendance_today', 'guide', 'attendance', 'race_advance', 'race_stop', 'export_sheet', 'camera', 'voice_test', 'noise', 'speak', 'points_board', 'schedule_today', 'schedule_next']);
-const LEAD_VERBS = new Set(N(['افتح', 'فج', 'شغل', 'سكر', 'اقفل', 'طفي', 'دور', 'ابحث', 'اكتب', 'ذكرني', 'ارفع', 'وطي', 'نزل', 'اكتم', 'رتب', 'صور', 'قول', 'ارقص', 'تعال', 'روح', 'اختار', 'اختر', 'لف', 'احتفل', 'سو', 'سوي', 'ابدا', 'حط']));
+  'class_star', 'attendance_today', 'guide', 'attendance', 'race_advance', 'race_stop', 'export_sheet', 'camera', 'voice_test', 'noise', 'compose', 'draw_shape', 'office_write', 'office_format', 'office_slide', 'office_pdf', 'office_equation', 'office_circle', 'screen_write', 'screen_draw', 'screen_pen', 'screen_clear', 'set_digits', 'key', 'speak', 'points_board', 'schedule_today', 'schedule_next']);
+const LEAD_VERBS = new Set(N(['افتح', 'فج', 'شغل', 'سكر', 'اقفل', 'طفي', 'دور', 'ابحث', 'اكتب', 'ذكرني', 'ارفع', 'وطي', 'نزل', 'اكتم', 'رتب', 'صور', 'قول', 'ارقص', 'تعال', 'روح', 'اختار', 'اختر', 'لف', 'احتفل', 'سو', 'سوي', 'ابدا', 'حط', 'ارسم', 'خلي', 'جهز', 'حضر', 'ضيف', 'حول']));
 
 /**
  * Splits «افتح الحاسبة وبعدين المفكرة» or «افتح الحاسبة وافتح الوورد» into
@@ -669,6 +670,12 @@ function recognizeText(raw, fuzzy) {
     const clock = !repeat && !/ بعد /.test(` ${text} `) ? parseClock(text) : null;
     const minutes = clock ? null : parseMinutes(text);
     return out('reminder', { minutes, clock, note: reminderNote(raw, L.remind, repeat), repeat }, minutes || clock ? 0.92 : 0.6);
+  }
+
+  // ---- writing and drawing in Word, PowerPoint, Excel and PDF
+  {
+    const hit = recognizeOffice(text, raw);
+    if (hit) return out(...hit);
   }
 
   if (findPhrase(padded, L.pdfSign)) {

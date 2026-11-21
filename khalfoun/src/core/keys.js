@@ -6,7 +6,7 @@ import { normalize } from './arabic.js';
 
 /** id → {ar: name he says, edits: changes content?, phrases: what people say} */
 export const KEYS = {
-  enter: { ar: 'إنتر', edits: true, phrases: ['انتر', 'انتير', 'اضغط انتر', 'دوس انتر', 'ادخال', 'اضغط ادخال'] },
+  enter: { ar: 'إنتر', edits: true, phrases: ['انتر', 'انتير', 'اضغط انتر', 'دوس انتر', 'ادخال', 'اضغط ادخال', 'انزل سطر', 'نزل سطر', 'سطر جديد', 'سطر ثاني', 'انزل سطر جديد', 'فقره جديده', 'روح السطر الجاي', 'السطر اللي بعده', 'انزل تحت سطر'] },
   tab: { ar: 'تاب', edits: false, phrases: ['تاب', 'اضغط تاب'] },
   escape: { ar: 'إسكيب', edits: false, phrases: ['اسكيب', 'اضغط اسكيب', 'اسكب'] },
   space: { ar: 'مسافة', edits: true, phrases: ['مسافه', 'اضغط مسافه', 'سبيس'] },
@@ -35,8 +35,13 @@ export const KEYS = {
   page_up: { ar: 'طلوع في الصفحة', edits: false, phrases: ['اطلع في الصفحه', 'اطلع فوق في الصفحه', 'طلع الصفحه', 'سكرول فوق', 'طلع في الصفحه'] },
   top: { ar: 'أول الصفحة', edits: false, phrases: ['اول الصفحه', 'روح اول الصفحه', 'بدايه الصفحه'] },
   bottom: { ar: 'آخر الصفحة', edits: false, phrases: ['اخر الصفحه', 'روح اخر الصفحه', 'نهايه الصفحه'] },
-  zoom_in: { ar: 'تكبير', edits: false, phrases: ['كبر الخط', 'كبر الشاشه', 'زووم', 'قرب الشاشه', 'كبر الصفحه'] },
-  zoom_out: { ar: 'تصغير', edits: false, phrases: ['صغر الخط', 'صغر الشاشه', 'بعد الشاشه', 'صغر الصفحه'] },
+  // Formatting shortcuts (used when no Office program answers; «خلي الخط عريض» goes through Office first).
+  bold: { ar: 'خط عريض', edits: true, phrases: [] },
+  italic: { ar: 'خط مائل', edits: true, phrases: [] },
+  underline: { ar: 'خط تحت الكلام', edits: true, phrases: [] },
+  align_center: { ar: 'توسيط', edits: true, phrases: [] },
+  zoom_in: { ar: 'تكبير', edits: false, phrases: ['كبر الشاشه', 'زووم', 'قرب الشاشه', 'كبر الصفحه'] },
+  zoom_out: { ar: 'تصغير', edits: false, phrases: ['صغر الشاشه', 'بعد الشاشه', 'صغر الصفحه'] },
   zoom_reset: { ar: 'الحجم الطبيعي', edits: false, phrases: ['رجع الحجم', 'الحجم الطبيعي', 'رجع الخط طبيعي'] },
   switch_window: { ar: 'تبديل النافذة', edits: false, phrases: ['بدل النافذه', 'غير النافذه', 'النافذه الثانيه', 'روح النافذه الثانيه', 'بدل البرنامج'] },
   show_desktop: { ar: 'سطح المكتب', edits: false, phrases: ['سطح المكتب', 'وريني سطح المكتب', 'نزل كل النوافذ', 'خفي النوافذ', 'روح سطح المكتب'] },

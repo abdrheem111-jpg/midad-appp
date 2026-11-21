@@ -44,6 +44,7 @@ const KEY_WIN = {
   slideshow: '{F5}', next_slide: '{RIGHT}', prev_slide: '{LEFT}', end_show: '{ESC}',
   new_file: '^n', new_tab: '^t', close_tab: '^w', next_tab: '^{TAB}', prev_tab: '^+{TAB}', reopen_tab: '^+t',
   page_down: '{PGDN}', page_up: '{PGUP}', top: '^{HOME}', bottom: '^{END}',
+  bold: '^b', italic: '^i', underline: '^u', align_center: '^e',
   zoom_in: '^{ADD}', zoom_out: '^{SUBTRACT}', zoom_reset: '^0', switch_window: '%{TAB}', fullscreen: '{F11}', refresh: '{F5}',
 };
 const KEY_MAC = {
@@ -54,7 +55,7 @@ const KEY_MAC = {
   find: ['keystroke "f" using command down'], new_file: ['keystroke "n" using command down'], slideshow: ['keystroke return using {command down, shift down}'], next_slide: ['key code 124'], prev_slide: ['key code 123'], end_show: ['key code 53'], new_tab: ['keystroke "t" using command down'], close_tab: ['keystroke "w" using command down'],
   next_tab: ['keystroke "]" using {command down, shift down}'], prev_tab: ['keystroke "[" using {command down, shift down}'],
   reopen_tab: ['keystroke "t" using {command down, shift down}'], page_down: ['key code 121'], page_up: ['key code 116'],
-  top: ['key code 126 using command down'], bottom: ['key code 125 using command down'], zoom_in: ['keystroke "=" using command down'],
+  top: ['key code 126 using command down'], bottom: ['key code 125 using command down'], bold: ['keystroke "b" using command down'], italic: ['keystroke "i" using command down'], underline: ['keystroke "u" using command down'], align_center: ['keystroke "e" using command down'], zoom_in: ['keystroke "=" using command down'],
   zoom_out: ['keystroke "-" using command down'], zoom_reset: ['keystroke "0" using command down'], switch_window: ['key code 48 using command down'],
   show_desktop: ['key code 103'], fullscreen: ['keystroke "f" using {command down, control down}'], refresh: ['keystroke "r" using command down'],
 };
@@ -63,7 +64,7 @@ const KEY_LINUX = {
   paste: 'ctrl+v', cut: 'ctrl+x', select_all: 'ctrl+a', save: 'ctrl+s', print: 'ctrl+p', undo: 'ctrl+z', redo: 'ctrl+y', find: 'ctrl+f',
   slideshow: 'F5', next_slide: 'Right', prev_slide: 'Left', end_show: 'Escape',
   new_file: 'ctrl+n', new_tab: 'ctrl+t', close_tab: 'ctrl+w', next_tab: 'ctrl+Tab', prev_tab: 'ctrl+shift+Tab', reopen_tab: 'ctrl+shift+t',
-  page_down: 'Next', page_up: 'Prior', top: 'ctrl+Home', bottom: 'ctrl+End', zoom_in: 'ctrl+plus', zoom_out: 'ctrl+minus',
+  page_down: 'Next', page_up: 'Prior', top: 'ctrl+Home', bottom: 'ctrl+End', bold: 'ctrl+b', italic: 'ctrl+i', underline: 'ctrl+u', align_center: 'ctrl+e', zoom_in: 'ctrl+plus', zoom_out: 'ctrl+minus',
   zoom_reset: 'ctrl+0', switch_window: 'alt+Tab', show_desktop: 'super+d', fullscreen: 'F11', refresh: 'F5',
 };
 

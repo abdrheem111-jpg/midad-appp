@@ -30,6 +30,10 @@ import { DiagLog } from './diag.js';
 import { ocrImage } from './ocr.js';
 import { TASK_MODES, LOOK_MODES } from '../core/chat-prompt.js';
 import { Notebook } from '../core/notebook.js';
+import { OfficeHost } from './office/office-host.js';
+import { createOfficeActions } from './office/index.js';
+import { composePrompt, extractJson, cleanPlan, KINDS } from '../core/office-plan.js';
+const KIND_SET = new Set(Object.keys(KINDS));
 import { PARTIAL_DOWNLOAD, downloadKind } from '../core/desktop.js';
 import {
   setupVoice, pullOllamaModel, ollamaStatus, setupErrorText, packSizeMB,
@@ -74,7 +78,8 @@ let whisper = { available: false, bin: null, model: null, wakeModel: null };
 let watcher = null;
 let chat = null; // ChatClient when a local model is found
 let chatInfo = null;
-let downloadsDirForSmoke = ''; // the smoke test's own Downloads/Documents folder
+let downloadsDirForSmoke = '';
+let officeHost = null; // the PowerShell that writes and draws inside Office (Windows) // the smoke test's own Downloads/Documents folder
 let visionModel = null; // a local model that understands images (gemma3, qwen2.5vl, llava...)
 let voiceDirs = [];
 let diag = { write() {} }; // DiagLog once the profile folder is known
@@ -392,6 +397,20 @@ async function renderOverlayPdf(html, size) {
   }
 }
 
+let docFontCss = '';
+
+/** Prints a whole document page (HTML) to an A4 PDF file. */
+async function printPlanPdf(html, file) {
+  const view = new BrowserWindow({ show: false, width: 900, height: 1200, webPreferences: { offscreen: true, javascript: false, sandbox: true } });
+  try {
+    await view.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    const pdf = await view.webContents.printToPDF({ pageSize: 'A4', printBackground: true, preferCSSPageSize: true });
+    await writeFile(file, pdf);
+  } finally {
+    view.destroy();
+  }
+}
+
 async function writePdf(text, position, dirs, page = 1) {
   const res = await writeIntoLatestPdf({ dirs, text, position, page, render: renderOverlayPdf, fontCss: pdfFontCss });
   if (res.ok && !SMOKE) shell.openPath(res.data.file);
@@ -575,6 +594,34 @@ function setupIpc(stores, executor) {
     });
     diag.write(secrets.brain || 'brain', `«${String(p.text || '').slice(0, 80)}» →`, res.ok ? `${res.addressed ? '' : '(not for me) '}«${res.say}» ${JSON.stringify(res.commands)} ${res.ms} ms${res.model ? ` ${res.model}` : ''}` : `failed: ${res.error}${res.detail ? ` (${res.detail})` : ''}`);
     return res;
+  });
+  // Writing a document, deck, table or diagram with the cloud brain (or the local model).
+  ipcMain.handle('office:compose', async (event, payload) => {
+    if (!fromApp(event)) return { ok: false, error: 'forbidden' };
+    const p = payload && typeof payload === 'object' ? payload : {};
+    const kind = KIND_SET.has(p.kind) ? p.kind : 'text';
+    const req = { kind, topic: String(p.topic || '').slice(0, 300), count: Number(p.count) || null, raw: String(p.raw || '').slice(0, 400) };
+    const prompt = composePrompt(req);
+    const digitsLine = p.digits === 'latin' ? 'اكتب الأرقام بالأرقام 0123456789.' : 'اكتب كل الأرقام بالأرقام العربية المشرقية: ٠١٢٣٤٥٦٧٨٩.';
+    const kidsLine = settings.kidsMode ? '\nالقارئ طفل: كلمات بسيطة جداً وجمل قصيرة.' : '';
+    const system = `${prompt.system}\n${digitsLine}${kidsLine}`;
+    const t0 = Date.now();
+    let res;
+    if (secrets.brain) {
+      const fetchFn = (url, init) => net.fetch(url, init);
+      res = await chainAgents([
+        secrets.data.gemini ? new GeminiAgent({ key: secrets.geminiKey, fetchFn }) : null,
+        secrets.data.claude ? new ClaudeAgent({ key: secrets.claudeKey, fetchFn }) : null,
+      ]).write({ system, user: prompt.user });
+    } else if (chat && settings.chatEnabled !== false) {
+      res = await chat.compose({ system, user: prompt.user });
+    } else {
+      return { ok: false, error: 'no_cloud' };
+    }
+    if (!res.ok) { diag.write('compose', kind, 'failed:', res.error); return { ok: false, error: res.error }; }
+    const plan = cleanPlan(kind, extractJson(res.text));
+    diag.write('compose', kind, `«${req.topic.slice(0, 40)}» →`, plan ? `ok (${res.service || 'local'}, ${((Date.now() - t0) / 1000).toFixed(1)} s)` : 'unusable answer');
+    return plan ? { ok: true, plan } : { ok: false, error: 'unusable' };
   });
   ipcMain.handle('voice:speak', async (event, text) => {
     if (!fromApp(event)) return { ok: false, error: 'forbidden' };
@@ -1152,8 +1199,21 @@ async function start() {
   });
   reminderScheduler = new ReminderScheduler({ store: new JsonStore(userData, 'reminders.json', { items: [] }), onFire: showReminder });
   await reminderScheduler.restore();
+  officeHost = new OfficeHost({ tempDir: join(app.getPath('temp'), 'khalfoun'), log: (...a) => diag.write(...a) });
+  const office = createOfficeActions({
+    host: officeHost,
+    documentsDir: SMOKE ? downloadsDir : app.getPath('documents'),
+    openPath: (f) => shell.openPath(f),
+    personProcess: async () => { const w = await activeWindow(); return w.ok ? w.data.process : null; },
+    printPdf: printPlanPdf,
+    fontCss: async () => docFontCss,
+    pressKey: (k) => platform.pressKey(k),
+    typeText: (t) => platform.typeText(t),
+    openFiles: !SMOKE,
+    log: (...a) => diag.write(...a),
+  });
   const executor = createExecutor({
-    platform, getSettings: () => settings, downloadsDir, journal: stores.journal, scheduleReminder,
+    platform, getSettings: () => settings, downloadsDir, journal: stores.journal, scheduleReminder, office,
     cancelReminders: () => reminderScheduler.cancelAll(),
     readScreen,
     activeWindow,
@@ -1166,6 +1226,8 @@ async function start() {
   try {
     const font = await readFile(join(ROOT, 'assets', 'fonts', 'Tajawal-700-arabic.woff2'));
     pdfFontCss = `@font-face { font-family: 'Tajawal'; font-weight: 700; src: url(data:font/woff2;base64,${font.toString('base64')}) format('woff2'); }`;
+    const regular = await readFile(join(ROOT, 'assets', 'fonts', 'Tajawal-400-arabic.woff2'));
+    docFontCss = `${pdfFontCss}\n@font-face { font-family: 'Tajawal'; font-weight: 400; src: url(data:font/woff2;base64,${regular.toString('base64')}) format('woff2'); }`;
   } catch { /* system fonts still work */ }
   watcher = new WindowWatcher({
     onChange: (list) => send('windows', { list }),
@@ -1224,6 +1286,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
     if (fgHelper) { try { fgHelper.child.kill(); } catch { /* gone */ } }
+    officeHost?.stop();
     if (watcher) watcher.stop();
     if (reminderScheduler) reminderScheduler.stop();
   });

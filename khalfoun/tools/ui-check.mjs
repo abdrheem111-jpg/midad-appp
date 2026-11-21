@@ -417,11 +417,12 @@ await check('a sentence without his name is ignored; «يا خلفون افتح 
 
 await check('just «يا خلفون» makes him answer and listen for the command', async () => {
   await vpage.waitForTimeout(1500);
-  await vpage.evaluate(() => { window.__fakeTranscripts = ['يا خلفون', 'كم الساعة']; window.__khalfoun.bridge._transcribeCalls.length = 0; });
+  await vpage.evaluate(() => { window.__fakeTranscripts = ['يا خلفون', 'كم الساعة', 'خلاص']; window.__khalfoun.bridge._transcribeCalls.length = 0; });
   const ok = await until("window.__khalfoun.bridge._transcribeCalls.some((c) => c.purpose === 'command')", 25000);
   assert(ok, `never listened for a command: ${JSON.stringify(await vpage.evaluate(() => window.__khalfoun.bridge._transcribeCalls))}`);
-  await vpage.waitForTimeout(1500);
-  assert(/[٠-٩]/.test(await vbubble()), `bubble: ${await vbubble()}`);
+  // In the session the next sentence is the command: the time comes back.
+  const told = await until("/[٠-٩]/.test(document.getElementById('bubble-text').textContent)", 12000);
+  assert(told, `bubble: ${await vbubble()}`);
   await vpage.screenshot({ path: `${outDir}/6-wake.png` });
 });
 
@@ -822,6 +823,101 @@ await check('X: the reading check records a student and marks the words', async 
   assert(await rpage.locator('#res-words .w.bad').count() >= 2, 'no marked words');
   assert(/مريم/.test(await rpage.locator('#history').textContent()), 'no history');
   await rpage.screenshot({ path: `${outDir}/x13-reading-result.png`, fullPage: true });
+});
+
+// ------------------------------------------------------------------ writing, drawing, the voice session
+const opage = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+opage.on('pageerror', (e) => problems.push(`office page error: ${e.message}`));
+opage.on('console', (m) => { if (m.type() === 'error') problems.push(`office console: ${m.text()}`); });
+await opage.goto(`${base}?fakevoice=1`);
+await opage.evaluate(() => {
+  localStorage.setItem('khalfoun.settings', JSON.stringify({ onboarded: true, level: 3, kidsMode: false }));
+  localStorage.setItem('khalfoun.memory', JSON.stringify({ name: 'عبدالرحيم', humor: 1 }));
+});
+await opage.reload();
+await opage.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 15000 });
+const obubble = () => opage.locator('#bubble-text').textContent();
+const ohear = async (t, wait = 700) => { await opage.evaluate((s) => window.__khalfoun.hear(s), t); await opage.waitForTimeout(wait); };
+const lastAction = () => opage.evaluate(() => { const a = window.__khalfoun.bridge._actions; return a[a.length - 1] || null; });
+
+await check('W: «اكتب فقرة عن النخلة في الوورد» asks the cloud brain, then writes a Word document', async () => {
+  await ohear('اكتب فقرة عن النخلة في الوورد', 2200);
+  const call = await opage.evaluate(() => window.__khalfoun.bridge._chatCalls.find((c) => c.compose));
+  assert(call && call.compose === 'text' && call.topic === 'النخلة', JSON.stringify(call));
+  const a = await lastAction();
+  assert(a && a.type === 'office_put' && a.params.app === 'word' && a.params.plan.blocks[0].text.includes('النخلة'), JSON.stringify(a));
+  assert(/ملف جديد|الوورد/.test(await obubble()), await obubble());
+});
+
+await check('W: «افتح الوورد واكتب فقرة عن الماء» waits for Word before writing', async () => {
+  await opage.evaluate(() => { window.__khalfoun.bridge._actions.length = 0; });
+  await ohear('افتح الوورد واكتب فقرة عن الماء', 4200);
+  const types = await opage.evaluate(() => window.__khalfoun.bridge._actions.map((x) => x.type));
+  assert(types[0] === 'open_app' && types.includes('office_put'), types.join(','));
+});
+
+await check('W: drawing with no Office open lands on the screen in a hand-drawn style', async () => {
+  await ohear('ارسم ٣ نجوم صفرا', 1500);
+  const n = await opage.evaluate(() => window.__khalfoun.ink.items.filter((i) => i.kind === 'shape').length);
+  assert(n === 3, `shapes on screen: ${n}`);
+  assert(await opage.evaluate(() => document.querySelector('.ink-canvas').classList.contains('on')), 'ink hidden');
+  await ohear('اكتب على الشاشة مرحبا يا طلاب', 1800);
+  await ohear('اكتب معادلة س زائد اثنين يساوي خمسة', 2000);
+  const texts = await opage.evaluate(() => window.__khalfoun.ink.items.filter((i) => i.kind === 'text').map((i) => i.text));
+  assert(texts.includes('مرحبا يا طلاب') && texts.includes('س + ٢ = ٥'), texts.join(' | '));
+  await opage.screenshot({ path: `${outDir}/w1-screen-ink.png` });
+});
+
+await check('W: «دور عليه» with no Office circles the spot under the mouse', async () => {
+  await opage.mouse.move(900, 300);
+  await ohear('دور عليه', 1200);
+  const c = await opage.evaluate(() => window.__khalfoun.ink.items.at(-1));
+  assert(c.kind === 'shape' && c.outline && Math.abs(c.x - 900) < 2 && Math.abs(c.y - 300) < 2, JSON.stringify(c));
+});
+
+await check('W: pen mode: the teacher draws with the mouse, then «امسح الشاشة» clears everything', async () => {
+  await ohear('قلم', 600);
+  assert(await opage.locator('.ink-bar').isVisible(), 'no pen toolbar');
+  await opage.mouse.move(500, 500);
+  await opage.mouse.down();
+  for (let i = 1; i <= 10; i += 1) await opage.mouse.move(500 + i * 20, 500 - i * 8);
+  await opage.mouse.up();
+  const strokes = await opage.evaluate(() => window.__khalfoun.ink.items.filter((i) => i.kind === 'stroke').length);
+  assert(strokes === 1, `strokes: ${strokes}`);
+  await opage.screenshot({ path: `${outDir}/w2-pen.png` });
+  await opage.keyboard.press('Escape');
+  await opage.waitForTimeout(400);
+  assert(await opage.locator('.ink-bar').count() === 0, 'toolbar still open');
+  await ohear('امسح الشاشة', 400);
+  assert(await opage.evaluate(() => window.__khalfoun.ink.items.length === 0), 'ink not cleared');
+});
+
+await check('W: «يا خلفون» opens a voice session: commands follow without his name until «خلاص»', async () => {
+  await opage.evaluate(() => { window.__khalfoun.bridge._actions.length = 0; window.__fakeTranscripts = ['يا خلفون', 'افتح الحاسبة', 'ارسم دايرة زرقا', 'خلاص']; });
+  const wav = () => opage.evaluate(() => window.__khalfoun.onWakeSentence(new Uint8Array(3200)));
+  await wav();
+  await opage.waitForTimeout(400);
+  assert(await opage.evaluate(() => window.__khalfoun.inSession), 'no session');
+  assert(await opage.locator('#session-chip').isVisible(), 'no session chip');
+  await opage.screenshot({ path: `${outDir}/w3-session.png` });
+  await wav();
+  await opage.waitForTimeout(900);
+  await wav();
+  await opage.waitForTimeout(1200);
+  const types = await opage.evaluate(() => window.__khalfoun.bridge._actions.map((x) => x.type));
+  assert(types.includes('open_app') && types.includes('office_draw'), types.join(','));
+  await wav();
+  await opage.waitForTimeout(500);
+  assert(await opage.evaluate(() => !window.__khalfoun.inSession), 'session still open after «خلاص»');
+  assert(await opage.locator('#session-chip').isHidden(), 'chip still shown');
+});
+
+await check('W: words outside a session are only checked for his name', async () => {
+  await opage.evaluate(() => { window.__khalfoun.bridge._actions.length = 0; window.__fakeTranscripts = ['افتح الحاسبة']; });
+  await opage.evaluate(() => window.__khalfoun.onWakeSentence(new Uint8Array(3200)));
+  await opage.waitForTimeout(600);
+  const types = await opage.evaluate(() => window.__khalfoun.bridge._actions.map((x) => x.type));
+  assert(!types.includes('open_app'), types.join(','));
 });
 
 await browser.close();

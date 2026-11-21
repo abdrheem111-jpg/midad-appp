@@ -20,6 +20,8 @@ import { Effects } from './effects.js';
 import { NameWheel, RaceBoard, NoiseGauge, CameraPanel, VoiceTestPanel } from './classroom-ui.js';
 import { GUIDE } from '../core/guide.js';
 import { STAR_MILESTONES as STAR_STEPS } from '../core/classfun.js';
+import { InkLayer } from './ink.js';
+import { normalize } from '../core/arabic.js';
 
 const CHAR_W = 170;
 const CHAR_H = 209;
@@ -56,6 +58,11 @@ const raceBoard = new RaceBoard(document.body);
 const noise = new NoiseGauge(document.body);
 const CLASS_SCALE = 1.9; // «وضع الصف»: big enough for the back row on a projector
 let classMode = false;
+// Writing and drawing on the screen (voice, or the teacher's own pen).
+const ink = new InkLayer({ onChange: (on) => { if (!on) setInteractive(false); } });
+// The voice session: after «يا خلفون», every sentence is a command until «خلاص» or a quiet spell.
+let sessionUntil = 0;
+let waitingQueue = false; // a queued command waits for the step before it (a file, an answer) to finish
 
 // ------------------------------------------------------------------ bubble
 
@@ -180,6 +187,13 @@ function handle(reply) {
       break;
   }
   if (reply.effect) playEffect(reply.effect);
+  if (reply.ink) {
+    if (reply.ink.clear) ink.clear();
+    else if (reply.ink.text) ink.write(reply.ink.text);
+    else if (reply.ink.shape) ink.draw(reply.ink);
+  }
+  if (reply.pen !== undefined) { ink.setPen(reply.pen); if (reply.pen) { closeCommand(); setInteractive(true); } }
+  if (reply.compose) runCompose(reply.compose);
   if (reply.race !== undefined) raceBoard.show(reply.race, () => { brain.race = null; });
   if (reply.noise === true) startNoise();
   else if (reply.noise === false) noise.stop();
@@ -189,7 +203,11 @@ function handle(reply) {
   if (reply.ask) runTask(reply.ask);
   if (reply.look) runLook(reply.look);
   // «افتح الحاسبة وبعدين المفكرة»: the next command follows after a short pause.
-  if (reply.more) setTimeout(() => handle(brain.continueQueue()), 1600);
+  // The next queued command waits for this one's action or writing to finish.
+  if (reply.more) {
+    if (reply.action || reply.compose) waitingQueue = true;
+    else setTimeout(() => handle(brain.continueQueue()), 1600);
+  }
 }
 
 // ------------------------------------------------------- speaking voice
@@ -511,6 +529,28 @@ async function runAction(action) {
     result = { ok: false, error: String(err?.message || err) };
   }
   handle(brain.actionResult(action.id, result));
+  nextInQueue();
+}
+
+function nextInQueue() {
+  if (!waitingQueue) return;
+  waitingQueue = false;
+  setTimeout(() => handle(brain.continueQueue()), 500);
+}
+
+/** The cloud brain writes the document; then the brain turns it into an action. */
+async function runCompose(req) {
+  const slow = setTimeout(() => { if (brain.composing) handle(brain.event('thinking_long')); }, 9000);
+  let res;
+  try {
+    res = typeof bridge.compose === 'function' ? await bridge.compose(req) : { ok: false, error: 'no_cloud' };
+  } catch (err) {
+    res = { ok: false, error: String(err?.message || err) };
+  }
+  clearTimeout(slow);
+  const next = brain.composed(req, res);
+  handle(next);
+  if (!next?.action) nextInQueue();
 }
 
 let chatting = false;
@@ -691,44 +731,106 @@ function updateWake() {
   els.ear.hidden = !want;
 }
 
+/** «خلاص», «شكراً»...: the end of a voice session. */
+const SESSION_END = new Set(['خلاص', 'خلاص يا خلفون', 'خلاص خلفون', 'شكرا', 'شكرا خلفون', 'شكرا يا خلفون', 'مشكور', 'تسلم', 'تسلم يا خلفون', 'مع السلامه', 'بس', 'بس خلاص', 'وقف السماع', 'لا تسمع', 'كفايه', 'خلصت', 'خلاص خلصت', 'خلاص شكرا', 'باي'].map(normalize));
+const SESSION_MS = () => Math.max(1, Math.min(10, Number(brain?.memory.data.sessionMinutes) || 2)) * 60000;
+const inSession = () => Date.now() < sessionUntil;
+
+function startSession() {
+  if (brain?.memory.data.voiceSession === false) return;
+  const was = inSession();
+  sessionUntil = Date.now() + SESSION_MS();
+  els.stage.classList.add('session');
+  els.ear.classList.add('session');
+  showSessionChip();
+  if (!was) bridge.note?.('voice session started');
+}
+
+function endSession(why) {
+  if (!sessionUntil) return;
+  sessionUntil = 0;
+  if (why === 'words') followUntil = 0; // «خلاص» means done: no follow-up listening either
+  els.stage.classList.remove('session');
+  els.ear.classList.remove('session');
+  $('session-chip').hidden = true;
+  bridge.note?.(`voice session ended (${why})`);
+  if (why === 'timeout') handle(brain.event('session_timeout'));
+  else if (why === 'words') handle(brain.event('session_end'));
+}
+
+function showSessionChip() {
+  const chip = $('session-chip');
+  chip.textContent = 'أسمعك… قول أوامرك، و«خلاص» لما تخلص';
+  chip.hidden = false;
+}
+
+setInterval(() => { if (sessionUntil && !inSession()) endSession('timeout'); }, 1000);
+
+// Sentences heard while the previous one is still being read wait their turn (two at most).
+const wakeQueue = [];
 async function onWakeSentence(wav) {
-  if (wakeBusy || recorder.active || panelsOpen()) return;
+  if (recorder.active || panelsOpen()) return;
+  if (wakeBusy) { if (wakeQueue.length < 2 && (inSession() || brain.dictation)) wakeQueue.push(wav); return; }
   wakeBusy = true;
   try {
-    if (brain.dictation) {
-      // Dictation: every sentence counts, read with the accurate model.
-      const res = await bridge.transcribe(wav, 'command');
-      if (res?.ok && res.text) {
-        const hit = findWakeWord(res.text);
-        const said = hit.found ? hit.rest : res.text;
-        if (said) hear(said);
-      }
-      return;
-    }
-    const res = await bridge.transcribe(wav, 'wake');
-    if (!res?.ok || !res.text) return;
-    const hit = findWakeWord(res.text);
-    if (!hit.found) {
-      // A follow-up right after he answered needs no name; Claude (or the rules) decide
-      // whether it was meant for him, and he stays quiet if not.
-      if (Date.now() < followUntil && !chatting) hear(res.text, { quietIfUnknown: true });
-      return;
-    }
-    els.ear.classList.add('heard');
-    setTimeout(() => els.ear.classList.remove('heard'), 900);
-    if (hit.rest && !['call', 'empty'].includes(recognize(hit.rest).intent)) {
-      // «يا خلفون افتح الحاسبة» in one breath: do it right away.
-      hear(hit.rest);
-      return;
-    }
-    const wasAsleep = brain.emotions.asleep;
-    handle(brain.event('wake_call'));
-    if (wasAsleep) await new Promise((r) => setTimeout(r, 900));
-    wake.pause();
-    try { await listen(); } finally { wake.resume(); }
+    await readWakeSentence(wav);
+    while (wakeQueue.length) await readWakeSentence(wakeQueue.shift());
   } finally {
     wakeBusy = false;
   }
+}
+
+async function readWakeSentence(wav) {
+  if (brain.dictation) {
+    // Dictation: every sentence counts, read with the accurate model.
+    const res = await bridge.transcribe(wav, 'command');
+    if (res?.ok && res.text) {
+      const hit = findWakeWord(res.text);
+      const said = hit.found ? hit.rest : res.text;
+      if (said) hear(said);
+    }
+    return;
+  }
+  // In a session every sentence is read as a command (accurate), not just checked for his name.
+  const session = inSession();
+  const res = await bridge.transcribe(wav, session ? 'command' : 'wake');
+  if (!res?.ok || !res.text) return;
+  const hit = findWakeWord(res.text);
+  if (session) {
+    const said = (hit.found ? hit.rest : res.text).trim();
+    if (!said) { startSession(); return; }
+    showHeard(said);
+    if (SESSION_END.has(normalize(said))) { endSession('words'); return; }
+    sessionUntil = Date.now() + SESSION_MS(); // each command keeps the session open
+    hear(said, { quietIfUnknown: true, session: true });
+    return;
+  }
+  if (!hit.found) {
+    // A follow-up right after he answered needs no name; Claude (or the rules) decide
+    // whether it was meant for him, and he stays quiet if not.
+    if (Date.now() < followUntil && !chatting) hear(res.text, { quietIfUnknown: true });
+    return;
+  }
+  els.ear.classList.add('heard');
+  setTimeout(() => els.ear.classList.remove('heard'), 900);
+  const wasAsleep = brain.emotions.asleep;
+  if (hit.rest && !['call', 'empty'].includes(recognize(hit.rest).intent)) {
+    // «يا خلفون افتح الحاسبة» in one breath: do it, and keep listening for the next one.
+    startSession();
+    showHeard(hit.rest);
+    hear(hit.rest);
+    return;
+  }
+  if (brain.memory.data.voiceSession !== false) {
+    // «يا خلفون» alone opens the session: no button, no repeating his name.
+    handle(brain.event('session_start'));
+    startSession();
+    return;
+  }
+  handle(brain.event('wake_call'));
+  if (wasAsleep) await new Promise((r) => setTimeout(r, 900));
+  wake.pause();
+  try { await listen(); } finally { wake.resume(); }
 }
 
 // ---------------------------------------------------------- open windows
@@ -765,8 +867,9 @@ const panelsOpen = () => !els.onboarding.hidden || !els.settings.hidden || !$('g
 let lastMouseX = null;
 document.addEventListener('mousemove', (e) => {
   lastMouseX = e.clientX;
+  ink.setPointer(e.clientX, e.clientY);
   const over = e.target instanceof Element && e.target.closest('.stage, .bubble, .command, .panel, .fx-ui');
-  setInteractive(Boolean(over) || panelsOpen() || !els.command.hidden && document.activeElement === els.input);
+  setInteractive(Boolean(over) || ink.pen || panelsOpen() || !els.command.hidden && document.activeElement === els.input);
   if (motion.mode !== 'drag') {
     const hx = motion.x + CHAR_W / 2;
     const hy = motion.y + CHAR_H * 0.33;
@@ -820,7 +923,8 @@ els.stage.addEventListener('pointercancel', endPress);
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (cameraPanel.open) cameraPanel.close();
+    if (ink.pen) handle(brain.hear('وقف القلم'));
+    else if (cameraPanel.open) cameraPanel.close();
     else if (voiceTest.open) voiceTest.close();
     else if (!$('guide').hidden) hideGuide();
     else if (!els.settings.hidden) closeSettings();
@@ -901,6 +1005,13 @@ async function saveCloud(patch) {
   brain.setChatAvailable(chatOn() || agentOn());
   renderCloud();
   $('cl-result').textContent = r?.ok ? 'انحفظ.' : (CLOUD_ERRORS[r?.error] || `ما انحفظ: ${r?.error}`);
+  // Fast hearing is ready: «يا خلفون» without a button, once (the person can still turn it off).
+  if (r?.ok && (cloudInfo?.azure || cloudInfo?.gemini) && cloudInfo.use?.hear !== false && !brain.memory.data.listenAutoDone) {
+    brain.memory.set({ listenAutoDone: true });
+    brain.updateSettings({ alwaysListen: true });
+    updateWake();
+    $('st-listen').checked = true;
+  }
   return r?.ok;
 }
 
@@ -912,6 +1023,7 @@ function openSettings(focus = null) {
   radio('st-humor', d.humor);
   $('st-kids').checked = !!d.kidsMode;
   $('st-listen').checked = !!d.alwaysListen;
+  $('st-session').checked = d.voiceSession !== false;
   $('st-chat').checked = d.chatEnabled !== false;
   $('st-chat').disabled = !chatInfo.available;
   $('st-windows').checked = d.walkOnWindows !== false;
@@ -1149,6 +1261,10 @@ $('st-listen').addEventListener('change', () => {
   brain.updateSettings({ alwaysListen: $('st-listen').checked });
   updateWake();
 });
+$('st-session').addEventListener('change', () => {
+  brain.memory.set({ voiceSession: $('st-session').checked });
+  if (!$('st-session').checked) endSession('off');
+});
 $('st-forget').addEventListener('click', () => {
   // eslint-disable-next-line no-alert
   if (window.confirm('أنسى كل اللي تعلمته عنك؟ (الإعدادات تبقى)')) {
@@ -1348,7 +1464,7 @@ async function start() {
   else handle(brain.start());
 
   // Hooks for automated UI tests and debugging.
-  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut };
+  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, ink, startSession, endSession, onWakeSentence, get inSession() { return inSession(); }, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut };
   document.documentElement.dataset.ready = '1';
 }
 

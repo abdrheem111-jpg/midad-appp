@@ -16,6 +16,7 @@ import { KEYS } from './keys.js';
 import { isKnownProgramName } from './app-match.js';
 import { Classroom } from './classroom.js';
 import { routeClassroom, riddleTurn, classroomEvent } from './brain-class.js';
+import { routeOffice, composeTopicTurn, composed as composedReply, officeResult } from './brain-office.js';
 import { classesOn, nextClass, dueClasses, classTime, DAY_NAMES } from './schedule.js';
 
 const FEELING_LABEL = { tired: 'تعبان', sad: 'متضايق', sick: 'مريض', stressed: 'مضغوط' };
@@ -88,6 +89,8 @@ export class Brain {
     this.focus = false;
     this.quiz = null;
     this.riddle = null; // a riddle waiting for the class to answer
+    this.composing = null; // a document the cloud brain is writing
+    this.composeWaiting = null; // «سو عرض» — waiting to hear what about
     this.race = null; // the camel race on screen
     this.noiseOn = false;
     this.chatHistory = [];
@@ -180,7 +183,7 @@ export class Brain {
     this.learnFromReaction(raw, now);
     // A sentence with several commands runs them one after another; a taught phrase may
     // stand for several («لما أقول بداية الحصة: افتح العرض وبعدين شغل مؤقت ٤٠ دقيقة»).
-    if (!this.pending && !this.quiz && !this.dictation && !this.riddle) {
+    if (!this.pending && !this.quiz && !this.dictation && !this.riddle && !this.composeWaiting) {
       const taught = (this.memory.data.aliases || {})[phraseKey(raw)];
       const parts = taught ? splitCommands(taught, { force: true }) : splitCommands(raw);
       if (parts.length > 1) {
@@ -193,6 +196,11 @@ export class Brain {
   }
 
   /** The next command from a sentence that held several (the shell calls this after a short pause). */
+  /** The cloud brain finished (or failed) writing what `req` asked for. */
+  composed(req, res) {
+    return composedReply(this, req, res, this.clock());
+  }
+
   continueQueue() {
     const next = this.queue.shift();
     if (!next) return null;
@@ -265,6 +273,10 @@ export class Brain {
     }
     if (this.riddle) {
       const handled = riddleTurn(this, r, raw, now);
+      if (handled) return handled;
+    }
+    if (this.composeWaiting) {
+      const handled = composeTopicTurn(this, r, raw, now);
       if (handled) return handled;
     }
 
@@ -569,6 +581,8 @@ export class Brain {
     this.inflight.delete(id);
     const now = this.clock();
     this.memory.log({ action: spec.action.type, ok: !!result?.ok, error: result?.error || null, summary: spec.summary || '' }, now);
+    const office = officeResult(this, spec, result, now);
+    if (office !== undefined) return office;
     if (!result || !result.ok) {
       this.emotions.feel('error', now);
       if (spec.dictation && this.dictation) { this.dictation = null; return this.reply('dictation_failed', { behavior: 'dictation_off' }); }
@@ -681,6 +695,8 @@ export class Brain {
     const s = r.slots;
     const joy = routeClassroom(this, r, raw, now);
     if (joy !== undefined) return joy;
+    const office = routeOffice(this, r, raw, now);
+    if (office !== undefined) return office;
     if (r.intent === 'attendance') return this.route({ ...r, intent: 'unknown' }, raw, now); // «جا أحمد» with no such student
     switch (r.intent) {
       case 'empty': return null;

@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('khalfoun', {
   chat: (payload) => ipcRenderer.invoke('chat:reply', payload),
   chatTask: (payload) => ipcRenderer.invoke('chat:task', payload),
   visionLook: (payload) => ipcRenderer.invoke('vision:look', payload),
+  compose: (req) => ipcRenderer.invoke('office:compose', req && typeof req === 'object' ? { kind: String(req.kind || ''), topic: String(req.topic || ''), count: Number(req.count) || null, raw: String(req.raw || ''), digits: req.digits === 'latin' ? 'latin' : 'arabic' } : {}),
   camera: (payload) => ipcRenderer.invoke('vision:camera', { image: String(payload?.image || ''), mode: payload?.mode === 'look' ? 'look' : 'solve' }),
   agent: (payload) => ipcRenderer.invoke('agent:respond', payload),
   speak: (text) => ipcRenderer.invoke('voice:speak', String(text || '').slice(0, 600)),

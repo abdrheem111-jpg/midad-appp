@@ -26,7 +26,7 @@ export class WakeListener {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       this.ctx = new AudioContext();
       await this.ctx.audioWorklet.addModule('recorder-worklet.js');
-      this.vad = new VoiceActivityDetector({ sampleRate: this.ctx.sampleRate, maxMs: 5000 });
+      this.vad = new VoiceActivityDetector({ sampleRate: this.ctx.sampleRate, maxMs: 9000 });
       this.src = this.ctx.createMediaStreamSource(this.stream);
       this.node = new AudioWorkletNode(this.ctx, 'khalfoun-recorder');
       this.node.port.onmessage = (e) => {

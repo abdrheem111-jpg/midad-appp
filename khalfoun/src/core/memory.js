@@ -30,6 +30,7 @@ export function defaultMemory(now = Date.now()) {
     attendance: { days: {} }, // absent/late per school day
     classStars: 0, // stars the whole class earned; unlock outfits and dances
     riddlesSeen: [],
+    writeDigits: 'arabic', // numbers he writes: Arabic (١٢٣) or Latin (123)
     schedule: [], // timetable: {id, days, hour, minute, subject, command, notified}
     log: [],
   };

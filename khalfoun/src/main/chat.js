@@ -120,6 +120,26 @@ export class ChatClient {
     }
   }
 
+  /** Writes a document as JSON from a system and a user prompt (the cloud is much faster at this). */
+  async compose({ system, user }) {
+    if (this.busy) return { ok: false, error: 'busy' };
+    this.busy = true;
+    try {
+      const data = await getJSON(this.fetchFn, `${this.endpoint}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: this.model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], temperature: 0.5, max_tokens: 2500, stream: false }),
+      }, Math.max(this.timeoutMs, this.coldTimeoutMs) * 2);
+      this.lastUsed = this.now();
+      const text = String(data?.choices?.[0]?.message?.content || '');
+      return text ? { ok: true, text } : { ok: false, error: 'empty' };
+    } catch (err) {
+      return { ok: false, error: err?.name === 'AbortError' ? 'timeout' : String(err?.message || err) };
+    } finally {
+      this.busy = false;
+    }
+  }
+
   /**
    * Looks at a screenshot with a vision model: describe, explain, solve, questions or summarize.
    * @param {{mode: string, image: string, model: string, kidsMode?: boolean}} ctx image = base64 JPEG/PNG

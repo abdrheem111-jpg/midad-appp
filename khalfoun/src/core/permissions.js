@@ -23,6 +23,13 @@ export const LEVEL_INFO = [
 export const ACTION_RISK = {
   open_tool: 'none', // his own whiteboard and notebook windows
   close_tool: 'none',
+  office_put: 'modify', // writes into the open Word/PowerPoint/Excel document, or a new file
+  office_draw: 'modify',
+  office_format: 'modify',
+  office_slide: 'modify',
+  office_equation: 'modify',
+  office_circle: 'modify',
+  office_pdf: 'system', // saves a PDF copy of the open document in Documents\\خلفون
   save_sheet: 'system', // a new spreadsheet in Documents\\خلفون (attendance, points); never overwrites another file
   open_app: 'open',
   open_url: 'open',

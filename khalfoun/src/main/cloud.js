@@ -114,6 +114,10 @@ export const COMMAND_EXAMPLES = [
   'غايب <اسم> و<اسم>', '<اسم> متأخر', 'حضر <اسم>', 'منو غايب اليوم', 'صدر كشف الغياب', 'صدر النقاط', 'عطني لغز', 'لف العجلة',
   'ابدأ سباق الهجن', 'نقطة للفريق الأول', 'نجمة للصف', 'كم نجمة عند الصف', 'احتفل', 'العاب نارية', 'سو مطر', 'زينة العيد الوطني',
   'شيل الزينة', 'مقياس الهدوء', 'وقف مقياس الهدوء', 'وضع الصف', 'الوضع العادي', 'حل من الكاميرا', 'افتح اختبار القراءة', 'اختبر السمع',
+  'اكتب فقرة عن <موضوع> في الوورد', 'سو عرض تقديمي عن <موضوع> من ٥ شرائح', 'جهز ورقة عمل عن <موضوع>', 'سو اختبار عن <موضوع>', 'سو جدول <موضوع> في الاكسل',
+  'اكتب قصة عن <موضوع> في PDF', 'ارسم دورة <موضوع>', 'ارسم دائرة حمرا', 'ارسم ٣ نجوم صفرا', 'اكتب في الوورد: <نص كما قاله>', 'اكتب معادلة س زائد ٢ يساوي ٥',
+  'خلي الخط عريض', 'كبر الخط', 'لون الخط احمر', 'وسط الكلام', 'انزل سطر', 'شريحة جديدة', 'دور عليه', 'حوله PDF',
+  'اكتب على الشاشة <نص>', 'ارسم دائرة على الشاشة', 'قلم', 'وقف القلم', 'امسح الشاشة',
 ];
 
 const RESPOND_TOOL = {
@@ -526,6 +530,67 @@ ClaudeAgent.prototype.vision = async function vision(image, { mime = 'image/jpeg
   }
 };
 
+/** Claude writes longer content (documents, decks) from a system and a user prompt. */
+ClaudeAgent.prototype.write = async function write({ system, user, maxTokens = 3000, timeoutMs = 60000 }) {
+  const t0 = this.now();
+  try {
+    const res = await withTimeout(this.fetchFn, CLAUDE_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': this.key, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: this.model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] }),
+    }, timeoutMs);
+    if (res.status === 401 || res.status === 403) return { ok: false, error: 'bad_key' };
+    if (res.status === 402 || res.status === 400) {
+      const msg = String((await res.json().catch(() => ({})))?.error?.message || '');
+      return { ok: false, error: /credit|balance|billing/i.test(msg) ? 'no_credit' : `http_${res.status}` };
+    }
+    if (res.status === 429 || res.status === 529) return { ok: false, error: 'busy' };
+    if (!res.ok) return { ok: false, error: `http_${res.status}` };
+    const data = await res.json();
+    const text = (data?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+    return text ? { ok: true, text, ms: this.now() - t0, service: 'claude' } : { ok: false, error: 'empty' };
+  } catch (err) {
+    return { ok: false, error: errorName(err) };
+  }
+};
+
+/** Gemini writes longer content, answering in JSON. */
+GeminiAgent.prototype.write = async function write({ system, user, maxTokens = 4000, timeoutMs = 60000 }) {
+  const t0 = this.now();
+  let model = await this.resolveModel();
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const generationConfig = { temperature: 0.6, maxOutputTokens: maxTokens, responseMimeType: 'application/json' };
+    const thinking = this.thinkingConfig();
+    if (thinking) generationConfig.thinkingConfig = thinking;
+    let res;
+    try {
+      res = await withTimeout(this.fetchFn, `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': this.key },
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text: user }] }], generationConfig }),
+      }, timeoutMs);
+    } catch (err) {
+      return { ok: false, error: errorName(err) };
+    }
+    if (res.status === 400 || res.status === 404) {
+      const msg = String((await res.json().catch(() => ({})))?.error?.message || '');
+      if (/API key not valid|API_KEY_INVALID/i.test(msg)) return { ok: false, error: 'bad_key' };
+      if (/thinking/i.test(msg) && this.refuseThinking()) continue;
+      const found = await this.discoverModel();
+      if (found && found !== model) { model = found; this.model = found; continue; }
+      return { ok: false, error: `http_${res.status}` };
+    }
+    if (res.status === 401 || res.status === 403) return geminiAuthError(res);
+    if (res.status === 429) return { ok: false, error: 'quota' };
+    if (res.status >= 500) return { ok: false, error: 'busy' };
+    if (!res.ok) return { ok: false, error: `http_${res.status}` };
+    const out = await res.json();
+    const text = (out?.candidates?.[0]?.content?.parts || []).map((x) => x.text || '').join('');
+    return text ? { ok: true, text, ms: this.now() - t0, service: 'gemini' } : { ok: false, error: 'empty' };
+  }
+  return { ok: false, error: 'no_answer' };
+};
+
 /**
  * Several cloud brains in order: the next one answers when the first has no credit, a bad
  * key or is busy (a Claude key without credit must not block a working Gemini key).
@@ -538,6 +603,15 @@ export function chainAgents(agents) {
       for (const a of chain) {
         last = await a.respond(p);
         if (last.ok || !['no_credit', 'bad_key', 'busy', 'key_type', 'quota'].includes(last.error)) return last;
+      }
+      return last;
+    },
+    async write(req) {
+      let last = { ok: false, error: 'not_configured' };
+      for (const a of chain) {
+        if (!a.write) continue;
+        last = await a.write(req);
+        if (last.ok || !['no_credit', 'bad_key', 'busy', 'key_type', 'quota', 'timeout'].includes(last.error)) return last;
       }
       return last;
     },

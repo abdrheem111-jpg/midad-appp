@@ -271,9 +271,17 @@ export function classroomEvent(b, name, data, now) {
     }
     case 'wheel_done':
       return null;
+    case 'session_start':
+      b.emotions.feel('greet', now);
+      return b.reply('session_start');
+    case 'session_end':
+      b.emotions.feel('success', now);
+      return b.reply('session_end');
+    case 'session_timeout':
+      return b.rng() < 0.5 ? b.reply('session_timeout') : null;
     case 'camera_result': {
       if (!data.ok) {
-        b.emotions.feel('confused', now);
+        b.emotions.feel('not_understood', now);
         const sit = data.reason === 'no_cloud' ? 'camera_no_cloud' : data.reason === 'no_camera' ? 'camera_none' : 'camera_failed';
         return b.reply(sit);
       }

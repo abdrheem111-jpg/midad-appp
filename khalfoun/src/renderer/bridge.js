@@ -107,6 +107,9 @@ function createPreviewBridge() {
       if (action.type === 'read_screen') return window.__fakeScreen === undefined ? { ok: false, error: 'unsupported' } : { ok: true, data: { text: window.__fakeScreen } };
       if (action.type === 'active_window') return window.__fakeWindow ? { ok: true, data: window.__fakeWindow } : { ok: false, error: 'unsupported' };
       if (action.type === 'cancel_reminders') return { ok: true, data: { cancelled: 1 } };
+      // Preview: no Office here, so drawing and circles land on the screen; documents become «files».
+      if (/^office_(draw|equation|circle|format|slide|pdf)$/.test(action.type) && !window.__fakeOffice) return { ok: false, error: 'no_office' };
+      if (action.type === 'office_put') return { ok: true, data: { mode: window.__fakeOffice ? 'inserted' : 'file', app: action.params.app } };
       if (action.type === 'organize_downloads') return { ok: true, data: { moved: 7 } };
       if (action.type === 'undo_organize') return { ok: true, data: { restored: 7 } };
       return { ok: true };
@@ -149,6 +152,17 @@ function createPreviewBridge() {
       return queue.length ? { ok: true, ms: 150, ...queue.shift() } : { ok: false, error: 'timeout' };
     },
     async speak() { return { ok: false, error: 'not_configured' }; },
+    async compose(req) {
+      chatCalls.push({ compose: req.kind, topic: req.topic });
+      await new Promise((r) => setTimeout(r, 300));
+      if (window.__fakeCompose) return window.__fakeCompose;
+      const plans = {
+        slides: { kind: 'slides', title: req.topic, subtitle: '', slides: [{ title: 'مقدمة', bullets: ['نقطة', 'نقطة ثانية'], note: '' }] },
+        table: { kind: 'table', title: req.topic, columns: ['أ', 'ب'], rows: [['١', '٢']] },
+        diagram: { kind: 'diagram', title: req.topic, layout: 'cycle', nodes: [{ id: 'a', text: 'أ', color: null }, { id: 'b', text: 'ب', color: null }, { id: 'c', text: 'ج', color: null }], links: [] },
+      };
+      return { ok: true, plan: plans[req.kind] || { kind: req.kind, title: req.topic, blocks: [{ type: 'paragraph', text: `فقرة عن ${req.topic}.` }] } };
+    },
     async camera(payload) {
       chatCalls.push({ camera: payload.mode, bytes: payload.image.length });
       await new Promise((r) => setTimeout(r, 200));
