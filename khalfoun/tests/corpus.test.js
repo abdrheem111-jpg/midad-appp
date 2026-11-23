@@ -18,6 +18,9 @@ const CORPUS = [
   ['حط دايرة على المحدد', 'office_circle', {}],
   ['ارسم دائرة حمراء حول الكلام المحدد', 'office_circle', {}],
   ['حوط المحدد', 'office_circle', {}],
+  // Khalfoun 2 live test: «settings» opened Windows' settings; Khalfoun's own have their words
+  ['افتح اعداداتك', 'open_settings', {}],
+  ['افتح اعدادات الجهاز', 'open', { app: 'settings' }],
   // ---- opening apps, many ways
   ['افتح الحاسبة', 'open', { app: 'calculator' }],
   ['افتح لي الحاسبه لو سمحت', 'open', { app: 'calculator' }],
