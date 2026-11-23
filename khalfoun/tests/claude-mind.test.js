@@ -487,3 +487,38 @@ test('live test fix: the feeling comes with the words (one trip to Claude instea
   client.onEvent({ type: 'text', text: '[excited] يلا نبدأ!' });
   assert.deepEqual([feelings.at(-1), shown.at(-1)], ['excited', 'يلا نبدأ!']);
 });
+
+test('on Windows: the focus helper brings back the exact window, without sending Alt', { skip: process.platform !== 'win32' }, async () => {
+  const { spawn } = await import('node:child_process');
+  const { FG_SCRIPT } = await import('../src/main/foreground-script.js');
+  assert.doesNotMatch(FG_SCRIPT, /keybd_event\(0x12/); // no Alt tap (Notepad menu mode ate the paste)
+  const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(FG_SCRIPT, 'utf16le').toString('base64')], { stdio: ['pipe', 'pipe', 'ignore'] });
+  child.stdout.setEncoding('utf8');
+  let buf = '';
+  const waiters = [];
+  child.stdout.on('data', (d) => { buf += d; let nl; while ((nl = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1); waiters.shift()?.(line); } });
+  const ask = (req) => new Promise((r) => { waiters.push(r); child.stdin.write(`${req}\n`); });
+  const parse = (l) => { const [pid, proc, hwnd, ...t] = l.split('\t'); return { pid: Number(pid), proc, hwnd, title: t.join(' ') }; };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const opened = [];
+  try {
+    // two windows of two programs: mspaint/charmap are absent on Server, so two Notepads by file
+    const dir = await mkdtemp(join(tmpdir(), 'kh-fg-'));
+    await writeFile(join(dir, 'first.txt'), 'first');
+    await writeFile(join(dir, 'second.txt'), 'second');
+    opened.push(spawn('notepad.exe', [join(dir, 'first.txt')], { detached: true, stdio: 'ignore' }));
+    await sleep(2500);
+    const first = parse(await ask('fg'));
+    opened.push(spawn('notepad.exe', [join(dir, 'second.txt')], { detached: true, stdio: 'ignore' }));
+    await sleep(2500);
+    const second = parse(await ask('fg'));
+    if (!/first/i.test(first.title) || !/second/i.test(second.title)) { console.log('no interactive desktop:', first.title, '|', second.title); return; }
+    assert.notEqual(first.hwnd, second.hwnd);
+    const back = parse(await ask(`acth ${first.hwnd}`));
+    assert.equal(back.hwnd, first.hwnd, `foreground is «${back.title}»`);
+  } finally {
+    child.stdin.end();
+    child.kill();
+    spawn('taskkill', ['/IM', 'notepad.exe', '/F'], { stdio: 'ignore' });
+  }
+});

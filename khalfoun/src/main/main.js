@@ -31,6 +31,7 @@ import { ocrImage } from './ocr.js';
 import { TASK_MODES, LOOK_MODES, lookTask } from '../core/chat-prompt.js';
 import { findOnScreen, layoutHint } from '../core/screen-find.js';
 import { createClaudeMind } from './brain/index.js';
+import { FG_SCRIPT } from './foreground-script.js';
 import { Notebook } from '../core/notebook.js';
 import { OfficeHost } from './office/office-host.js';
 import { createOfficeActions } from './office/index.js';
@@ -479,40 +480,7 @@ async function giveFocusBack() {
  * A small PowerShell helper stays running so the answer comes back in milliseconds.
  */
 let fgHelper = null;
-const FG_SCRIPT = `
-[Console]::OutputEncoding = [Text.Encoding]::UTF8
-$ws = New-Object -ComObject WScript.Shell
-Add-Type -Name F -Namespace K -MemberDefinition @'
-[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
-[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
-[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
-[DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
-[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
-[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint f, UIntPtr extra);
-'@
-while ($null -ne ($line = [Console]::In.ReadLine())) {
-  if ($line -match '^act (\\d+)$') { try { [void]$ws.AppActivate([int]$Matches[1]); Start-Sleep -Milliseconds 120 } catch {} }
-  if ($line -match '^acth (\\d+)$') {
-    # The exact window (a program can have several, like Notepad): a tap of Alt lets Windows
-    # hand the foreground over, then that window comes forward.
-    try {
-      $w = [IntPtr][long]$Matches[1]
-      if ([K.F]::IsWindow($w)) {
-        if ([K.F]::IsIconic($w)) { [void][K.F]::ShowWindow($w, 9) }
-        [K.F]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [K.F]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
-        [void][K.F]::SetForegroundWindow($w)
-        Start-Sleep -Milliseconds 120
-      }
-    } catch {}
-  }
-  $h = [K.F]::GetForegroundWindow(); $p = 0; [void][K.F]::GetWindowThreadProcessId($h, [ref]$p)
-  $sb = New-Object System.Text.StringBuilder 512; [void][K.F]::GetWindowText($h, $sb, 512)
-  $n = ''; try { $n = (Get-Process -Id $p -ErrorAction Stop).ProcessName } catch {}
-  [Console]::Out.WriteLine("$p\t$n\t$([long]$h)\t" + ($sb.ToString() -replace '[\r\n\t]', ' ')); [Console]::Out.Flush()
-}
-`;
+
 function foregroundInfo(request = 'fg') {
   if (process.platform !== 'win32') return Promise.resolve(null);
   if (!fgHelper) {
