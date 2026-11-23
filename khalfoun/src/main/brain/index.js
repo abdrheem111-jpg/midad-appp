@@ -77,7 +77,7 @@ export function createClaudeMind(deps) {
   }, platform, log });
   // Anything done on the screen makes the last reading of it stale.
   const runAction = async (action) => { eyes.changed(); return deps.run(action); };
-  const tools = khalfounTools({ run: runAction, look: eyes.look, find: eyes.find, screen: eyes.screen, ui: (k, p, ms) => { if (k === 'ink') eyes.changed(); return ui(k, p, ms); }, log });
+  const tools = khalfounTools({ digits: () => deps.getSettings().digits || 'arabic', run: runAction, look: eyes.look, find: eyes.find, screen: eyes.screen, ui: (k, p, ms) => { if (k === 'ink') eyes.changed(); return ui(k, p, ms); }, log });
 
   function makeBrain() {
     const s = deps.getSettings();

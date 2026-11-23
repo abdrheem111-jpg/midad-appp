@@ -550,7 +550,7 @@ test('maths text looks like maths on the screen', async () => {
   assert.equal(mathText('a_1 != a_2'), 'a₁ ≠ a₂');
   const { tools, ui } = toolsWith();
   await tools.screen_write.handler({ text: 'س^2 = 9', x: 500, y: 100 });
-  assert.equal(ui[0][1].text, 'س² = 9');
+  assert.equal(ui[0][1].text, 'س\uE000٢\uE001 = ٩');
 });
 
 test('sentences about the screen take the screenshot along; others do not', async () => {
@@ -604,4 +604,36 @@ test('MindClient draws a sketch on the ink layer', () => {
   assert.deepEqual(m.ink({ op: 'sketch', shapes: [{ type: 'point', x: 1, y: 2 }], color: 'red' }), { ok: true });
   assert.equal(drawn.length, 1);
   assert.equal(drawn[0][1].color, 'red');
+});
+
+test('Omani maths by default: Arabic digits, س ص ع, small raised Arabic powers on the screen', async () => {
+  const { mathText, mathRuns, tickText, MARK } = await import('../src/core/math-sketch.js');
+  const ar = mathText('2x^2 + 3y = 10', { digits: 'arabic' });
+  assert.equal(ar, `٢س${MARK.supOpen}٢${MARK.supClose} + ٣ص = ١٠`);
+  assert.deepEqual(mathRuns(ar).map((r) => r.kind), ['base', 'sup', 'base']);
+  assert.equal(mathText('x² - 4 = 0', { digits: 'arabic', office: true }), 'س² - ٤ = ٠');
+  assert.equal(mathText('3.5 * 2 = 7, z?', { digits: 'arabic' }), '٣٫٥ × ٢ = ٧، ع؟');
+  assert.equal(mathText('max + box', { digits: 'arabic' }), 'max + box'); // only lone x y z are unknowns
+  assert.equal(tickText(12), '١٢');
+  assert.match(tickText(-3), /-٣/);
+  // the tools use the teacher's setting: Arabic unless he chose Latin
+  const { tools, ui } = toolsWith();
+  await tools.screen_write.handler({ text: 'x = 5', x: 500, y: 100 });
+  assert.equal(ui.at(-1)[1].text, 'س = ٥');
+  await tools.screen_draw.handler({ items: [{ type: 'axes', x: 700, y: 400 }, { type: 'fraction', x: 300, y: 300, top: '3', bottom: '4' }] });
+  const sk = ui.at(-1)[1].shapes;
+  assert.equal(sk[0].digits, 'arabic');
+  assert.deepEqual([sk[1].top, sk[1].bottom], ['٣', '٤']);
+  const latin = toolsWith();
+  latin.ctx.digits = () => 'latin';
+  const lt = Object.fromEntries(khalfounTools(latin.ctx).map((t) => [t.name, t]));
+  await lt.screen_write.handler({ text: 'x = 5', x: 500, y: 100 });
+  assert.equal(latin.ui.at(-1)[1].text, 'x = 5');
+});
+
+test('the persona tells Claude: Arabic digits and س ص ع always, even over an English page', () => {
+  const p = personaPrompt({});
+  assert.match(p, /س، ص، ع/);
+  assert.match(p, /حتى لو الصفحة/);
+  assert.doesNotMatch(p, /إلا إذا الكتاب اللي قدامه بالإنجليزي/);
 });

@@ -7,18 +7,67 @@ export const SKETCH_TYPES = ['point', 'line', 'circle', 'rect', 'polygon', 'angl
 
 const SUP = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹', '-': '⁻', '+': '⁺', n: 'ⁿ', x: 'ˣ', '٢': '²', '٣': '³' };
 const SUB = { 0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉' };
+const AR = '٠١٢٣٤٥٦٧٨٩';
+const SUP_BACK = { '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '⁻': '-', '⁺': '+', 'ⁿ': 'n' };
+const SUB_BACK = { '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9' };
 
-/** «x^2 + sqrt(9) * 3 >= pi» → «x² + √(9) × 3 ≥ π» (also Arabic letters and digits). */
-export function mathText(text) {
+/** Raised / lowered pieces of screen maths: the ink layer draws them small, above or below. */
+export const MARK = { supOpen: '', supClose: '', subOpen: '', subClose: '' };
+
+/** Western digits → Arabic-Indic (٠١٢٣٤٥٦٧٨٩), decimal point → ٫ */
+export const arabicDigits = (t) => String(t).replace(/(\d)\.(\d)/g, '$1٫$2').replace(/[0-9]/g, (d) => AR[d]);
+
+/**
+ * Typed maths → written maths.
+ *  latin:  «x^2 + sqrt(9) * 3 >= pi» → «x² + √(9) × 3 ≥ π»
+ *  arabic (the default, as in Omani schools): «2x^2 + y = 10» → «٢س[٢] + ص = ١٠» where [٢] is a
+ *  small raised Arabic ٢ (marked for the ink layer; `office` keeps Unicode ² for Word/PowerPoint),
+ *  x y z → س ص ع, 3.5 → ٣٫٥, ? → ؟, , → ،, % → ٪
+ * @param {string} text
+ * @param {{digits?: 'arabic'|'latin', office?: boolean}} [opts]
+ */
+export function mathText(text, { digits = 'latin', office = false } = {}) {
   let t = String(text || '');
-  t = t.replace(/\^\(([0-9n+-]{1,4})\)/g, (_, e) => [...e].map((c) => SUP[c] || c).join(''));
-  t = t.replace(/\^([0-9٢٣n+-]{1,3})/g, (_, e) => [...e].map((c) => SUP[c] || c).join(''));
-  t = t.replace(/_([0-9]{1,2})/g, (_, e) => [...e].map((c) => SUB[c] || c).join(''));
   t = t.replace(/sqrt\s*/gi, '√').replace(/\bpi\b/gi, 'π').replace(/\binfinity\b|\binf\b/gi, '∞');
   t = t.replace(/>=/g, '≥').replace(/<=/g, '≤').replace(/!=/g, '≠').replace(/\+-/g, '±').replace(/->/g, '→');
   t = t.replace(/(\S)\s*\*\s*(\S)/g, '$1 × $2');
   t = t.replace(/\bdeg\b|°?degrees?/gi, '°');
+  if (digits !== 'arabic') {
+    t = t.replace(/\^\(([0-9n+-]{1,4})\)/g, (_, e) => [...e].map((c) => SUP[c] || c).join(''));
+    t = t.replace(/\^([0-9٢٣n+-]{1,3})/g, (_, e) => [...e].map((c) => SUP[c] || c).join(''));
+    t = t.replace(/_([0-9]{1,2})/g, (_, e) => [...e].map((c) => SUB[c] || c).join(''));
+    return t;
+  }
+  // Arabic: the unknowns are س ص ع, the digits Arabic-Indic, the punctuation Arabic.
+  t = t.replace(/(?<![A-Za-z])x(?![A-Za-z])/g, 'س').replace(/(?<![A-Za-z])y(?![A-Za-z])/g, 'ص').replace(/(?<![A-Za-z])z(?![A-Za-z])/g, 'ع');
+  t = t.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺ⁿ]+/g, (m) => `^(${[...m].map((c) => SUP_BACK[c]).join('')})`);
+  t = t.replace(/[₀-₉]+/g, (m) => `_${[...m].map((c) => SUB_BACK[c]).join('')}`);
+  t = arabicDigits(t).replace(/\?/g, '؟').replace(/,/g, '،').replace(/;/g, '؛').replace(/%/g, '٪');
+  const sup = (e) => (office ? [...e].map((c) => { const i = AR.indexOf(c); return SUP[i >= 0 ? String(i) : c] || c; }).join('') : `${MARK.supOpen}${e.replace(/n/g, 'ن')}${MARK.supClose}`);
+  t = t.replace(/\^\(([0-9٠-٩n+\-−]{1,4})\)/g, (_, e) => sup(e));
+  t = t.replace(/\^([٠-٩n+\-]{1,3})/g, (_, e) => sup(e));
+  t = t.replace(/_([٠-٩]{1,2})/g, (_, e) => (office ? e : `${MARK.subOpen}${e}${MARK.subClose}`));
   return t;
+}
+
+/** Splits marked maths into runs: [{text, kind: 'base'|'sup'|'sub'}]. */
+export function mathRuns(text) {
+  const runs = [];
+  let kind = 'base'; let buf = '';
+  const push = () => { if (buf) runs.push({ text: buf, kind }); buf = ''; };
+  for (const c of String(text || '')) {
+    if (c === MARK.supOpen) { push(); kind = 'sup'; } else if (c === MARK.subOpen) { push(); kind = 'sub'; } else if (c === MARK.supClose || c === MARK.subClose) { push(); kind = 'base'; } else buf += c;
+  }
+  push();
+  return runs;
+}
+
+/** A number for an axis or number-line tick, in the teacher's digits. */
+export function tickText(v, digits = 'arabic') {
+  const n = Math.round(Number(v) * 100) / 100;
+  if (digits !== 'arabic') return String(n);
+  const a = arabicDigits(String(Math.abs(n)));
+  return n < 0 ? `⁦-${a}⁩` : a; // minus kept on the left of the number
 }
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
@@ -32,27 +81,28 @@ const str = (v, n = 80) => (typeof v === 'string' ? v.slice(0, n) : v === undefi
  */
 export function cleanSketch(items, map) {
   const out = [];
+  const M = (t, n = 20) => mathText(str(t, n), { digits: map.digits || 'latin' });
   for (const it of (Array.isArray(items) ? items : []).slice(0, 60)) {
     if (!it || !SKETCH_TYPES.includes(it.type)) continue;
     const P = (x, y) => (num(x) === null || num(y) === null ? null : map.pt(num(x), num(y)));
-    const base = { type: it.type, color: str(it.color, 12) || null, dashed: Boolean(it.dashed), width: num(it.width) ? Math.max(1, Math.min(12, num(it.width))) : null };
+    const base = { type: it.type, digits: map.digits || 'latin', color: str(it.color, 12) || null, dashed: Boolean(it.dashed), width: num(it.width) ? Math.max(1, Math.min(12, num(it.width))) : null };
     switch (it.type) {
       case 'point': case 'check': case 'cross': {
         const p = P(it.x, it.y);
         if (!p) continue;
-        out.push({ ...base, ...p, label: mathText(str(it.label, 20)), size: map.len(num(it.size) || (it.type === 'point' ? 8 : 40)) });
+        out.push({ ...base, ...p, label: M(it.label, 20), size: map.len(num(it.size) || (it.type === 'point' ? 8 : 40)) });
         break;
       }
       case 'line': {
         const a = P(it.x1, it.y1); const b = P(it.x2, it.y2);
         if (!a || !b) continue;
-        out.push({ ...base, x1: a.x, y1: a.y, x2: b.x, y2: b.y, arrow: ['end', 'both', 'start'].includes(it.arrow) ? it.arrow : 'none', label: mathText(str(it.label, 20)) });
+        out.push({ ...base, x1: a.x, y1: a.y, x2: b.x, y2: b.y, arrow: ['end', 'both', 'start'].includes(it.arrow) ? it.arrow : 'none', label: M(it.label, 20) });
         break;
       }
       case 'circle': {
         const c = P(it.x, it.y);
         if (!c || !(num(it.r) > 0)) continue;
-        out.push({ ...base, ...c, r: map.len(num(it.r)), label: mathText(str(it.label, 20)) });
+        out.push({ ...base, ...c, r: map.len(num(it.r)), label: M(it.label, 20) });
         break;
       }
       case 'rect': {
@@ -64,26 +114,26 @@ export function cleanSketch(items, map) {
       case 'polygon': case 'curve': {
         const pts = (Array.isArray(it.points) ? it.points : []).slice(0, 200).map((p) => (Array.isArray(p) ? P(p[0], p[1]) : P(p?.x, p?.y))).filter(Boolean);
         if (pts.length < 2) continue;
-        const labels = Array.isArray(it.labels) ? it.labels.slice(0, pts.length).map((l) => mathText(str(l, 12))) : [];
+        const labels = Array.isArray(it.labels) ? it.labels.slice(0, pts.length).map((l) => M(l, 12)) : [];
         out.push({ ...base, points: pts, closed: it.type === 'polygon' && it.closed !== false, labels });
         break;
       }
       case 'angle': {
         const v = P(it.x, it.y);
         if (!v || num(it.from) === null || num(it.to) === null) continue;
-        out.push({ ...base, ...v, from: num(it.from), to: num(it.to), r: map.len(num(it.r) || 30), right: Boolean(it.right), label: mathText(str(it.label, 12)) });
+        out.push({ ...base, ...v, from: num(it.from), to: num(it.to), r: map.len(num(it.r) || 30), right: Boolean(it.right), label: M(it.label, 12) });
         break;
       }
       case 'text': {
         const p = P(it.x, it.y);
         if (!p || !str(it.text)) continue;
-        out.push({ ...base, ...p, text: mathText(str(it.text, 120)), size: map.len(num(it.size) || 34) });
+        out.push({ ...base, ...p, text: M(it.text, 120), size: map.len(num(it.size) || 34) });
         break;
       }
       case 'fraction': {
         const p = P(it.x, it.y);
         if (!p || str(it.top) === '' || str(it.bottom) === '') continue;
-        out.push({ ...base, ...p, top: mathText(str(it.top, 20)), bottom: mathText(str(it.bottom, 20)), size: map.len(num(it.size) || 34) });
+        out.push({ ...base, ...p, top: M(it.top, 20), bottom: M(it.bottom, 20), size: map.len(num(it.size) || 34) });
         break;
       }
       case 'axes': {

@@ -3,6 +3,47 @@
 // draws with the mouse (colours, highlighter, eraser, undo). Everything stays until cleared.
 
 import { SHAPES, COLORS } from '../core/office-plan.js';
+import { mathRuns, tickText, MARK } from '../core/math-sketch.js';
+
+const HAS_MARK = new RegExp(`[${MARK.supOpen}${MARK.subOpen}]`);
+const SMALL = 0.62; // raised/lowered pieces (powers, indices) are this much of the text size
+
+/** Width of a line of screen maths at the current font (powers drawn small). */
+export function mathWidth(ctx, text, size) {
+  if (!HAS_MARK.test(text)) return ctx.measureText(text).width;
+  const font = ctx.font;
+  let w = 0;
+  for (const r of mathRuns(text)) {
+    ctx.font = r.kind === 'base' ? font : font.replace(/\d+px/, `${Math.round(size * SMALL)}px`);
+    w += ctx.measureText(r.text).width;
+  }
+  ctx.font = font;
+  return w;
+}
+
+/**
+ * Draws a line of screen maths centred on (x, y), right to left as Arabic is written: a power sits
+ * small and raised on the left of its base (س٢), an index small and lowered. `paint(text, x, y)`
+ * does the actual stroke/fill at the current font with textAlign 'right'.
+ */
+export function paintMath(ctx, text, x, y, size, paint) {
+  if (!HAS_MARK.test(text)) { ctx.textAlign = 'center'; paint(text, x, y); return; }
+  const font = ctx.font;
+  const align = ctx.textAlign;
+  const total = mathWidth(ctx, text, size);
+  let right = x + total / 2;
+  ctx.textAlign = 'right';
+  ctx.direction = 'rtl';
+  for (const r of mathRuns(text)) {
+    const small = r.kind !== 'base';
+    ctx.font = small ? font.replace(/\d+px/, `${Math.round(size * SMALL)}px`) : font;
+    const w = ctx.measureText(r.text).width;
+    paint(r.text, right, y + (r.kind === 'sup' ? -size * 0.38 : r.kind === 'sub' ? size * 0.3 : 0));
+    right -= w;
+  }
+  ctx.font = font;
+  ctx.textAlign = align;
+}
 
 const PEN_COLORS = [
   ['red', '#E63946'], ['blue', '#1D70B8'], ['green', '#2A9D5C'], ['black', '#222222'], ['yellow', '#F4C430'], ['white', '#FFFFFF'],
@@ -68,7 +109,7 @@ export class InkLayer {
     if (at && Number.isFinite(at.x) && Number.isFinite(at.y)) {
       this.ctx.save();
       this.ctx.font = `700 ${fontSize}px 'Tajawal', 'Segoe UI', sans-serif`;
-      const width = this.ctx.measureText(t).width;
+      const width = mathWidth(this.ctx, t, fontSize);
       this.ctx.restore();
       const cx = anchor === 'center' ? at.x : Math.min(this.w - 4, at.x) - width / 2;
       x = Math.max(width / 2 + 4, Math.min(this.w - width / 2 - 4, cx));
@@ -271,9 +312,9 @@ export class InkLayer {
       ctx.textBaseline = 'middle';
       ctx.lineWidth = Math.max(3, size / 7);
       ctx.strokeStyle = 'rgba(255,255,255,0.92)';
-      ctx.strokeText(text, x, y);
       ctx.fillStyle = color;
-      ctx.fillText(text, x, y);
+      ctx.lineJoin = 'round';
+      paintMath(ctx, text, x, y, size, (tt, xx, yy) => { ctx.strokeText(tt, xx, yy); ctx.fillText(tt, xx, yy); });
       ctx.restore();
     };
     const arrowHead = (x1, y1, x2, y2, w) => {
@@ -355,7 +396,7 @@ export class InkLayer {
         case 'fraction': {
           ctx.globalAlpha = part;
           ctx.font = font(sh.size);
-          const wide = Math.max(ctx.measureText(sh.top).width, ctx.measureText(sh.bottom).width) + 14;
+          const wide = Math.max(mathWidth(ctx, sh.top, sh.size), mathWidth(ctx, sh.bottom, sh.size)) + 14;
           label(sh.top, sh.x, sh.y - sh.size * 0.62, sh.size, color);
           ctx.lineWidth = Math.max(3, sh.size / 12);
           ctx.beginPath(); ctx.moveTo(sh.x - wide / 2, sh.y); ctx.lineTo(sh.x + wide / 2, sh.y); ctx.stroke();
@@ -370,14 +411,15 @@ export class InkLayer {
           for (let k = -Math.floor(sh.left / sh.step); k <= Math.floor(sh.right / sh.step); k += 1) {
             if (!k) continue; const x = sh.x + k * sh.step;
             ctx.beginPath(); ctx.moveTo(x, sh.y - 6); ctx.lineTo(x, sh.y + 6); ctx.stroke();
-            if (sh.labels) label(String(k), x, sh.y + 20, 16, color);
+            if (sh.labels) label(tickText(k, sh.digits), x, sh.y + 20, 16, color);
           }
           for (let k = -Math.floor(sh.down / sh.step); k <= Math.floor(sh.up / sh.step); k += 1) {
             if (!k) continue; const y = sh.y - k * sh.step;
             ctx.beginPath(); ctx.moveTo(sh.x - 6, y); ctx.lineTo(sh.x + 6, y); ctx.stroke();
-            if (sh.labels) label(String(k), sh.x - 20, y, 16, color);
+            if (sh.labels) label(tickText(k, sh.digits), sh.x - 20, y, 16, color);
           }
-          label('x', sh.x + sh.right - 6, sh.y - 18, 20, color); label('y', sh.x + 18, sh.y - sh.up + 6, 20, color);
+          const ar = sh.digits === 'arabic';
+          label(ar ? 'س' : 'x', sh.x + sh.right - 6, sh.y - 18, 20, color); label(ar ? 'ص' : 'y', sh.x + 30, sh.y - sh.up + 2, 20, color);
           break;
         }
         case 'numberline': {
@@ -390,7 +432,7 @@ export class InkLayer {
           for (let k = 0; k <= count; k += 1) {
             const v = sh.from + k * sh.step; const x = px(v);
             ctx.beginPath(); ctx.moveTo(x, sh.y - 8); ctx.lineTo(x, sh.y + 8); ctx.stroke();
-            label(String(Math.round(v * 100) / 100), x, sh.y + 24, 17, color);
+            label(tickText(v, sh.digits), x, sh.y + 24, 17, color);
           }
           for (const m of sh.marks) { ctx.beginPath(); ctx.arc(px(m), sh.y, 7, 0, Math.PI * 2); ctx.fill(); }
           break;
@@ -485,7 +527,7 @@ export class InkLayer {
     ctx.direction = 'rtl';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const width = ctx.measureText(t.text).width;
+    const width = mathWidth(ctx, t.text, t.size);
     // Revealed from the right, the way Arabic is written.
     ctx.beginPath();
     ctx.rect(t.x + width / 2 + 10 - (width + 20) * t.reveal, t.y - t.size, (width + 20) * t.reveal, t.size * 2);
@@ -493,9 +535,8 @@ export class InkLayer {
     ctx.lineWidth = Math.max(6, t.size / 7);
     ctx.strokeStyle = 'rgba(255,255,255,0.92)';
     ctx.lineJoin = 'round';
-    ctx.strokeText(t.text, t.x, t.y);
     ctx.fillStyle = t.color;
-    ctx.fillText(t.text, t.x, t.y);
+    paintMath(ctx, t.text, t.x, t.y, t.size, (tt, xx, yy) => { ctx.strokeText(tt, xx, yy); ctx.fillText(tt, xx, yy); });
     ctx.restore();
   }
 

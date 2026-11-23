@@ -52,6 +52,8 @@ function why(res) {
 export function khalfounTools(ctx) {
   const sleep = ctx.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
   const log = ctx.log || (() => {});
+  // The teacher's digits (Omani schools: Arabic ٠١٢٣ and the unknowns س ص ع) unless he chose otherwise.
+  const digitsNow = () => (ctx.digits?.() === 'latin' ? 'latin' : 'arabic');
   const P = (x, y) => ctx.screen.toPhysical(x, y);
   const act = async (action, okText) => {
     const res = await ctx.run(action);
@@ -191,7 +193,7 @@ export function khalfounTools(ctx) {
       schema: { text: z.string().min(1).max(300), x: z.number().optional(), y: z.number().optional(), size: z.number().min(12).max(160).optional(), color: z.enum(COLOR_IDS).optional() },
       handler: async (a) => {
         const at = a.x !== undefined && a.y !== undefined ? ctx.screen.toOverlay(a.x, a.y) : null;
-        await ctx.ui('ink', { op: 'write', text: mathText(a.text), at, anchor: 'center', size: a.size ? Math.round(a.size * ctx.screen.pictureScale()) : null, color: a.color || 'blue' });
+        await ctx.ui('ink', { op: 'write', text: mathText(a.text, { digits: digitsNow() }), at, anchor: 'center', size: a.size ? Math.round(a.size * ctx.screen.pictureScale()) : null, color: a.color || 'blue' });
         return text('كتبت على الشاشة.');
       },
     },
@@ -199,14 +201,14 @@ export function khalfounTools(ctx) {
       name: 'screen_draw',
       description: `Draw maths and diagrams ON the screen (over a PDF, a slide, anything) in ONE call, like a teacher at the board. items: a list, each {type, ...} in picture pixels:
 point {x,y,label?} · line {x1,y1,x2,y2,arrow?:'end'|'both'|'start',dashed?,label?} · circle {x,y,r,label?} · rect {x,y,w,h} · polygon {points:[[x,y],...],labels?:['أ','ب','ج']} (triangles, shapes) · angle {x,y (vertex),from,to (degrees, 0 = right, counter-clockwise),r?,right?:true for a right-angle square,label?} · text {x,y (centre),text,size?} · fraction {x,y (centre),top,bottom,size?} (stacked) · axes {x,y (origin),left,right,up,down,step} (coordinate plane with numbered ticks) · numberline {x1,x2,y,from,to,step?,marks?:[values]} · curve {points:[[x,y],...]} (a smooth graph) · check {x,y,size?} ✓ · cross {x,y,size?} ✗.
-Any item may have color (${COLOR_IDS.join(', ')}) and width. Text may use x^2, sqrt, *, >=, pi: they are shown as x², √, ×, ≥, π.`,
+Any item may have color (${COLOR_IDS.join(', ')}) and width. Write maths the Omani way: Arabic digits ٠١٢٣٤٥٦٧٨٩ and the unknowns س ص ع. Powers as ^ (س^٢ shows a small raised ٢), sqrt → √, * → ×, >= → ≥. Western digits and x y z are converted automatically.`,
       schema: {
         items: z.array(z.object({ type: z.enum(SKETCH_TYPES) }).passthrough()).min(1).max(60),
         color: z.enum(COLOR_IDS).optional(),
       },
       handler: async ({ items, color }) => {
         const scale = ctx.screen.pictureScale();
-        const shapes = cleanSketch(items, { pt: (x, y) => ctx.screen.toOverlay(x, y), len: (v) => Math.round(v * scale) });
+        const shapes = cleanSketch(items, { pt: (x, y) => ctx.screen.toOverlay(x, y), len: (v) => Math.round(v * scale), digits: digitsNow() });
         if (!shapes.length) return fail('ما فهمت الرسم: تأكد من الأنواع والإحداثيات.');
         await ctx.ui('ink', { op: 'sketch', shapes, color: color || 'blue' });
         return text(`رسمت ${shapes.length} ${shapes.length === 1 ? 'شي' : 'أشياء'} على الشاشة${shapes.length < items.length ? ` (تركت ${items.length - shapes.length} ناقصة)` : ''}.`);
@@ -248,7 +250,7 @@ Any item may have color (${COLOR_IDS.join(', ')}) and width. Text may use x^2, s
         const kind = a.slides ? 'slides' : a.columns ? 'table' : (a.kind && !['slides', 'table', 'diagram'].includes(a.kind) ? a.kind : (a.questions ? 'worksheet' : 'text'));
         const plan = cleanPlan(kind, { title: a.title || '', blocks: a.blocks || [], questions: a.questions || [], slides: a.slides || [], columns: a.columns || [], rows: a.rows || [] });
         if (!plan) return fail('المحتوى فاضي أو ناقص.');
-        const res = await ctx.run({ type: 'office_put', params: { app: a.app, plan, fresh: Boolean(a.new_file), verbatim: Boolean(a.exact), digits: a.digits || 'arabic' } });
+        const res = await ctx.run({ type: 'office_put', params: { app: a.app, plan, fresh: Boolean(a.new_file), verbatim: Boolean(a.exact), digits: a.digits || digitsNow() } });
         if (!res.ok) return fail(`ما انكتب: ${why(res)}`);
         const m = res.data?.mode;
         return text(m === 'file' ? `انعمل ملف جديد وانفتح${res.data?.file ? `: ${res.data.file}` : ''}.` : m === 'pasted' ? 'انلصق في البرنامج.' : 'انكتب في المستند المفتوح.');
@@ -258,7 +260,7 @@ Any item may have color (${COLOR_IDS.join(', ')}) and width. Text may use x^2, s
       name: 'office_equation',
       description: 'Write a maths equation into the open Word/PowerPoint at the cursor, already in symbols, e.g. "س + ٢ = ٥" or "x² + 3x = 10".',
       schema: { text: z.string().min(1).max(300) },
-      handler: async ({ text: t }) => act({ type: 'office_equation', params: { app: null, text: t } }, 'كتبت المعادلة.'),
+      handler: async ({ text: t }) => act({ type: 'office_equation', params: { app: null, text: mathText(t, { digits: digitsNow(), office: true }) } }, 'كتبت المعادلة.'),
     },
     {
       name: 'office_format',
