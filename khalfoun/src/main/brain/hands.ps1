@@ -19,6 +19,83 @@ public struct POINT { public int X; public int Y; }
 '@
 [void][K.H]::SetProcessDPIAware()
 
+# ---- Windows of the desktop: the list the teacher sees on the taskbar, and what can be done
+# to one of them (identified by its handle from that list).
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Collections.Generic;
+public static class KWin {
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
+  [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int i);
+  [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int s);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool f);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  public static List<string> List() {
+    var o = new List<string>();
+    EnumWindows((h, l) => {
+      if (!IsWindowVisible(h) || GetWindow(h, 4) != IntPtr.Zero) return true; // owned windows are dialogs of others
+      if ((GetWindowLong(h, -20) & 0x80) != 0) return true; // tool windows
+      int cloaked; if (DwmGetWindowAttribute(h, 14, out cloaked, 4) == 0 && cloaked != 0) return true;
+      var sb = new StringBuilder(512); GetWindowText(h, sb, 512);
+      string t = sb.ToString(); if (t.Length == 0) return true;
+      uint pid; GetWindowThreadProcessId(h, out pid);
+      RECT r; GetWindowRect(h, out r);
+      o.Add(((long)h).ToString() + "	" + pid + "	" + (IsIconic(h) ? "min" : IsZoomed(h) ? "max" : "normal") + "	" + r.L + "," + r.T + "," + (r.R - r.L) + "," + (r.B - r.T) + "	" + t.Replace("	", " "));
+      return true;
+    }, IntPtr.Zero);
+    return o;
+  }
+  public static bool Focus(IntPtr w) {
+    if (IsIconic(w)) ShowWindow(w, 9);
+    uint x; uint fgt = GetWindowThreadProcessId(GetForegroundWindow(), out x); uint me = GetCurrentThreadId();
+    bool att = fgt != 0 && fgt != me && AttachThreadInput(me, fgt, true);
+    BringWindowToTop(w); SetForegroundWindow(w);
+    if (att) AttachThreadInput(me, fgt, false);
+    return GetForegroundWindow() == w;
+  }
+}
+"@
+function Win-List {
+  $names = @{}
+  $lines = foreach ($l in [KWin]::List()) {
+    $f = $l.Split("`t", 5)
+    $pid0 = [int]$f[1]
+    if (-not $names.ContainsKey($pid0)) { try { $names[$pid0] = (Get-Process -Id $pid0 -ErrorAction Stop).ProcessName } catch { $names[$pid0] = '?' } }
+    "$($f[0])`t$($names[$pid0])`t$($f[2])`t$($f[3])`t$($f[4])"
+  }
+  return ($lines -join "`n")
+}
+function Win-Do($a) {
+  if ([string]$a.hwnd -notmatch '^\d{1,20}$') { throw 'bad_window' }
+  $w = [IntPtr][long]$a.hwnd
+  if (-not [KWin]::IsWindow($w)) { throw 'no_window' }
+  switch ([string]$a.op) {
+    'focus' { return [KWin]::Focus($w) }
+    'minimize' { [void][KWin]::ShowWindow($w, 6); return $true }
+    'maximize' { [void][KWin]::ShowWindow($w, 3); [void][KWin]::Focus($w); return $true }
+    'restore' { [void][KWin]::ShowWindow($w, 9); [void][KWin]::Focus($w); return $true }
+    'close' { [void][KWin]::PostMessage($w, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero); return $true }
+    default { throw 'bad_op' }
+  }
+}
+
 $LEFTDOWN = 0x02; $LEFTUP = 0x04; $RIGHTDOWN = 0x08; $RIGHTUP = 0x10; $MIDDOWN = 0x20; $MIDUP = 0x40; $WHEEL = 0x0800; $HWHEEL = 0x1000
 $KEYUP = 0x02; $EXT = 0x01
 
@@ -170,6 +247,8 @@ while ($true) {
       }
       'keys' { Press ([string]$a.keys) ([int]$a.times) }
       'ocr' { $data = Ocr-Read ([string]$a.path) }
+      'win_list' { $data = Win-List }
+      'win_do' { $data = Win-Do $a }
       'ocr_init' { Ocr-Init; $data = [bool]$script:engine }
       'cursor' { $pt = New-Object K.H+POINT; [void][K.H]::GetCursorPos([ref]$pt); $data = @{ x = $pt.X; y = $pt.Y } }
       default { throw 'bad_op' }
@@ -177,7 +256,7 @@ while ($true) {
     Send-Answer $id $true $data ''
   } catch {
     $msg = [string]$_.Exception.Message
-    if ($msg -notmatch '^(bad_op|bad_key|off_screen|no_file)$') { $msg = 'input: ' + $msg }
+    if ($msg -notmatch '^(bad_op|bad_key|off_screen|no_file|bad_window|no_window)$') { $msg = 'input: ' + $msg }
     Send-Answer $id $false $null $msg
   }
 }

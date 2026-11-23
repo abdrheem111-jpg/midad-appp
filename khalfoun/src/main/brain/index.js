@@ -11,7 +11,8 @@ import { ClaudeBrain, MODELS } from './claude-brain.js';
 import { khalfounTools, khalfounServer } from './tools.js';
 import { createEyes } from './eyes.js';
 import { installClaude, claudeExePath, claudeInstalled, CLAUDE_PROGRAM } from './claude-setup.js';
-import { personaPrompt, userTurn, speakable } from '../../core/claude-persona.js';
+import { personaPrompt, userTurn, speakable, needsScreen } from '../../core/claude-persona.js';
+import { normalize } from '../../core/arabic.js';
 
 /** The environment Claude's program runs in: the person's own, minus API keys (the subscription pays). */
 export function childEnv(base = process.env) {
@@ -203,7 +204,18 @@ export function createClaudeMind(deps) {
       brain = makeBrain();
     }
     const t0 = Date.now();
-    const res = await brain.ask(userTurn(text, ctx), image ? { image } : {});
+    // «اكتب هنا», «كمل وراي», «حل هذي»: the screen goes with the sentence (one round trip less).
+    let turn = userTurn(text, ctx);
+    let pic = image;
+    if (!pic && needsScreen(normalize(text))) {
+      const seen = await eyes.look().catch(() => null);
+      if (seen?.ok) {
+        pic = { data: seen.data, mime: seen.mime };
+        turn += `\n\n[صورة الشاشة الحين مرفقة: ${seen.width}×${seen.height}${seen.window ? ` · النافذة: ${seen.window}` : ''}${seen.cursor ? ` · الماوس عند (${seen.cursor.x},${seen.cursor.y})` : ''}]${seen.layout ? `\nالنص في الشاشة ومواقعه:\n${seen.layout}` : ''}`;
+        log('claude look (with the sentence)', `${seen.width}x${seen.height}`, `${Date.now() - t0} ms`);
+      }
+    }
+    const res = await brain.ask(turn, pic ? { image: pic } : {});
     log('claude turn', `«${String(text).slice(0, 80)}»`, '→', res.ok ? `ok ${((Date.now() - t0) / 1000).toFixed(1)} s «${String(res.text).slice(0, 120)}»` : `failed: ${res.error}`);
     if (!res.ok && res.error === 'auth') auth = { ...auth, loggedIn: false, checked: Date.now() };
     return res.ok ? { ok: true, say: speakable(res.text), ms: Date.now() - t0 } : { ok: false, error: res.error };

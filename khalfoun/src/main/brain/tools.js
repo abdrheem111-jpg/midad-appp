@@ -11,6 +11,14 @@ import { FEELINGS, keysNeedConsent } from '../../core/claude-persona.js';
 import { SHAPES, COLORS, cleanPlan, KINDS } from '../../core/office-plan.js';
 import { OFFICE_FORMATS } from '../actions/index.js';
 import { APPS } from '../../core/intents.js';
+import { cleanSketch, mathText, SKETCH_TYPES } from '../../core/math-sketch.js';
+
+/** «hwnd\tprocess\tstate\tx,y,w,h\ttitle» lines from the hands process. */
+export function parseWindows(data) {
+  return String(data || '').split('\n').map((l) => l.split('\t')).filter((f) => f.length >= 5 && /^\d+$/.test(f[0]))
+    .map(([hwnd, proc, state, rect, ...t]) => ({ id: hwnd, program: proc, state, rect, title: t.join(' ') }))
+    .filter((w) => !/^khalfoun$/i.test(w.program));
+}
 
 const text = (t) => ({ content: [{ type: 'text', text: String(t) }] });
 const fail = (t) => ({ content: [{ type: 'text', text: String(t) }], isError: true });
@@ -25,6 +33,7 @@ function why(res) {
     no_office: 'ما فيه وورد/بوربوينت/إكسل مفتوح.', not_running: 'البرنامج مو شغال.', no_selection: 'ما فيه شي محدد.',
     off_screen: 'النقطة خارج الشاشة.', bad_point: 'إحداثيات غير صحيحة.', bad_key: 'اسم مفتاح غير معروف.', unsupported: 'هذا الجهاز ما يدعم هالعملية.',
     not_installed: 'البرنامج مو مثبت.', level_too_low: 'مستوى الصلاحيات ما يسمح.', timeout: 'تأخر وما رد.',
+    no_window: 'النافذة ما عادت موجودة.', bad_window: 'رقم نافذة غير صحيح.',
   };
   return map[e] || e;
 }
@@ -149,6 +158,28 @@ export function khalfounTools(ctx) {
       },
     },
     {
+      name: 'windows',
+      description: 'The windows open on the computer, and control over them: action "list" gives each window\'s id, program, state (normal/min/max), place and title. Then "focus" (bring to front), "minimize", "maximize", "restore" or "close" one by its id. Closing asks the program to close normally (it asks to save if needed).',
+      schema: { action: z.enum(['list', 'focus', 'minimize', 'maximize', 'restore', 'close']), id: z.string().regex(/^\d{1,20}$/).optional() },
+      handler: async ({ action, id }) => {
+        if (action === 'list') {
+          const res = await ctx.run({ type: 'window_list', params: {} });
+          if (!res.ok) return fail(`ما قدرت أشوف النوافذ: ${why(res)}`);
+          const list = parseWindows(res.data);
+          return text(list.length ? list.map((w) => `id=${w.id} · ${w.program} · ${w.state} · «${w.title}»`).join('\n') : 'ما فيه نوافذ مفتوحة.');
+        }
+        if (!id) return fail('حدد id النافذة من القائمة (action list).');
+        if (action === 'close') {
+          const res = await ctx.run({ type: 'window_list', params: {} });
+          const w = res.ok ? parseWindows(res.data).find((x) => x.id === id) : null;
+          if (w && /\*|غير محفوظ|unsaved/i.test(w.title) && !(await ask(`أسكّر «${w.title}»؟ يمكن فيه شغل مو محفوظ.`))) return text('المعلم ما وافق، ما سكرت.');
+        }
+        const res = await ctx.run({ type: 'window_op', params: { hwnd: id, op: action } });
+        const done = { focus: 'جبتها قدام.', minimize: 'صغّرتها.', maximize: 'كبّرتها.', restore: 'رجعتها.', close: 'سكرتها.' }[action];
+        return res.ok ? text(done) : fail(`ما زبط: ${why(res)}`);
+      },
+    },
+    {
       name: 'open_website',
       description: 'Open an https web page in the teacher\'s browser.',
       schema: { url: z.string().url().max(2000) },
@@ -160,18 +191,25 @@ export function khalfounTools(ctx) {
       schema: { text: z.string().min(1).max(300), x: z.number().optional(), y: z.number().optional(), size: z.number().min(12).max(160).optional(), color: z.enum(COLOR_IDS).optional() },
       handler: async (a) => {
         const at = a.x !== undefined && a.y !== undefined ? ctx.screen.toOverlay(a.x, a.y) : null;
-        await ctx.ui('ink', { op: 'write', text: a.text, at, anchor: 'center', size: a.size ? Math.round(a.size * ctx.screen.pictureScale()) : null, color: a.color || 'blue' });
+        await ctx.ui('ink', { op: 'write', text: mathText(a.text), at, anchor: 'center', size: a.size ? Math.round(a.size * ctx.screen.pictureScale()) : null, color: a.color || 'blue' });
         return text('كتبت على الشاشة.');
       },
     },
     {
       name: 'screen_draw',
-      description: `Draw a hand-drawn shape ON the screen in a box (picture pixels): ${SHAPE_IDS.join(', ')}. label writes text inside.`,
-      schema: { shape: z.enum(SHAPE_IDS), x: z.number(), y: z.number(), w: z.number().min(4), h: z.number().min(4), color: z.enum(COLOR_IDS).optional(), label: z.string().max(40).optional() },
-      handler: async (a) => {
-        const box = ctx.screen.boxToOverlay(a);
-        await ctx.ui('ink', { op: 'shape', shape: a.shape, box, color: a.color || 'red', label: a.label || '' });
-        return text('رسمت.');
+      description: `Draw maths and diagrams ON the screen (over a PDF, a slide, anything) in ONE call, like a teacher at the board. items: a list, each {type, ...} in picture pixels:
+point {x,y,label?} · line {x1,y1,x2,y2,arrow?:'end'|'both'|'start',dashed?,label?} · circle {x,y,r,label?} · rect {x,y,w,h} · polygon {points:[[x,y],...],labels?:['أ','ب','ج']} (triangles, shapes) · angle {x,y (vertex),from,to (degrees, 0 = right, counter-clockwise),r?,right?:true for a right-angle square,label?} · text {x,y (centre),text,size?} · fraction {x,y (centre),top,bottom,size?} (stacked) · axes {x,y (origin),left,right,up,down,step} (coordinate plane with numbered ticks) · numberline {x1,x2,y,from,to,step?,marks?:[values]} · curve {points:[[x,y],...]} (a smooth graph) · check {x,y,size?} ✓ · cross {x,y,size?} ✗.
+Any item may have color (${COLOR_IDS.join(', ')}) and width. Text may use x^2, sqrt, *, >=, pi: they are shown as x², √, ×, ≥, π.`,
+      schema: {
+        items: z.array(z.object({ type: z.enum(SKETCH_TYPES) }).passthrough()).min(1).max(60),
+        color: z.enum(COLOR_IDS).optional(),
+      },
+      handler: async ({ items, color }) => {
+        const scale = ctx.screen.pictureScale();
+        const shapes = cleanSketch(items, { pt: (x, y) => ctx.screen.toOverlay(x, y), len: (v) => Math.round(v * scale) });
+        if (!shapes.length) return fail('ما فهمت الرسم: تأكد من الأنواع والإحداثيات.');
+        await ctx.ui('ink', { op: 'sketch', shapes, color: color || 'blue' });
+        return text(`رسمت ${shapes.length} ${shapes.length === 1 ? 'شي' : 'أشياء'} على الشاشة${shapes.length < items.length ? ` (تركت ${items.length - shapes.length} ناقصة)` : ''}.`);
       },
     },
     {

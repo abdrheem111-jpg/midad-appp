@@ -134,6 +134,20 @@ export class InkLayer {
     return added;
   }
 
+  /**
+   * A maths drawing from the Claude mind (core/math-sketch cleanSketch output, overlay
+   * pixels): drawn piece by piece, like a teacher at the board.
+   */
+  sketch(shapes, { color = 'blue' } = {}) {
+    if (!Array.isArray(shapes) || !shapes.length) return null;
+    const hex = COLORS[color] ? `#${COLORS[color].hex}` : (/^#[0-9a-f]{6}$/i.test(color) ? color : `#${COLORS.blue.hex}`);
+    const item = { kind: 'sketch', shapes, color: hex, reveal: 0 };
+    this.items.push(item);
+    this.animate(item, Math.min(2200, 350 + shapes.length * 220));
+    this.show();
+    return item;
+  }
+
   clear() {
     this.items = [];
     this.nextY = 0.18;
@@ -148,9 +162,9 @@ export class InkLayer {
 
   show() { this.canvas.classList.add('on'); }
 
-  animate(item) {
+  animate(item, ms = 0) {
     const start = performance.now();
-    const dur = item.kind === 'text' ? Math.min(1600, 300 + item.text.length * 60) : 700;
+    const dur = ms || (item.kind === 'text' ? Math.min(1600, 300 + item.text.length * 60) : 700);
     const step = (t) => {
       item.reveal = Math.min(1, (t - start) / dur);
       this.redraw();
@@ -239,6 +253,167 @@ export class InkLayer {
       else if (it.kind === 'text') this.drawText(it);
       else if (it.kind === 'shape') this.drawShape(it);
       else if (it.kind === 'mark') this.drawMark(it);
+      else if (it.kind === 'sketch') this.drawSketch(it);
+    }
+  }
+
+  drawSketch(item) {
+    const { ctx } = this;
+    const n = item.shapes.length;
+    const shown = item.reveal * n;
+    const colorOf = (sh) => (COLORS[sh.color] ? `#${COLORS[sh.color].hex}` : (/^#[0-9a-f]{6}$/i.test(sh.color || '') ? sh.color : item.color));
+    const font = (size) => `700 ${Math.round(size)}px 'Tajawal', 'Segoe UI', 'Cambria Math', sans-serif`;
+    const label = (text, x, y, size, color) => {
+      if (!text) return;
+      ctx.save();
+      ctx.font = font(size);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = Math.max(3, size / 7);
+      ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+      ctx.strokeText(text, x, y);
+      ctx.fillStyle = color;
+      ctx.fillText(text, x, y);
+      ctx.restore();
+    };
+    const arrowHead = (x1, y1, x2, y2, w) => {
+      const a = Math.atan2(y2 - y1, x2 - x1); const l = Math.max(10, w * 4);
+      ctx.beginPath();
+      ctx.moveTo(x2, y2); ctx.lineTo(x2 - l * Math.cos(a - 0.45), y2 - l * Math.sin(a - 0.45));
+      ctx.moveTo(x2, y2); ctx.lineTo(x2 - l * Math.cos(a + 0.45), y2 - l * Math.sin(a + 0.45));
+      ctx.stroke();
+    };
+    for (let i = 0; i < n; i += 1) {
+      if (i >= shown) break;
+      const part = Math.min(1, shown - i); // the piece being drawn now
+      const sh = item.shapes[i];
+      const color = colorOf(sh);
+      const w = sh.width || 4;
+      ctx.save();
+      ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      if (sh.dashed) ctx.setLineDash([w * 3, w * 2.5]);
+      switch (sh.type) {
+        case 'point':
+          ctx.beginPath(); ctx.arc(sh.x, sh.y, Math.max(4, sh.size / 2) * part, 0, Math.PI * 2); ctx.fill();
+          label(sh.label, sh.x + 16, sh.y - 18, 26, color);
+          break;
+        case 'line': {
+          const x2 = sh.x1 + (sh.x2 - sh.x1) * part; const y2 = sh.y1 + (sh.y2 - sh.y1) * part;
+          ctx.beginPath(); ctx.moveTo(sh.x1, sh.y1); ctx.lineTo(x2, y2); ctx.stroke();
+          ctx.setLineDash([]);
+          if (part === 1 && (sh.arrow === 'end' || sh.arrow === 'both')) arrowHead(sh.x1, sh.y1, sh.x2, sh.y2, w);
+          if (part === 1 && (sh.arrow === 'start' || sh.arrow === 'both')) arrowHead(sh.x2, sh.y2, sh.x1, sh.y1, w);
+          if (part === 1) label(sh.label, (sh.x1 + sh.x2) / 2, (sh.y1 + sh.y2) / 2 - 20, 24, color);
+          break;
+        }
+        case 'circle':
+          ctx.beginPath(); ctx.arc(sh.x, sh.y, sh.r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * part); ctx.stroke();
+          if (part === 1) label(sh.label, sh.x, sh.y - sh.r - 20, 24, color);
+          break;
+        case 'rect':
+          ctx.globalAlpha = part; ctx.strokeRect(sh.x, sh.y, sh.w, sh.h);
+          break;
+        case 'polygon': case 'curve': {
+          const pts = sh.points; const segs = sh.closed ? pts.length : pts.length - 1;
+          const upto = segs * part;
+          ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+          if (sh.type === 'curve' && pts.length > 2) {
+            for (let k = 1; k < pts.length && k <= upto + 1; k += 1) {
+              const pm = pts[k - 1]; const pk = pts[k];
+              ctx.quadraticCurveTo(pm.x, pm.y, (pm.x + pk.x) / 2, (pm.y + pk.y) / 2);
+            }
+          } else {
+            for (let k = 1; k <= segs && k <= Math.ceil(upto); k += 1) {
+              const a = pts[k - 1]; const b = pts[k % pts.length]; const f = Math.min(1, upto - (k - 1));
+              ctx.lineTo(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f);
+            }
+          }
+          ctx.stroke();
+          if (part === 1) {
+            const cx = pts.reduce((t, p) => t + p.x, 0) / pts.length; const cy = pts.reduce((t, p) => t + p.y, 0) / pts.length;
+            sh.labels.forEach((l, k) => {
+              const p = pts[k]; const dx = p.x - cx; const dy = p.y - cy; const d = Math.hypot(dx, dy) || 1;
+              label(l, p.x + (dx / d) * 22, p.y + (dy / d) * 22, 26, color);
+            });
+          }
+          break;
+        }
+        case 'angle': {
+          const a1 = (-sh.from * Math.PI) / 180; const a2 = (-sh.to * Math.PI) / 180;
+          if (sh.right) {
+            const s = sh.r * 0.6; const u = { x: Math.cos(a1), y: Math.sin(a1) }; const v = { x: Math.cos(a2), y: Math.sin(a2) };
+            ctx.beginPath(); ctx.moveTo(sh.x + u.x * s, sh.y + u.y * s); ctx.lineTo(sh.x + (u.x + v.x) * s, sh.y + (u.y + v.y) * s); ctx.lineTo(sh.x + v.x * s, sh.y + v.y * s); ctx.stroke();
+          } else {
+            ctx.beginPath(); ctx.arc(sh.x, sh.y, sh.r, a1, a1 + (a2 - a1) * part, a2 < a1); ctx.stroke();
+          }
+          if (part === 1) { const m = (a1 + a2) / 2; label(sh.label, sh.x + Math.cos(m) * (sh.r + 22), sh.y + Math.sin(m) * (sh.r + 22), 24, color); }
+          break;
+        }
+        case 'text':
+          ctx.globalAlpha = part; label(sh.text, sh.x, sh.y, sh.size, color);
+          break;
+        case 'fraction': {
+          ctx.globalAlpha = part;
+          ctx.font = font(sh.size);
+          const wide = Math.max(ctx.measureText(sh.top).width, ctx.measureText(sh.bottom).width) + 14;
+          label(sh.top, sh.x, sh.y - sh.size * 0.62, sh.size, color);
+          ctx.lineWidth = Math.max(3, sh.size / 12);
+          ctx.beginPath(); ctx.moveTo(sh.x - wide / 2, sh.y); ctx.lineTo(sh.x + wide / 2, sh.y); ctx.stroke();
+          label(sh.bottom, sh.x, sh.y + sh.size * 0.66, sh.size, color);
+          break;
+        }
+        case 'axes': {
+          ctx.lineWidth = 3; ctx.globalAlpha = part;
+          ctx.beginPath(); ctx.moveTo(sh.x - sh.left, sh.y); ctx.lineTo(sh.x + sh.right, sh.y); ctx.moveTo(sh.x, sh.y + sh.down); ctx.lineTo(sh.x, sh.y - sh.up); ctx.stroke();
+          arrowHead(sh.x - sh.left, sh.y, sh.x + sh.right, sh.y, 3); arrowHead(sh.x, sh.y + sh.down, sh.x, sh.y - sh.up, 3);
+          ctx.lineWidth = 2;
+          for (let k = -Math.floor(sh.left / sh.step); k <= Math.floor(sh.right / sh.step); k += 1) {
+            if (!k) continue; const x = sh.x + k * sh.step;
+            ctx.beginPath(); ctx.moveTo(x, sh.y - 6); ctx.lineTo(x, sh.y + 6); ctx.stroke();
+            if (sh.labels) label(String(k), x, sh.y + 20, 16, color);
+          }
+          for (let k = -Math.floor(sh.down / sh.step); k <= Math.floor(sh.up / sh.step); k += 1) {
+            if (!k) continue; const y = sh.y - k * sh.step;
+            ctx.beginPath(); ctx.moveTo(sh.x - 6, y); ctx.lineTo(sh.x + 6, y); ctx.stroke();
+            if (sh.labels) label(String(k), sh.x - 20, y, 16, color);
+          }
+          label('x', sh.x + sh.right - 6, sh.y - 18, 20, color); label('y', sh.x + 18, sh.y - sh.up + 6, 20, color);
+          break;
+        }
+        case 'numberline': {
+          ctx.globalAlpha = part; ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.moveTo(sh.x1, sh.y); ctx.lineTo(sh.x2, sh.y); ctx.stroke();
+          arrowHead(sh.x1, sh.y, sh.x2, sh.y, 3); arrowHead(sh.x2, sh.y, sh.x1, sh.y, 3);
+          const count = Math.round((sh.to - sh.from) / sh.step);
+          const px = (v) => sh.x1 + 18 + ((v - sh.from) / (sh.to - sh.from)) * (sh.x2 - sh.x1 - 36);
+          ctx.lineWidth = 2;
+          for (let k = 0; k <= count; k += 1) {
+            const v = sh.from + k * sh.step; const x = px(v);
+            ctx.beginPath(); ctx.moveTo(x, sh.y - 8); ctx.lineTo(x, sh.y + 8); ctx.stroke();
+            label(String(Math.round(v * 100) / 100), x, sh.y + 24, 17, color);
+          }
+          for (const m of sh.marks) { ctx.beginPath(); ctx.arc(px(m), sh.y, 7, 0, Math.PI * 2); ctx.fill(); }
+          break;
+        }
+        case 'check': {
+          const s = sh.size; ctx.lineWidth = Math.max(5, s / 7);
+          const pts = [[sh.x - s * 0.45, sh.y], [sh.x - s * 0.1, sh.y + s * 0.35], [sh.x + s * 0.5, sh.y - s * 0.4]];
+          ctx.beginPath(); ctx.moveTo(...pts[0]);
+          if (part > 0.4) ctx.lineTo(...pts[1]); else ctx.lineTo(pts[0][0] + (pts[1][0] - pts[0][0]) * part / 0.4, pts[0][1] + (pts[1][1] - pts[0][1]) * part / 0.4);
+          if (part > 0.4) { const f = (part - 0.4) / 0.6; ctx.lineTo(pts[1][0] + (pts[2][0] - pts[1][0]) * f, pts[1][1] + (pts[2][1] - pts[1][1]) * f); }
+          ctx.stroke();
+          break;
+        }
+        case 'cross': {
+          const s = sh.size * 0.4; ctx.lineWidth = Math.max(5, sh.size / 7);
+          ctx.beginPath(); ctx.moveTo(sh.x - s, sh.y - s); ctx.lineTo(sh.x - s + 2 * s * Math.min(1, part * 2), sh.y - s + 2 * s * Math.min(1, part * 2));
+          if (part > 0.5) { const f = (part - 0.5) * 2; ctx.moveTo(sh.x + s, sh.y - s); ctx.lineTo(sh.x + s - 2 * s * f, sh.y - s + 2 * s * f); }
+          ctx.stroke();
+          break;
+        }
+        default: break;
+      }
+      ctx.restore();
     }
   }
 

@@ -522,3 +522,86 @@ test('on Windows: the focus helper brings back the exact window, without sending
     spawn('taskkill', ['/IM', 'notepad.exe', '/F'], { stdio: 'ignore' });
   }
 });
+
+// ------------------------------------------------------------ maths teacher, PDF, windows
+
+test('maths drawing: one call draws a triangle, a fraction and a ✓ where Claude pointed', async () => {
+  const { tools, ui } = toolsWith();
+  const r = await tools.screen_draw.handler({ items: [
+    { type: 'polygon', points: [[100, 100], [300, 100], [200, 250]], labels: ['أ', 'ب', 'ج'] },
+    { type: 'fraction', x: 784, y: 441, top: '٣', bottom: '٤' },
+    { type: 'check', x: 784, y: 100 },
+    { type: 'bogus', x: 1, y: 1 },
+  ] });
+  assert.equal(r.isError, undefined);
+  assert.match(r.content[0].text, /رسمت 3/);
+  const [kind, p] = ui[0];
+  assert.equal(kind, 'ink');
+  assert.equal(p.op, 'sketch');
+  assert.equal(p.shapes.length, 3);
+  assert.deepEqual({ x: p.shapes[1].x, y: p.shapes[1].y }, { x: 640, y: 360 }); // picture centre → overlay centre
+  assert.equal(p.shapes[0].labels.length, 3);
+});
+
+test('maths text looks like maths on the screen', async () => {
+  const { mathText } = await import('../src/core/math-sketch.js');
+  assert.equal(mathText('x^2 + y^2'), 'x² + y²');
+  assert.equal(mathText('sqrt(16) * 2 >= pi'), '√(16) × 2 ≥ π');
+  assert.equal(mathText('a_1 != a_2'), 'a₁ ≠ a₂');
+  const { tools, ui } = toolsWith();
+  await tools.screen_write.handler({ text: 'س^2 = 9', x: 500, y: 100 });
+  assert.equal(ui[0][1].text, 'س² = 9');
+});
+
+test('sentences about the screen take the screenshot along; others do not', async () => {
+  const { needsScreen } = await import('../src/core/claude-persona.js');
+  const { normalize } = await import('../src/core/arabic.js');
+  for (const t of ['كمل وراي', 'اكتب الجواب هنا', 'حل المسألة اللي قدامك', 'ارسم دائرة فوق الشكل', 'صحح هذا']) assert.equal(needsScreen(normalize(t)), true, t);
+  for (const t of ['افتح الوورد', 'هلا خلفون', 'شو الوقت', 'سكر الكروم']) assert.equal(needsScreen(normalize(t)), false, t);
+});
+
+test('window list from the hands process, without Khalfoun itself', async () => {
+  const { parseWindows } = await import('../src/main/brain/tools.js');
+  const w = parseWindows('123\tAcroRd32\tmax\t0,0,1920,1040\tدرس الكسور.pdf - Adobe Acrobat\n456\tKhalfoun\tnormal\t0,0,10,10\tKhalfoun\nbad line\n789\tnotepad\tmin\t5,5,800,600\t*بدون عنوان - Notepad');
+  assert.deepEqual(w.map((x) => x.id), ['123', '789']);
+  assert.equal(w[0].title, 'درس الكسور.pdf - Adobe Acrobat');
+  assert.equal(w[1].state, 'min');
+});
+
+test('window control goes through the double check; closing unsaved work asks first', async () => {
+  const list = '123\tAcroRd32\tnormal\t0,0,800,600\tدرس.pdf - Adobe Acrobat\n789\tnotepad\tnormal\t0,0,800,600\t*ملاحظات - Notepad';
+  const { tools, ran, ui } = toolsWith({
+    run: (a) => (a.type === 'window_list' ? { ok: true, data: list } : { ok: true }),
+    ui: (kind) => (kind === 'ask' ? { answer: 'no' } : { ok: true }),
+  });
+  const l = await tools.windows.handler({ action: 'list' });
+  assert.match(l.content[0].text, /id=123 · AcroRd32/);
+  await tools.windows.handler({ action: 'maximize', id: '123' });
+  assert.deepEqual(ran.at(-1), { type: 'window_op', params: { hwnd: '123', op: 'maximize' } });
+  for (const a of ran) assert.equal(validateAction(a), null);
+  const before = ran.length;
+  const c = await tools.windows.handler({ action: 'close', id: '789' });
+  assert.match(c.content[0].text, /ما وافق/);
+  assert.equal(ui.at(-1)[0], 'ask');
+  assert.equal(ran.slice(before).some((a) => a.type === 'window_op'), false);
+  // the double check refuses a made-up handle or operation
+  assert.equal(validateAction({ type: 'window_op', params: { hwnd: 'abc', op: 'close' } }), 'bad_window');
+  assert.equal(validateAction({ type: 'window_op', params: { hwnd: '1', op: 'format_disk' } }), 'bad_window');
+  assert.equal(decide({ type: 'window_op', params: {} }, { level: 3 }).allowed, true);
+  assert.equal(decide({ type: 'window_list', params: {} }, { level: 0 }).allowed, true);
+});
+
+test('persona teaches the maths-teacher way: after his line, never over text, PDF ink is cleared on a new page', () => {
+  const p = personaPrompt({});
+  for (const must of ['وراي', 'screen_draw', 'PDF', 'screen_clear', 'windows', 'fraction']) assert.ok(p.includes(must), must);
+});
+
+test('MindClient draws a sketch on the ink layer', () => {
+  const drawn = [];
+  const ink = { sketch: (sh, o) => drawn.push([sh, o]) };
+  const m = new MindClient({ ink, character: { setPenColor() {} }, animator: { play() {} }, colorHex: () => '#C0392B' });
+  clearInterval(m.timer);
+  assert.deepEqual(m.ink({ op: 'sketch', shapes: [{ type: 'point', x: 1, y: 2 }], color: 'red' }), { ok: true });
+  assert.equal(drawn.length, 1);
+  assert.equal(drawn[0][1].color, 'red');
+});

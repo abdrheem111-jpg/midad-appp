@@ -57,6 +57,9 @@ export function validateAction(action) {
     case 'key_combo':
       if (typeof p.keys !== 'string' || !KEY_COMBO.test(p.keys)) return 'bad_key';
       return p.times === undefined || (Number.isInteger(p.times) && p.times >= 1 && p.times <= 50) ? null : 'bad_key';
+    case 'window_list': return null;
+    case 'window_op':
+      return typeof p.hwnd === 'string' && /^\d{1,20}$/.test(p.hwnd) && ['focus', 'minimize', 'maximize', 'restore', 'close'].includes(p.op) ? null : 'bad_window';
     case 'open_web': {
       if (typeof p.url !== 'string' || p.url.length > 2000) return 'bad_url';
       try { const u = new URL(p.url); return u.protocol === 'https:' && u.hostname.includes('.') && !u.username && !u.password ? null : 'bad_url'; } catch { return 'bad_url'; }
@@ -165,6 +168,8 @@ export function createExecutor(deps) {
         case 'mouse_drag': return await hands('drag', { x1: p.x1, y1: p.y1, x2: p.x2, y2: p.y2 });
         case 'mouse_scroll': return await hands('scroll', { x: p.x, y: p.y, direction: p.direction, amount: p.amount });
         case 'key_combo': return await hands('keys', { keys: p.keys, times: p.times || 1 });
+        case 'window_list': return await hands('win_list', {});
+        case 'window_op': return await hands('win_do', { hwnd: p.hwnd, op: p.op });
         case 'open_web': return platform.openWeb ? await platform.openWeb(p.url) : { ok: false, error: 'unsupported' };
         case 'reminder':
           deps.scheduleReminder(Math.round(p.minutes), p.note || '', Boolean(p.repeat));

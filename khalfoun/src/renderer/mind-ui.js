@@ -166,6 +166,7 @@ export class MindClient {
     if (p.op === 'write') ink.write(p.text, { at: p.at, anchor: p.anchor || 'right', size: p.size || 0, color: hexOf(p.color) });
     else if (p.op === 'shape') ink.draw({ shape: p.shape, color: p.color, box: p.box, text: p.label || '' });
     else if (p.op === 'mark') ink.mark(p.boxes, { mark: p.mark, color: p.color });
+    else if (p.op === 'sketch') ink.sketch(p.shapes, { color: p.color });
     character.setPenColor?.(this.d.colorHex?.(p.color) || '#1D70B8');
     animator.play('write');
     return { ok: true };

@@ -54,6 +54,8 @@ export const ACTION_RISK = {
   mouse_scroll: 'none',
   key_combo: 'modify', // closing/deleting combos are asked for first (core/claude-persona keysNeedConsent)
   open_web: 'open', // an https page in the browser
+  window_list: 'none', // the windows on the taskbar
+  window_op: 'modify', // bring forward / minimize / maximize / restore / close one of them
   pdf_write: 'modify',
   organize_downloads: 'modify',
   undo_organize: 'modify',
