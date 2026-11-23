@@ -33,6 +33,7 @@ function why(res) {
     no_office: 'ما فيه وورد/بوربوينت/إكسل مفتوح.', not_running: 'البرنامج مو شغال.', no_selection: 'ما فيه شي محدد.',
     off_screen: 'النقطة خارج الشاشة.', bad_point: 'إحداثيات غير صحيحة.', bad_key: 'اسم مفتاح غير معروف.', unsupported: 'هذا الجهاز ما يدعم هالعملية.',
     not_installed: 'البرنامج مو مثبت.', level_too_low: 'مستوى الصلاحيات ما يسمح.', timeout: 'تأخر وما رد.',
+    no_file: 'الملف مو موجود أو مو في مجلداته.', bad_file: 'نوع الملف ما ينفتح من هني.',
     no_window: 'النافذة ما عادت موجودة.', bad_window: 'رقم نافذة غير صحيح.',
   };
   return map[e] || e;
@@ -157,6 +158,28 @@ export function khalfounTools(ctx) {
         const res = id ? await act({ type: 'open_app', params: { app: id } }, `فتحت ${name}.`) : await act({ type: 'open_installed', params: { name } }, `فتحت ${name}.`);
         await sleep(1200);
         return res;
+      },
+    },
+    {
+      name: 'open_file',
+      description: 'Find and open one of the teacher\'s own files (lesson PDFs, Word, PowerPoint, Excel, pictures, videos) from his Desktop, Documents and Downloads by what he calls it, e.g. query "الصف العاشر" kind "pdf". One clear match opens at once; several come back as a list, then call again with the chosen path. Use this (not open_app or classroom) for «افتح الملف / البي دي إف / الدرس…».',
+      schema: { query: z.string().max(120).optional(), kind: z.enum(['pdf', 'word', 'powerpoint', 'excel', 'picture', 'video']).optional(), path: z.string().max(600).optional() },
+      handler: async ({ query, kind, path }) => {
+        const open = async (p, name) => {
+          const res = await ctx.run({ type: 'open_file', params: { path: p } });
+          if (!res.ok) return fail(`ما قدرت أفتحه: ${why(res)}`);
+          await sleep(1500); // let the program show it before the next step
+          return text(`فتحت «${name}».`);
+        };
+        if (path) return open(path, path.split(/[\\/]/).pop());
+        if (!query) return fail('قول اسم الملف أو كلمة منه.');
+        const res = await ctx.run({ type: 'find_files', params: { query, ...(kind ? { kind } : {}) } });
+        if (!res.ok) return fail(`ما قدرت أدوّر: ${why(res)}`);
+        const list = Array.isArray(res.data) ? res.data : [];
+        if (!list.length) return text(`ما لقيت ملف اسمه فيه «${query}» في سطح المكتب والمستندات والتنزيلات.`);
+        const [best, next] = list;
+        if (list.length === 1 || (best.score >= 0.99 && (!next || next.score < best.score))) return open(best.path, best.name);
+        return text(`لقيت أكثر من ملف، اختار واحد (أو اسأل المعلم):\n${list.slice(0, 8).map((f, i) => `${i + 1}. «${f.name}» path=${f.path}`).join('\n')}`);
       },
     },
     {
@@ -285,7 +308,7 @@ Any item may have color (${COLOR_IDS.join(', ')}) and width. Write maths the Oma
     },
     {
       name: 'classroom',
-      description: 'Run one of Khalfoun\'s ready classroom features with a short Arabic command, e.g. «لف العجلة», «احتفل», «العاب نارية», «مؤقت ٥ دقايق», «غايب أحمد», «منو غايب اليوم», «نجمة لمريم», «لغز», «سباق الهجن», «مقياس الهدوء», «وضع الصف», «افتح السبورة», «اختبار القراءة», «اختبر السمع», «ذكرني بعد ١٠ دقايق». Returns what happened.',
+      description: 'ONLY for Khalfoun\'s ready classroom games and tools (not for opening files or programs: use open_file / open_app). A short Arabic command, e.g. «لف العجلة», «احتفل», «العاب نارية», «مؤقت ٥ دقايق», «غايب أحمد», «منو غايب اليوم», «نجمة لمريم», «لغز», «سباق الهجن», «مقياس الهدوء», «وضع الصف», «افتح السبورة», «اختبار القراءة», «اختبر السمع», «ذكرني بعد ١٠ دقايق». Returns what happened.',
       schema: { command: z.string().min(1).max(120) },
       handler: async ({ command }) => {
         const r = await ctx.ui('classroom', { command }, 15000);

@@ -9,6 +9,8 @@ import { OFFICE_APPS, KINDS, SHAPES, COLORS, cleanPlan } from '../../core/office
 import { join } from 'node:path';
 import { organizeFolder, undoMoves } from './organize.js';
 import { KEY_IDS } from '../../core/keys.js';
+import { findFiles, insideRoots, OPENABLE } from './files.js';
+import { extname, isAbsolute } from 'node:path';
 
 const APP_IDS = new Set(APPS.filter((a) => a.kind === 'app').map((a) => a.id));
 const URLS = new Set(APPS.filter((a) => a.kind === 'url').map((a) => a.url));
@@ -57,6 +59,10 @@ export function validateAction(action) {
     case 'key_combo':
       if (typeof p.keys !== 'string' || !KEY_COMBO.test(p.keys)) return 'bad_key';
       return p.times === undefined || (Number.isInteger(p.times) && p.times >= 1 && p.times <= 50) ? null : 'bad_key';
+    case 'find_files':
+      return str(p.query, 120) && (p.kind === undefined || ['pdf', 'word', 'powerpoint', 'excel', 'picture', 'video'].includes(p.kind)) ? null : 'bad_text';
+    case 'open_file':
+      return typeof p.path === 'string' && p.path.length <= 600 && isAbsolute(p.path) && OPENABLE.has(extname(p.path).toLowerCase()) ? null : 'bad_file';
     case 'window_list': return null;
     case 'window_op':
       return typeof p.hwnd === 'string' && /^\d{1,20}$/.test(p.hwnd) && ['focus', 'minimize', 'maximize', 'restore', 'close'].includes(p.op) ? null : 'bad_window';
@@ -168,6 +174,13 @@ export function createExecutor(deps) {
         case 'mouse_drag': return await hands('drag', { x1: p.x1, y1: p.y1, x2: p.x2, y2: p.y2 });
         case 'mouse_scroll': return await hands('scroll', { x: p.x, y: p.y, direction: p.direction, amount: p.amount });
         case 'key_combo': return await hands('keys', { keys: p.keys, times: p.times || 1 });
+        case 'find_files': return { ok: true, data: await findFiles(deps.fileRoots || [], String(p.query || ''), { kind: p.kind }) };
+        case 'open_file': {
+          // Only a document inside his own folders, checked again with links resolved.
+          if (!(await insideRoots(deps.fileRoots || [], p.path))) return { ok: false, error: 'no_file' };
+          const err = await platform.openPath(p.path);
+          return err ? { ok: false, error: err } : { ok: true };
+        }
         case 'window_list': return await hands('win_list', {});
         case 'window_op': return await hands('win_do', { hwnd: p.hwnd, op: p.op });
         case 'open_web': return platform.openWeb ? await platform.openWeb(p.url) : { ok: false, error: 'unsupported' };

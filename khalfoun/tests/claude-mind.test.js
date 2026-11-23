@@ -13,7 +13,7 @@ import { khalfounTools } from '../src/main/brain/tools.js';
 import { screenMap, pictureScale } from '../src/main/brain/eyes.js';
 import { extractFromTgz, installClaude } from '../src/main/brain/claude-setup.js';
 import { parseAuthStatus, childEnv, createClaudeMind } from '../src/main/brain/index.js';
-import { personaPrompt, userTurn, keysNeedConsent, speakable, FEELINGS } from '../src/core/claude-persona.js';
+import { personaPrompt, userTurn, keysNeedConsent, speakable, FEELINGS, turnContext as turnContextOf } from '../src/core/claude-persona.js';
 import { validateAction, createExecutor, KEY_COMBO } from '../src/main/actions/index.js';
 import { decide } from '../src/core/permissions.js';
 import { yesNo, isStop, FEELING_LOOK, MindClient } from '../src/renderer/mind-ui.js';
@@ -636,4 +636,103 @@ test('the persona tells Claude: Arabic digits and س ص ع always, even over an 
   assert.match(p, /س، ص، ع/);
   assert.match(p, /حتى لو الصفحة/);
   assert.doesNotMatch(p, /إلا إذا الكتاب اللي قدامه بالإنجليزي/);
+});
+
+// ------------------------------------------------------------ hands-free voice, speed, files
+
+test('the screenshot taken when he stopped talking goes with a screen sentence (no second look)', async () => {
+  let looks = 0;
+  const texts = [];
+  const eyes = {
+    look: async () => { looks += 1; return { ok: true, data: 'AAAA', mime: 'image/jpeg', width: 1568, height: 882, layout: '(1,1 5×5) س', window: 'درس.pdf' }; },
+    find: async () => ({ ok: true, boxes: [] }), changed() {},
+    screen: screenMap({ bounds: { x: 0, y: 0, width: 1280, height: 720 }, workArea: { x: 0, y: 0 }, scaleFactor: 1 }),
+  };
+  const sdk = fakeSdk(async (t) => { texts.push(t); return say('[happy] تم'); });
+  const mind = createClaudeMind({ userData: '/tmp/kh', exePath: '/tmp/claude.exe', platform: 'linux', sdk, eyes,
+    run: async () => ({ ok: true }), hideWhile: (fn) => fn(), send() {}, log() {}, getSettings: () => ({ level: 3, mind: 'claude' }) });
+  mind.prefetch();
+  mind.prefetch(); // a second call within seconds does not take another picture
+  const r = await mind.ask('كمل وراي', { via: 'voice' });
+  assert.equal(r.ok, true);
+  assert.equal(looks, 1);
+  assert.match(texts[0], /صورة الشاشة الحين مرفقة/);
+  // a sentence that does not need the screen leaves the early picture unused, and it is not reused later
+  mind.prefetch();
+  await mind.ask('شحالك', {});
+  await mind.ask('حل هذي', {});
+  assert.equal(looks, 3);
+  mind.close();
+});
+
+test('hands-free listening: Claude is told the sentence may be for the class, and may stay quiet', () => {
+  const t = turnContextOf({ via: 'voice', session: true });
+  assert.match(t, /يمكن يكلم الطلاب/);
+  assert.match(personaPrompt({}), /\[quiet\]/);
+  assert.equal(speakable('[quiet]'), '');
+});
+
+test('his lesson files are found by what he calls them, only in his folders, never programs', async () => {
+  const { findFiles, matchScore, insideRoots } = await import('../src/main/actions/files.js');
+  const { mkdir, symlink } = await import('node:fs/promises');
+  const root = await mkdtemp(join(tmpdir(), 'kh-files-'));
+  const other = await mkdtemp(join(tmpdir(), 'kh-other-'));
+  await mkdir(join(root, 'الصف العاشر', 'الوحدة ٣'), { recursive: true });
+  await writeFile(join(root, 'الصف العاشر', 'الوحدة ٣', 'الإحصاء - التكرار التراكمي.pdf'), 'x');
+  await writeFile(join(root, 'رياضيات الصف 10 الفصل الثاني.pdf'), 'x');
+  await writeFile(join(root, 'درس الكسور.docx'), 'x');
+  await writeFile(join(root, 'العاشر.exe'), 'x');
+  await writeFile(join(other, 'سري.pdf'), 'x');
+  assert.ok(matchScore('الصف العاشر', 'رياضيات الصف 10 الفصل الثاني.pdf') >= 0.99);
+  assert.equal(matchScore('الكسور', 'الإحصاء.pdf'), 0);
+  const pdfs = await findFiles([root], 'التكرار التراكمي', { kind: 'pdf' });
+  assert.equal(pdfs[0].name, 'الإحصاء - التكرار التراكمي.pdf');
+  const tenth = await findFiles([root], 'البي دي اف حق الصف العاشر', { kind: 'pdf' });
+  assert.ok(tenth.some((f) => f.name.startsWith('رياضيات الصف 10')));
+  assert.equal((await findFiles([root], 'العاشر')).some((f) => f.name.endsWith('.exe')), false);
+  assert.equal(await insideRoots([root], join(root, 'درس الكسور.docx')), true);
+  assert.equal(await insideRoots([root], join(other, 'سري.pdf')), false);
+  assert.equal(await insideRoots([root], join(root, 'العاشر.exe')), false);
+  assert.equal(await insideRoots([root], join(root, '..', other.split(/[\\/]/).pop(), 'سري.pdf')), false);
+  try {
+    await symlink(other, join(root, 'رابط'));
+    assert.equal(await insideRoots([root], join(root, 'رابط', 'سري.pdf')), false); // a link out of his folders
+  } catch { /* no symlinks here (Windows without rights) */ }
+  // the double check
+  assert.equal(validateAction({ type: 'open_file', params: { path: join(root, 'درس الكسور.docx') } }), null);
+  assert.equal(validateAction({ type: 'open_file', params: { path: 'C:/Windows/System32/cmd.exe' } }), 'bad_file');
+  assert.equal(validateAction({ type: 'open_file', params: { path: 'درس.pdf' } }), 'bad_file');
+  assert.equal(validateAction({ type: 'find_files', params: { query: 'العاشر', kind: 'pdf' } }), null);
+  assert.equal(validateAction({ type: 'find_files', params: { query: 'x', kind: 'exe' } }), 'bad_text');
+  const opened = [];
+  const ex = createExecutor({ platform: { openPath: async (p) => { opened.push(p); return ''; } }, getSettings: () => ({ level: 3 }), fileRoots: [root] });
+  const found = await ex.run({ type: 'find_files', params: { query: 'الكسور' } });
+  assert.equal(found.data[0].name, 'درس الكسور.docx');
+  assert.equal((await ex.run({ type: 'open_file', params: { path: found.data[0].path } })).ok, true);
+  assert.equal((await ex.run({ type: 'open_file', params: { path: join(other, 'سري.pdf') } })).error, 'no_file');
+  assert.deepEqual(opened, [found.data[0].path]);
+});
+
+test('open_file: one clear match opens at once; several come back for Claude to choose', async () => {
+  const one = [{ path: '/h/Desktop/درس الكسور.docx', name: 'درس الكسور.docx', score: 1 }];
+  const many = [{ path: '/h/a.pdf', name: 'الصف العاشر أ.pdf', score: 1 }, { path: '/h/b.pdf', name: 'الصف العاشر ب.pdf', score: 1 }];
+  let list = one;
+  const { tools, ran } = toolsWith({ run: (a) => (a.type === 'find_files' ? { ok: true, data: list } : { ok: true }) });
+  const r1 = await tools.open_file.handler({ query: 'الكسور' });
+  assert.match(r1.content[0].text, /فتحت/);
+  assert.deepEqual(ran.at(-1), { type: 'open_file', params: { path: '/h/Desktop/درس الكسور.docx' } });
+  list = many;
+  const n = ran.length;
+  const r2 = await tools.open_file.handler({ query: 'الصف العاشر', kind: 'pdf' });
+  assert.match(r2.content[0].text, /أكثر من ملف/);
+  assert.equal(ran.slice(n).some((a) => a.type === 'open_file'), false);
+  await tools.open_file.handler({ path: '/h/b.pdf' });
+  assert.deepEqual(ran.at(-1).params, { path: '/h/b.pdf' });
+});
+
+test('wake listening sends only the first seconds; the daily cloud time is larger', async () => {
+  const { HEAD_MS } = await import('../src/renderer/wake-listener.js');
+  const { WAKE_SECONDS_PER_DAY } = await import('../src/main/secrets.js');
+  assert.ok(HEAD_MS <= 3000);
+  assert.equal(WAKE_SECONDS_PER_DAY, 30 * 60);
 });

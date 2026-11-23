@@ -6,7 +6,9 @@ import { downsample, encodeWav, rms } from './wav.js';
 const TARGET_RATE = 16000;
 const SILENCE_RMS = 0.012;
 const SILENCE_AFTER_SPEECH_MS = 1300;
-const MAX_MS = 12000;
+// A whole question read aloud (12 s cut his questions). The end is found by his voice dropping
+// against its own level, so a noisy class does not keep the recording open until the limit.
+const MAX_MS = 20000; // a whole question read aloud (12 s cut his questions)
 const NO_SPEECH_MS = 5000;
 
 export class Recorder {
@@ -37,6 +39,7 @@ export class Recorder {
       const chunks = [];
       let spoke = false;
       let lastLoud = performance.now();
+      let voice = 0; // his speaking level, smoothed
       const started = performance.now();
       await new Promise((resolve) => {
         this.finish = resolve;
@@ -46,7 +49,9 @@ export class Recorder {
           const level = rms(chunk);
           if (onLevel) onLevel(Math.min(1, level * 12));
           const now = performance.now();
-          if (level > SILENCE_RMS) { spoke = true; lastLoud = now; }
+          // Quiet = below a fixed floor, or well below his own voice (a room with fans or pupils).
+          const quiet = level <= SILENCE_RMS || (voice > 0 && level < voice * 0.3);
+          if (!quiet) { spoke = true; lastLoud = now; voice = voice ? voice * 0.9 + level * 0.1 : level; }
           if ((spoke && now - lastLoud > silenceMs) || now - started > maxMs || (!spoke && now - started > noSpeechMs)) resolve();
         };
         src.connect(node);

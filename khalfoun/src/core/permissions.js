@@ -54,6 +54,8 @@ export const ACTION_RISK = {
   mouse_scroll: 'none',
   key_combo: 'modify', // closing/deleting combos are asked for first (core/claude-persona keysNeedConsent)
   open_web: 'open', // an https page in the browser
+  find_files: 'none', // look for the teacher's files by name (Desktop, Documents, Downloads)
+  open_file: 'open', // open one of them (documents, pictures, videos only)
   window_list: 'none', // the windows on the taskbar
   window_op: 'modify', // bring forward / minimize / maximize / restore / close one of them
   pdf_write: 'modify',

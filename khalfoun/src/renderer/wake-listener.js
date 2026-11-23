@@ -7,10 +7,13 @@ import { downsample, encodeWav } from './wav.js';
 
 const TARGET_RATE = 16000;
 const MIN_SENTENCE_MS = 350;
+/** «يا خلفون» comes at the start: only this much is sent to check for his name. */
+export const HEAD_MS = 2500;
 
 export class WakeListener {
   /**
-   * @param {{onSentence: (wav: Uint8Array, ms: number) => void, onError?: (err: Error) => void}} opts
+   * @param {{onSentence: (wav: Uint8Array, ms: number, head: Uint8Array) => void, onError?: (err: Error) => void}} opts
+   *   head: the first HEAD_MS of the sentence (enough to hear his name, a fraction of the cost)
    */
   constructor(opts) {
     this.onSentence = opts.onSentence;
@@ -26,15 +29,19 @@ export class WakeListener {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       this.ctx = new AudioContext();
       await this.ctx.audioWorklet.addModule('recorder-worklet.js');
-      this.vad = new VoiceActivityDetector({ sampleRate: this.ctx.sampleRate, maxMs: 9000 });
+      // Long enough for a whole question read from the board (was 9 s: questions were cut).
+      this.vad = new VoiceActivityDetector({ sampleRate: this.ctx.sampleRate, maxMs: 25000 });
       this.src = this.ctx.createMediaStreamSource(this.stream);
       this.node = new AudioWorkletNode(this.ctx, 'khalfoun-recorder');
       this.node.port.onmessage = (e) => {
         if (this.paused) return;
         for (const ev of this.vad.push(e.data)) {
           if (ev.type === 'segment' && ev.ms >= MIN_SENTENCE_MS) {
-            const wav = encodeWav(downsample(ev.samples, this.ctx.sampleRate, TARGET_RATE), TARGET_RATE);
-            this.onSentence(wav, ev.ms);
+            const pcm = downsample(ev.samples, this.ctx.sampleRate, TARGET_RATE);
+            const wav = encodeWav(pcm, TARGET_RATE);
+            const headLen = Math.round((HEAD_MS / 1000) * TARGET_RATE);
+            const head = pcm.length > headLen ? encodeWav(pcm.subarray(0, headLen), TARGET_RATE) : wav;
+            this.onSentence(wav, ev.ms, head);
           }
         }
       };

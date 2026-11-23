@@ -293,7 +293,7 @@ const cameraPanel = new CameraPanel({
 });
 
 const voiceTest = new VoiceTestPanel({
-  record: () => recorder.record((level) => els.micLevel.style.setProperty('--level', String(1 + level * 0.6))),
+  record: () => recorder.record((level) => els.micLevel.style.setProperty('--level', String(1 + level * 0.6)), { maxMs: 12000 }),
   transcribe: (wav) => bridge.transcribe(wav, 'command'),
   recognize: (text) => recognize(text),
   onDone: (score) => handle(brain.event('voice_test_done', { score })),
@@ -579,6 +579,9 @@ let heardSeq = 0;
 
 // With the Claude mind on, these stay instant and local (no need to think about them).
 const INSTANT = new Set(['screen_pen', 'screen_clear', 'volume', 'stop', 'open_settings']);
+// Not classroom features: Claude does these with its own tools.
+const GENERIC_INTENTS = new Set(['open_app', 'open_installed', 'close_app', 'open_url', 'open_folder', 'search', 'key', 'type_text', 'open_download', 'office_write', 'office_format', 'office_draw', 'office_equation', 'office_pdf', 'screen_write', 'screen_draw']);
+const GENERIC_ACTIONS = new Set(['open_app', 'open_installed', 'close_app', 'open_url', 'open_folder', 'search', 'press_key', 'type_text', 'open_download', 'office_put', 'office_format', 'office_draw', 'office_equation', 'office_pdf', 'open_web', 'key_combo']);
 
 function hear(text, opts = {}) {
   const t = String(text || '').trim();
@@ -593,7 +596,7 @@ function hear(text, opts = {}) {
       // and the keyboard goes back to the program the teacher was in (Word, a PDF…).
       if (!els.command.hidden) closeCommand({ forceGiveBack: true });
       if (!ink.pen && !panelsOpen()) setInteractive(false);
-      mind.ask(t, { via: opts.typed ? 'typed' : 'voice' }).then((took) => { if (!took) hear(t, { ...opts, local: true }); });
+      mind.ask(t, { via: opts.typed ? 'typed' : 'voice', session: Boolean(opts.session) }).then((took) => { if (!took) hear(t, { ...opts, local: true }); });
       return;
     }
   }
@@ -738,6 +741,8 @@ async function listen() {
     sounds.cue('stop');
     if (!spoke) { bridge.note?.(`mic: no speech detected (${wav?.length || 0} bytes recorded)`); handle(brain.event('stt_empty')); return; }
     showBubble('…', 'focused');
+    // The screenshot is taken now, while the words are being recognised (seconds saved).
+    if (mind?.on) bridge.mind?.prefetch?.();
     const t0 = performance.now();
     const res = await bridge.transcribe(wav, 'command');
     if (res?.ok && res.text) showHeard(res.text, (performance.now() - t0) / 1000);
@@ -874,27 +879,32 @@ document.querySelectorAll('input[name="md-model"]').forEach((r) => r.addEventLis
 
 let wakeBusy = false;
 const wake = new WakeListener({
-  onSentence: (wav) => { onWakeSentence(wav); },
+  onSentence: (wav, ms, head) => { onWakeSentence(wav, head); },
   onError: (err) => {
+    // The microphone can be busy for a moment (a call, another app): try again instead of
+    // switching listening off for good. After a few failures in a row, tell him once.
     console.warn('wake listener stopped', err);
-    brain.updateSettings({ alwaysListen: false });
-    handle(brain.event('mic_error'));
-    updateWake();
+    bridge.note?.(`wake listener stopped: ${err?.message || err}`);
+    wakeFailures += 1;
+    if (wakeFailures === 3) handle(brain.event('mic_error'));
+    setTimeout(() => updateWake(), Math.min(60000, 5000 * wakeFailures));
   },
 });
+let wakeFailures = 0;
 
 /** Starts or stops always-on listening to match the setting. */
 function updateWake() {
   // While dictating, listen all the time (no «يا خلفون» needed) if voice is installed.
   const want = Boolean((brain?.memory.data.alwaysListen || brain?.dictation) && voiceAvailable);
-  if (want && !wake.active) wake.start().then(() => { els.ear.hidden = !wake.active; });
+  if (want && !wake.active) wake.start().then(() => { els.ear.hidden = !wake.active; if (wake.active) wakeFailures = 0; });
   if (!want && wake.active) wake.stop();
   els.ear.hidden = !want;
 }
 
 /** «خلاص», «شكراً»...: the end of a voice session. */
 const SESSION_END = new Set(['خلاص', 'خلاص يا خلفون', 'خلاص خلفون', 'شكرا', 'شكرا خلفون', 'شكرا يا خلفون', 'مشكور', 'تسلم', 'تسلم يا خلفون', 'مع السلامه', 'بس', 'بس خلاص', 'وقف السماع', 'لا تسمع', 'كفايه', 'خلصت', 'خلاص خلصت', 'خلاص شكرا', 'باي'].map(normalize));
-const SESSION_MS = () => Math.max(1, Math.min(10, Number(brain?.memory.data.sessionMinutes) || 2)) * 60000;
+// After «يا خلفون», commands need no name and no button until «خلاص» or this long without one.
+const SESSION_MS = () => Math.max(1, Math.min(30, Number(brain?.memory.data.sessionMinutes) || 5)) * 60000;
 const inSession = () => Date.now() < sessionUntil;
 
 function startSession() {
@@ -921,7 +931,7 @@ function endSession(why) {
 
 function showSessionChip() {
   const chip = $('session-chip');
-  chip.textContent = 'أسمعك… قول أوامرك، و«خلاص» لما تخلص';
+  chip.textContent = 'أسمعك بدون زر… قول أوامرك، و«خلاص» لما تخلص';
   chip.hidden = false;
 }
 
@@ -929,20 +939,20 @@ setInterval(() => { if (sessionUntil && !inSession()) endSession('timeout'); }, 
 
 // Sentences heard while the previous one is still being read wait their turn (two at most).
 const wakeQueue = [];
-async function onWakeSentence(wav) {
+async function onWakeSentence(wav, head = wav) {
   // His own voice coming back through the speakers is not a command.
   if (recorder.active || panelsOpen() || voiceOut.speaking) return;
-  if (wakeBusy) { if (wakeQueue.length < 2 && (inSession() || brain.dictation)) wakeQueue.push(wav); return; }
+  if (wakeBusy) { if (wakeQueue.length < 2 && (inSession() || brain.dictation)) wakeQueue.push([wav, head]); return; }
   wakeBusy = true;
   try {
-    await readWakeSentence(wav);
-    while (wakeQueue.length) await readWakeSentence(wakeQueue.shift());
+    await readWakeSentence(wav, head);
+    while (wakeQueue.length) await readWakeSentence(...wakeQueue.shift());
   } finally {
     wakeBusy = false;
   }
 }
 
-async function readWakeSentence(wav) {
+async function readWakeSentence(wav, head = wav) {
   if (brain.dictation) {
     // Dictation: every sentence counts, read with the accurate model.
     const res = await bridge.transcribe(wav, 'command');
@@ -955,16 +965,26 @@ async function readWakeSentence(wav) {
   }
   // In a session every sentence is read as a command (accurate), not just checked for his name.
   const session = inSession();
-  const res = await bridge.transcribe(wav, session ? 'command' : 'wake');
+  // A sentence starts the screenshot now, while it is being turned into words (seconds saved).
+  if (session && mind?.on) bridge.mind?.prefetch?.();
+  // Outside a session only the first seconds are checked for «يا خلفون» (a fraction of the cost).
+  let res = await bridge.transcribe(session ? wav : head, session ? 'command' : 'wake');
   if (!res?.ok || !res.text) return;
-  const hit = findWakeWord(res.text);
+  let hit = findWakeWord(res.text);
+  if (!session && hit.found && head !== wav) {
+    // His name was there and he kept talking: read the whole sentence properly.
+    if (mind?.on) bridge.mind?.prefetch?.();
+    const full = await bridge.transcribe(wav, 'command');
+    if (full?.ok && full.text) { res = full; const again = findWakeWord(full.text); hit = again.found ? again : { found: true, rest: full.text }; }
+  }
   if (session) {
     const said = (hit.found ? hit.rest : res.text).trim();
     if (!said) { startSession(); return; }
     showHeard(said);
     if (SESSION_END.has(normalize(said))) { endSession('words'); return; }
     sessionUntil = Date.now() + SESSION_MS(); // each command keeps the session open
-    hear(said, { quietIfUnknown: true, session: true });
+    // He may be talking to the class, not to Khalfoun: Claude is told so, and stays quiet then.
+    hear(said, { quietIfUnknown: true, session: !hit.found });
     return;
   }
   if (!hit.found) {
@@ -1571,7 +1591,19 @@ async function start() {
   mind = new MindClient({
     bridge, brain, ink, character, animator, sounds, voiceOut, showBubble,
     recorderActive: () => recorder.active,
-    localHear: (cmd) => { const r = brain.hear(cmd); if (r && r.situation !== 'not_understood') handle(r); return r; },
+    localHear: (cmd, o = {}) => {
+      // Claude's «classroom» tool is for the games and class tools only: opening a program or a
+      // file, typing or searching are Claude's own tools (seen: «افتح الـ PDF مع الصف العاشر»
+      // went to «open an installed program» and Claude said it was done).
+      if (o.onlyClassroom) {
+        const intent = recognize(cmd)?.intent;
+        if (GENERIC_INTENTS.has(intent)) return { situation: 'not_classroom' };
+      }
+      const r = brain.hear(cmd);
+      if (o.onlyClassroom && r?.action && GENERIC_ACTIONS.has(r.action.type)) return { situation: 'not_classroom' };
+      if (r && r.situation !== 'not_understood') handle(r);
+      return r;
+    },
     note: (t) => bridge.note?.(t),
     colorHex: (c) => (COLORS[c] ? `#${COLORS[c].hex}` : null),
     showChoices, hideChoices,
@@ -1606,6 +1638,9 @@ async function start() {
         $('st-listen').disabled = !voiceAvailable;
         updateWake();
         break;
+      case 'wake-limit':
+        showBubble('خلص وقت سماع «يا خلفون» لليوم. الأوامر تشتغل بالزر أو Ctrl+Shift+Space، وبكرة يرجع السماع.', 'sorry', true);
+        break;
       case 'chat-ready':
         chatInfo = { available: !!ev.available, model: ev.model || null, vision: ev.vision || null };
         $('st-chat').disabled = !chatInfo.available;
@@ -1619,6 +1654,7 @@ async function start() {
   setInterval(() => {
     // No idle chatter while the Claude mind works, or just after it answered.
     if (mind && (mind.busy || Date.now() - (mind.lastAct || 0) < 60000)) return;
+    if (inSession()) return; // he is teaching with Khalfoun listening: no chatter
     handle(brain.tick());
   }, 4000);
   // Habits the person agreed to («كل يوم افتح لي...»), checked now and every ten minutes.

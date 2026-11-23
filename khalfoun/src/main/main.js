@@ -283,9 +283,11 @@ function createWindow() {
       devTools: !app.isPackaged,
     },
   });
-  win.setAlwaysOnTop(true, 'floating');
-  // A watchdog: if another program pushed Khalfoun behind it, he comes back on top.
-  setInterval(() => { if (win && !win.isDestroyed() && win.isVisible() && !win.isFocused()) keepOnTop(); }, 5000);
+  win.setAlwaysOnTop(true, 'screen-saver');
+  // A watchdog: if another program pushed Khalfoun behind it (a PDF in full screen, a window
+  // brought forward), he comes back on top within a second and a half. Cheap: no focus taken.
+  setInterval(() => { if (win && !win.isDestroyed() && win.isVisible() && !win.isFocused()) keepOnTop(); }, 1500);
+  win.on('always-on-top-changed', (_e, on) => { if (!on) setTimeout(keepOnTop, 50); });
   if (process.platform === 'darwin') win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
   win.setIgnoreMouseEvents(true, { forward: true });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -446,7 +448,7 @@ let returnHwnd = null; // its exact window (one program can have several, like N
  */
 function keepOnTop() {
   if (!win || win.isDestroyed()) return;
-  win.setAlwaysOnTop(true, 'floating');
+  win.setAlwaysOnTop(true, 'screen-saver');
   win.moveTop();
 }
 
@@ -741,7 +743,7 @@ function setupIpc(stores, executor) {
     const c = payload?.context && typeof payload.context === 'object' ? payload.context : {};
     const fg = await activeWindow().catch(() => null);
     return mind.ask(text, {
-      name: String(c.name || '').slice(0, 60), via: c.via === 'typed' ? 'typed' : 'voice',
+      name: String(c.name || '').slice(0, 60), via: c.via === 'typed' ? 'typed' : 'voice', session: c.session === true,
       students: Array.isArray(c.students) ? c.students.map((x) => String(x).slice(0, 40)).slice(0, 40) : [],
       notes: Array.isArray(c.notes) ? c.notes.map((x) => String(x).slice(0, 200)).slice(-12) : [],
       period: String(c.period || '').slice(0, 80),
@@ -749,6 +751,8 @@ function setupIpc(stores, executor) {
     });
   });
   ipcMain.on('mind:stop', (event) => { if (fromApp(event)) mind?.stop(); });
+  // A voice sentence just ended: take the screenshot while its words are recognised.
+  ipcMain.on('mind:prefetch', (event) => { if (fromApp(event) && settings.mind === 'claude') mind?.prefetch(); });
   ipcMain.on('mind:reset', (event) => { if (fromApp(event)) mind?.reset(); });
   ipcMain.on('mind:model', (event, m) => { if (fromApp(event) && ['fast', 'smart', 'best'].includes(m)) mind?.setModel(m); });
   ipcMain.on('mind:ui-reply', (event, msg) => { if (fromApp(event) && msg && Number.isInteger(msg.id)) mind?.uiReply(msg.id, msg.result ?? null); });
@@ -765,6 +769,13 @@ function setupIpc(stores, executor) {
   let sttQueue = Promise.resolve();
   // Learned on this computer: when the accurate model is too slow, commands use the quick one.
   let sttFast = false;
+  // What always-on listening did, written to the log every 50 checks (and every name heard).
+  const wakeHeard = { checks: 0, names: 0, failed: 0, limitTold: false };
+  const noteWake = (t) => {
+    wakeHeard.checks += 1;
+    if (t && /خل.?ف|خالف/.test(t)) { wakeHeard.names += 1; diag.write(`voice (wake) «${String(t).slice(0, 60)}»`); }
+    if (wakeHeard.checks % 50 === 0) diag.write('voice (wake) stats', { ...wakeHeard, usedToday: Math.round(secrets.data.usage?.wakeSeconds || 0) });
+  };
   ipcMain.handle('voice:transcribe', async (event, wav, purpose) => {
     if (!fromApp(event)) return { ok: false, error: 'forbidden' };
     const bytes = wav instanceof Uint8Array ? wav : new Uint8Array(wav || []);
@@ -781,6 +792,13 @@ function setupIpc(stores, executor) {
     try {
       // The cloud first when the person set it up: about a second instead of many on a slow PC.
       // Gemini's free tier counts requests per day, so always-on listening gets a smaller share there.
+      if (isWake && cloudHears() && !secrets.allowWake(secrets.azure ? undefined : 3 * 60)) {
+        // Today's listening time for «يا خلفون» is used up. The PC's own recogniser takes 25-45 s
+        // a sentence on the teacher's laptop (seen in his log) and made everything crawl, so the
+        // name is not checked locally: he is told once, and the button still works.
+        if (!wakeHeard.limitTold) { wakeHeard.limitTold = true; diag.write('voice (wake) daily cloud time used up: name checks paused until tomorrow'); send('wake-limit', {}); }
+        return { ok: true, text: '' };
+      }
       if (cloudHears() && (!isWake || secrets.allowWake(secrets.azure ? undefined : 3 * 60))) {
         const cloud = await cloudTranscribe(bytes, isWake);
         if (cloud.ok) {
@@ -788,9 +806,11 @@ function setupIpc(stores, executor) {
           clearTimeout(saveUsageTimer);
           saveUsageTimer = setTimeout(() => secrets.save().catch(() => {}), 5000);
           if (!isWake) diag.write(`voice (command, ${bytes.length} bytes) → «${cloud.text}» (${(cloud.ms / 1000).toFixed(1)} s, ${cloud.service})`);
+          else noteWake(cloud.text);
           return { ...cloud, model: cloud.service };
         }
         diag.write(`voice (${isWake ? 'wake' : 'command'}) ${cloud.service} failed: ${cloud.error}${cloud.detail ? ` (${cloud.detail})` : ''}${whisper.available && !isWake ? ' → whisper' : ''}`);
+        if (isWake) wakeHeard.failed += 1;
         // Always-on listening skips the sentence instead of making the PC crawl with whisper.
         if (isWake) return { ok: true, text: '' };
         if (!whisper.available) return { ok: false, error: `stt_failed: ${cloud.error}` };
@@ -1385,6 +1405,8 @@ async function start() {
     closeTool,
     documentsDir: SMOKE ? downloadsDir : app.getPath('documents'),
     openSaved: !SMOKE,
+    // The teacher's own folders, where «افتح البي دي إف حق الصف العاشر» looks.
+    fileRoots: SMOKE ? [downloadsDir] : [...new Set([app.getPath('desktop'), app.getPath('documents'), downloadsDir])],
   });
   try {
     const font = await readFile(join(ROOT, 'assets', 'fonts', 'Tajawal-700-arabic.woff2'));
@@ -1439,6 +1461,9 @@ async function start() {
   // Look for a local language model now and every five minutes until one appears.
   lookForModel = async (preferred) => {
     if (chat && visionModel) return;
+    // With the Claude mind on, the local model is never used: loading it only took the PC's
+    // memory and processor while Claude worked (seen: gemma3 4b warmed up during a lesson).
+    if (settings.mind === 'claude') return;
     const found = await findLocalModel(preferred ? { preferred } : {});
     if (!found) return;
     const hadChat = Boolean(chat);

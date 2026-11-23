@@ -78,7 +78,7 @@ export class MindClient {
 
   /**
    * @param {string} text what the teacher said
-   * @param {{via?: 'voice'|'typed'}} [opts]
+   * @param {{via?: 'voice'|'typed', session?: boolean}} [opts] session: heard while listening hands-free (may be for the class)
    * @returns {Promise<boolean>} false when Claude could not take it (the classic engine should)
    */
   async ask(text, opts = {}) {
@@ -96,7 +96,7 @@ export class MindClient {
     const thinking = setTimeout(() => { if (this.busy && !this.spoken) this.d.showBubble('…', 'focused'); }, 900);
     const m = this.d.brain.memory.data;
     const res = await this.d.bridge.mind.ask(text, {
-      via: opts.via || 'voice', name: m.name || '', students: m.classroom?.students || [], notes: m.claudeNotes || [],
+      via: opts.via || 'voice', session: Boolean(opts.session), name: m.name || '', students: m.classroom?.students || [], notes: m.claudeNotes || [],
       period: this.d.periodNow?.() || '',
     });
     clearTimeout(thinking);
@@ -190,7 +190,7 @@ export class MindClient {
   }
 
   classroom(command) {
-    const r = this.d.localHear(String(command || ''));
+    const r = this.d.localHear(String(command || ''), { onlyClassroom: true });
     const understood = Boolean(r) && !['not_understood', 'confused'].includes(r.situation);
     return { understood, situation: r?.situation || null, say: r?.say || '' };
   }

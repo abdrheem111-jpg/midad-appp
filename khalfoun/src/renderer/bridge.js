@@ -188,6 +188,7 @@ function createPreviewBridge() {
       async signIn() { window.__mindLoggedIn = true; emit({ type: 'mind', data: { type: 'login', step: 'done' } }); return { ok: true }; },
       async code() { return { ok: true }; },
       async signOut() { window.__mindLoggedIn = false; return { ok: true }; },
+      prefetch() { window.__mindPrefetch = (window.__mindPrefetch || 0) + 1; },
       async ask(text, context) {
         mindAsks.push({ text, context });
         const steps = window.__fakeMind ? window.__fakeMind(text) : [{ text: `سمعتك: ${text}` }];

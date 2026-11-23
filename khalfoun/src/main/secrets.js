@@ -14,7 +14,8 @@ export const DEFAULT_CLOUD = {
 };
 
 /** Free Azure hours are shared by everything: always-on listening may use this much a day. */
-export const WAKE_SECONDS_PER_DAY = 10 * 60;
+// Listening for «يا خلفون» sends only the first 2.5 s of each sentence: 30 minutes is hundreds of checks.
+export const WAKE_SECONDS_PER_DAY = 30 * 60;
 
 export class CloudSecrets {
   /**

@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('khalfoun', {
     signOut: () => ipcRenderer.invoke('mind:signout'),
     ask: (text, context) => ipcRenderer.invoke('mind:ask', { text: String(text || '').slice(0, 3000), context: context && typeof context === 'object' ? context : {} }),
     stop: () => ipcRenderer.send('mind:stop'),
+    prefetch: () => ipcRenderer.send('mind:prefetch'),
     reset: () => ipcRenderer.send('mind:reset'),
     model: (m) => ipcRenderer.send('mind:model', String(m)),
     reply: (id, result) => ipcRenderer.send('mind:ui-reply', { id: Number(id), result }),

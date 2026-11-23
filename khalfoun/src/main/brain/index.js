@@ -71,7 +71,7 @@ export function createClaudeMind(deps) {
     if (done) { pending.delete(id); done(result); }
   }
 
-  const eyes = createEyes({ electron: deps.electron, ocrImage: deps.ocrImage, hands: deps.hands, hideWhile: deps.hideWhile, activeWindow: async () => {
+  const eyes = deps.eyes || createEyes({ electron: deps.electron, ocrImage: deps.ocrImage, hands: deps.hands, hideWhile: deps.hideWhile, activeWindow: async () => {
     const r = await deps.activeWindow?.();
     return r?.ok ? r.data : null;
   }, platform, log });
@@ -197,6 +197,13 @@ export function createClaudeMind(deps) {
    * One sentence for Claude. Resolves when Claude has finished; its words are already
    * streamed to the page as they come.
    */
+  // A screenshot started when the teacher stopped talking (while his words are recognised).
+  let early = null;
+  function prefetch() {
+    if (early && Date.now() - early.at < 5000) return;
+    early = { at: Date.now(), promise: eyes.look().catch(() => null) };
+  }
+
   async function ask(text, ctx = {}, image = null) {
     if (!warmed && deps.hands && platform === 'win32') { warmed = true; deps.hands.call('ocr_init', {}, 30000).catch(() => {}); }
     if (!brain) {
@@ -207,8 +214,11 @@ export function createClaudeMind(deps) {
     // «اكتب هنا», «كمل وراي», «حل هذي»: the screen goes with the sentence (one round trip less).
     let turn = userTurn(text, ctx);
     let pic = image;
+    const ready = early && Date.now() - early.at < 15000 ? early : null;
+    early = null;
     if (!pic && needsScreen(normalize(text))) {
-      const seen = await eyes.look().catch(() => null);
+      const seen = ready ? await ready.promise : await eyes.look().catch(() => null);
+      if (ready) log('claude look ready from when he stopped talking', `${Date.now() - ready.at} ms ago`);
       if (seen?.ok) {
         pic = { data: seen.data, mime: seen.mime };
         turn += `\n\n[صورة الشاشة الحين مرفقة: ${seen.width}×${seen.height}${seen.window ? ` · النافذة: ${seen.window}` : ''}${seen.cursor ? ` · الماوس عند (${seen.cursor.x},${seen.cursor.y})` : ''}]${seen.layout ? `\nالنص في الشاشة ومواقعه:\n${seen.layout}` : ''}`;
@@ -231,7 +241,7 @@ export function createClaudeMind(deps) {
   }
 
   return {
-    status, install, signIn, signInCode, signOut, ask, ui, uiReply, checkAuth, warm,
+    status, install, signIn, signInCode, signOut, ask, prefetch, ui, uiReply, checkAuth, warm,
     stop: () => brain?.stop(),
     reset: () => brain?.reset(),
     setModel: (m) => brain?.setModel(m),

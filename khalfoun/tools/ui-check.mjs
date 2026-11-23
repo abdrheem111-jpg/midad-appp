@@ -37,7 +37,7 @@ for (const [ms, amp] of pattern) {
 }
 const micFile = join(tmpdir(), `khalfoun-mic-${process.pid}.wav`);
 await writeFile(micFile, encodeWav(samples, RATE));
-const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${micFile}`] });
+const browser = await chromium.launch({ ...(process.env.KHALFOUN_CHROME ? { executablePath: process.env.KHALFOUN_CHROME } : {}), args: ['--autoplay-policy=no-user-gesture-required', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${micFile}`] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 760 }, deviceScaleFactor: 1 });
 const problems = [];
 page.on('console', (m) => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
@@ -779,7 +779,7 @@ await check('X: push-to-talk beeps and shows «سمعتك» with what was heard'
   await xpage.evaluate(() => { window.__fakeTranscripts = ['كم الساعة']; window.__khalfoun.sounds.setEnabled(true); window.__khalfoun.sounds.played = 0; });
   await xpage.click('#stage', { position: { x: 85, y: 100 } }).catch(() => {});
   await xpage.evaluate(() => document.getElementById('mic').click());
-  await untilOn(xpage, () => !document.getElementById('heard').hidden, 20000);
+  await untilOn(xpage, () => !document.getElementById('heard').hidden, 30000);
   assert(/سمعتك: «كم الساعة»/.test(await xpage.locator('#heard').textContent()), await xpage.locator('#heard').textContent());
   assert(await xpage.evaluate(() => window.__khalfoun.sounds.played) >= 4, 'no beeps');
 });
