@@ -468,3 +468,22 @@ test('live test fix: «فوق في النص» writes centred where Claude points
   assert.match(persona, /السرعة/);
   assert.match(persona, /نص الكلام \(الوسط\)/);
 });
+
+test('live test fix: the feeling comes with the words (one trip to Claude instead of two)', async () => {
+  const { splitFeeling } = await import('../src/core/claude-persona.js');
+  assert.deepEqual(splitFeeling('[happy] هلا والله'), { feeling: 'happy', text: 'هلا والله' });
+  assert.deepEqual(splitFeeling('هلا'), { feeling: null, text: 'هلا' });
+  assert.equal(splitFeeling('[weird] هلا').feeling, null);
+  assert.equal(speakable('[proud] كتبت الفقرة.'), 'كتبت الفقرة.');
+  assert.match(personaPrompt(), /\[happy\]/);
+  const feelings = [];
+  const shown = [];
+  const client = new MindClient({
+    bridge: { mind: {} }, brain: { memory: { data: {} } }, ink: {}, animator: { play() {} },
+    character: { setEmotion: (e) => feelings.push(e.emotion) }, voiceOut: { enabled: false },
+    showBubble: (t) => shown.push(t), localHear: () => null,
+  });
+  clearInterval(client.timer);
+  client.onEvent({ type: 'text', text: '[excited] يلا نبدأ!' });
+  assert.deepEqual([feelings.at(-1), shown.at(-1)], ['excited', 'يلا نبدأ!']);
+});

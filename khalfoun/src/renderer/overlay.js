@@ -589,8 +589,9 @@ function hear(text, opts = {}) {
     if (!(quick && INSTANT.has(quick.intent) && quick.confidence >= 0.9) || mind.question) {
       followUntil = Date.now() + 9000;
       bridge.note?.(`heard «${t}» → claude`);
-      // Claude will click and type on the screen: Khalfoun's window must let the mouse through.
-      if (!els.command.hidden) closeCommand({ keepFocus: true });
+      // Claude will click and type on the screen: Khalfoun's window must let the mouse through,
+      // and the keyboard goes back to the program the teacher was in (Word, a PDF…).
+      if (!els.command.hidden) closeCommand({ forceGiveBack: true });
       if (!ink.pen && !panelsOpen()) setInteractive(false);
       mind.ask(t, { via: opts.typed ? 'typed' : 'voice' }).then((took) => { if (!took) hear(t, { ...opts, local: true }); });
       return;
@@ -695,7 +696,7 @@ function closeCommand(opts = {}) {
   clearTimeout(commandTimer);
   // While the Claude mind works, it decides where the focus is (it clicks the right window).
   const mindActing = mind && (mind.busy || Date.now() - (mind.lastAct || 0) < 20000);
-  if (hadFocus && els.settings.hidden && !opts.keepFocus && !mindActing) bridge.giveBack?.();
+  if (hadFocus && els.settings.hidden && !opts.keepFocus && (!mindActing || opts.forceGiveBack)) bridge.giveBack?.();
   // Clicks pass through again at once (not only after the next mouse move).
   if (!ink.pen && !panelsOpen()) setInteractive(false);
 }

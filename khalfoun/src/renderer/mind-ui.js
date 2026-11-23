@@ -4,6 +4,7 @@
 // and keeps what Claude chose to remember.
 
 import { normalize } from '../core/arabic.js';
+import { splitFeeling } from '../core/claude-persona.js';
 
 /** Claude's feelings → Khalfoun's face and body. */
 export const FEELING_LOOK = {
@@ -123,7 +124,10 @@ export class MindClient {
   onEvent(e) {
     if (!e) return;
     if (e.type === 'text') {
-      const t = String(e.text || '').trim();
+      // «[happy] هلا والله»: the feeling plays on his face, the words are said.
+      const { feeling, text: words } = splitFeeling(e.text);
+      if (feeling) this.feel(feeling);
+      const t = words.replace(/\[[a-z]+\]\s*/gi, '').trim();
       if (!t) return;
       this.spoken += `${t}\n`;
       this.say(t);

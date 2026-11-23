@@ -1394,6 +1394,11 @@ async function start() {
     userData: app.getPath('userData'),
     electron: { screen, desktopCapturer },
     run: async (action) => {
+      // Keys and typing must reach the teacher's program, never Khalfoun's own window.
+      if (['type_text', 'key_combo'].includes(action?.type) && win && !win.isDestroyed() && win.isFocused()) {
+        giveFocusBack();
+        await new Promise((r) => setTimeout(r, 250));
+      }
       const r = await executor.run(action);
       diag.write('action (claude)', action?.type, JSON.stringify(action?.params || {}).slice(0, 200), '→', r?.ok ? 'ok' : `failed: ${r?.error}`);
       return r;
