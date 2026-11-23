@@ -46,7 +46,9 @@ let brain;
 let voiceAvailable = false;
 let chatInfo = { available: false, model: null };
 let cloudInfo = { claude: false, azure: false, use: {} }; // the person's own cloud keys (status only)
-const agentOn = () => Boolean((cloudInfo.brain || cloudInfo.claude) && cloudInfo.use?.brain !== false && typeof bridge.agent === 'function');
+// With the Claude mind on, Claude is the only mind: no Gemini, no other cloud, no local model.
+const claudeOnly = () => brain?.memory.data.mind === 'claude';
+const agentOn = () => !claudeOnly() && Boolean((cloudInfo.brain || cloudInfo.claude) && cloudInfo.use?.brain !== false && typeof bridge.agent === 'function');
 let followUntil = 0; // after he answers, a follow-up needs no «يا خلفون» for a few seconds
 const character = createCharacter(els.stage);
 const animator = new Animator();
@@ -569,14 +571,14 @@ async function runCompose(req) {
 }
 
 let chatting = false;
-const chatOn = () => chatInfo.available && brain.memory.data.chatEnabled !== false && typeof bridge.chat === 'function';
+const chatOn = () => !claudeOnly() && chatInfo.available && brain.memory.data.chatEnabled !== false && typeof bridge.chat === 'function';
 
 // Every sentence the person says counts: an answer that comes back for an older one
 // (a slow cloud or model) is dropped instead of interrupting the newer command.
 let heardSeq = 0;
 
 // With the Claude mind on, these stay instant and local (no need to think about them).
-const INSTANT = new Set(['screen_pen', 'screen_clear', 'volume', 'stop']);
+const INSTANT = new Set(['screen_pen', 'screen_clear', 'volume', 'stop', 'open_settings']);
 
 function hear(text, opts = {}) {
   const t = String(text || '').trim();
@@ -587,6 +589,9 @@ function hear(text, opts = {}) {
     if (!(quick && INSTANT.has(quick.intent) && quick.confidence >= 0.9) || mind.question) {
       followUntil = Date.now() + 9000;
       bridge.note?.(`heard «${t}» → claude`);
+      // Claude will click and type on the screen: Khalfoun's window must let the mouse through.
+      if (!els.command.hidden) closeCommand({ keepFocus: true });
+      if (!ink.pen && !panelsOpen()) setInteractive(false);
       mind.ask(t, { via: opts.typed ? 'typed' : 'voice' }).then((took) => { if (!took) hear(t, { ...opts, local: true }); });
       return;
     }
@@ -684,11 +689,13 @@ function openCommand() {
   armCommandTimeout();
 }
 
-function closeCommand() {
+function closeCommand(opts = {}) {
   const hadFocus = !els.command.hidden && document.activeElement === els.input;
   els.command.hidden = true;
   clearTimeout(commandTimer);
-  if (hadFocus && els.settings.hidden) bridge.giveBack?.();
+  // While the Claude mind works, it decides where the focus is (it clicks the right window).
+  const mindActing = mind && (mind.busy || Date.now() - (mind.lastAct || 0) < 20000);
+  if (hadFocus && els.settings.hidden && !opts.keepFocus && !mindActing) bridge.giveBack?.();
   // Clicks pass through again at once (not only after the next mouse move).
   if (!ink.pen && !panelsOpen()) setInteractive(false);
 }
@@ -816,6 +823,8 @@ async function setMindSetting(patch) {
   if (res?.settings) brain.memory.set({ mind: res.settings.mind, mindModel: res.settings.mindModel });
   await mind.refresh();
   renderMind();
+  brain.setChatAvailable(chatOn() || agentOn());
+  brain.setVisionAvailable((Boolean(chatInfo.vision) && chatOn()) || agentOn());
 }
 
 $('md-install')?.addEventListener('click', async () => {
@@ -1566,7 +1575,10 @@ async function start() {
     colorHex: (c) => (COLORS[c] ? `#${COLORS[c].hex}` : null),
     showChoices, hideChoices,
     onSetup: (e) => renderMind(e),
-    onTool: (name) => { if (name === 'look_screen') motion.stay?.(); },
+    onTool: (name) => {
+      mind.lastAct = Date.now();
+      if (['click', 'drag', 'scroll', 'move_mouse'].includes(name) && !ink.pen) setInteractive(false);
+    },
   });
   if (bridge.mind) mind.refresh().then(() => renderMind());
   brain.setChatAvailable(chatOn() || agentOn());
@@ -1603,7 +1615,11 @@ async function start() {
     }
   });
 
-  setInterval(() => handle(brain.tick()), 4000);
+  setInterval(() => {
+    // No idle chatter while the Claude mind works, or just after it answered.
+    if (mind && (mind.busy || Date.now() - (mind.lastAct || 0) < 60000)) return;
+    handle(brain.tick());
+  }, 4000);
   // Habits the person agreed to («كل يوم افتح لي...»), checked now and every ten minutes.
   const runRoutines = () => { if (brain.memory.data.onboarded) for (const action of brain.dueRoutines()) runAction(action); };
   setTimeout(runRoutines, 8000);

@@ -280,6 +280,23 @@ export function createPlatform(deps) {
   }
 
   /**
+   * Pastes text into whatever has the keyboard focus now, without bringing any other window
+   * forward: for the Claude mind, which has just clicked exactly where the text should go.
+   * `press` presses Ctrl+V (the hands process).
+   */
+  async function pasteHere(text, press) {
+    const cb = deps.clipboard;
+    if (!cb) return { ok: false, error: 'no_clipboard' };
+    const previous = cb.readText();
+    cb.writeText(text);
+    await wait(60);
+    const r = await press();
+    await wait(450);
+    cb.writeText(previous);
+    return r?.ok ? { ok: true } : { ok: false, error: r?.error || 'paste_failed' };
+  }
+
+  /**
    * Reads the text selected in the person's window: copies it (Ctrl+C), reads
    * the clipboard, then puts the clipboard back the way it was.
    */
@@ -333,5 +350,5 @@ export function createPlatform(deps) {
     return { ok: true, data: { file } };
   }
 
-  return { platform, openApp, closeApp, openInstalled, listInstalled, pressKey, readSelection, openPath, openUrl, openWeb: openUrl, openFolder, search, volume, typeText, screenshot };
+  return { platform, openApp, closeApp, openInstalled, listInstalled, pressKey, readSelection, openPath, openUrl, openWeb: openUrl, pasteHere, openFolder, search, volume, typeText, screenshot };
 }

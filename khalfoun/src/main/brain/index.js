@@ -51,6 +51,7 @@ export function createClaudeMind(deps) {
   let auth = { loggedIn: false, method: null, email: null, plan: null, checked: 0 };
   const pending = new Map(); // page round-trips
   let nextUi = 1;
+  let warmed = false;
 
   const emit = (e) => deps.send('mind:event', e);
 
@@ -69,11 +70,13 @@ export function createClaudeMind(deps) {
     if (done) { pending.delete(id); done(result); }
   }
 
-  const eyes = createEyes({ electron: deps.electron, ocrImage: deps.ocrImage, hideWhile: deps.hideWhile, activeWindow: async () => {
+  const eyes = createEyes({ electron: deps.electron, ocrImage: deps.ocrImage, hands: deps.hands, hideWhile: deps.hideWhile, activeWindow: async () => {
     const r = await deps.activeWindow?.();
     return r?.ok ? r.data : null;
   }, platform, log });
-  const tools = khalfounTools({ run: deps.run, look: eyes.look, find: eyes.find, screen: eyes.screen, ui, log });
+  // Anything done on the screen makes the last reading of it stale.
+  const runAction = async (action) => { eyes.changed(); return deps.run(action); };
+  const tools = khalfounTools({ run: runAction, look: eyes.look, find: eyes.find, screen: eyes.screen, ui: (k, p, ms) => { if (k === 'ink') eyes.changed(); return ui(k, p, ms); }, log });
 
   function makeBrain() {
     const s = deps.getSettings();
@@ -91,7 +94,10 @@ export function createClaudeMind(deps) {
       cwd: join(deps.userData, 'claude-work'),
       env: childEnv(),
       log,
-      onEvent: (e) => emit(e),
+      onEvent: (e) => {
+        if (e.type === 'tool') log('claude tool', e.name, JSON.stringify(e.input || {}).slice(0, 160));
+        emit(e);
+      },
     });
   }
 
@@ -190,20 +196,30 @@ export function createClaudeMind(deps) {
    * One sentence for Claude. Resolves when Claude has finished; its words are already
    * streamed to the page as they come.
    */
-  async function ask(text, ctx = {}) {
+  async function ask(text, ctx = {}, image = null) {
+    if (!warmed && deps.hands && platform === 'win32') { warmed = true; deps.hands.call('ocr_init', {}, 30000).catch(() => {}); }
     if (!brain) {
       await mkdir(join(deps.userData, 'claude-work'), { recursive: true }).catch(() => {});
       brain = makeBrain();
     }
     const t0 = Date.now();
-    const res = await brain.ask(userTurn(text, ctx));
+    const res = await brain.ask(userTurn(text, ctx), image ? { image } : {});
     log('claude turn', `«${String(text).slice(0, 80)}»`, '→', res.ok ? `ok ${((Date.now() - t0) / 1000).toFixed(1)} s «${String(res.text).slice(0, 120)}»` : `failed: ${res.error}`);
     if (!res.ok && res.error === 'auth') auth = { ...auth, loggedIn: false, checked: Date.now() };
     return res.ok ? { ok: true, say: speakable(res.text), ms: Date.now() - t0 } : { ok: false, error: res.error };
   }
 
+  /** Starts Claude's program ahead of the first sentence, so the first answer is quick. */
+  async function warm() {
+    if (brain || !(await claudeInstalled(deps.userData, platform)) && deps.exePath === undefined) return;
+    await mkdir(join(deps.userData, 'claude-work'), { recursive: true }).catch(() => {});
+    brain = makeBrain();
+    brain.start();
+    if (deps.hands && platform === 'win32' && !warmed) { warmed = true; deps.hands.call('ocr_init', {}, 30000).catch(() => {}); }
+  }
+
   return {
-    status, install, signIn, signInCode, signOut, ask, ui, uiReply, checkAuth,
+    status, install, signIn, signInCode, signOut, ask, ui, uiReply, checkAuth, warm,
     stop: () => brain?.stop(),
     reset: () => brain?.reset(),
     setModel: (m) => brain?.setModel(m),

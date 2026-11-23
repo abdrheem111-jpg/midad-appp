@@ -124,7 +124,7 @@ export function khalfounTools(ctx) {
       name: 'type_text',
       description: 'Type text where the keyboard focus is now (Arabic and English, new lines allowed). Click the right place first.',
       schema: { text: z.string().min(1).max(2000) },
-      handler: async ({ text: t }) => act({ type: 'type_text', params: { text: t } }, 'كتبت.'),
+      handler: async ({ text: t }) => act({ type: 'type_text', params: { text: t, here: true } }, 'كتبت.'),
     },
     {
       name: 'press_keys',
@@ -155,11 +155,11 @@ export function khalfounTools(ctx) {
     },
     {
       name: 'screen_write',
-      description: 'Write text ON the screen itself (a transparent board over everything, like a smart pen), at a point (picture pixels, the top-right of the text since Arabic runs right to left). Without x,y it goes near the middle top. size in pixels (default 44). Use for writing on a PDF, a picture, a slide being shown, or anything not editable.',
+      description: 'Write text ON the screen itself (a transparent board over everything, like a smart pen). x,y = the CENTRE of the text in picture pixels (e.g. top middle of a 1568-wide picture: x=784, y=80). Without x,y it goes near the middle top. size = letter height in picture pixels (default about 40). Use for writing on a PDF, a picture, a slide being shown, or anything not editable. No need to look first unless the place depends on what is on the screen.',
       schema: { text: z.string().min(1).max(300), x: z.number().optional(), y: z.number().optional(), size: z.number().min(12).max(160).optional(), color: z.enum(COLOR_IDS).optional() },
       handler: async (a) => {
         const at = a.x !== undefined && a.y !== undefined ? ctx.screen.toOverlay(a.x, a.y) : null;
-        await ctx.ui('ink', { op: 'write', text: a.text, at, size: a.size ? Math.round(a.size / ctx.screen.pictureScale()) : null, color: a.color || 'blue' });
+        await ctx.ui('ink', { op: 'write', text: a.text, at, anchor: 'center', size: a.size ? Math.round(a.size * ctx.screen.pictureScale()) : null, color: a.color || 'blue' });
         return text('كتبت على الشاشة.');
       },
     },

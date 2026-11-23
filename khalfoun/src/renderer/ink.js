@@ -58,7 +58,7 @@ export class InkLayer {
    * Writes on the screen. `at` {x, y}: the top-right corner of the text (Arabic starts on the
    * right), in overlay pixels — the Claude mind places writing exactly there.
    */
-  write(text, { color = '#1D70B8', size = 0, at = null } = {}) {
+  write(text, { color = '#1D70B8', size = 0, at = null, anchor = 'right' } = {}) {
     const t = String(text || '').trim().slice(0, 300);
     if (!t) return null;
     const hex = COLORS[color] ? `#${COLORS[color].hex}` : (/^#[0-9a-f]{6}$/i.test(color) ? color : '#1D70B8');
@@ -70,8 +70,9 @@ export class InkLayer {
       this.ctx.font = `700 ${fontSize}px 'Tajawal', 'Segoe UI', sans-serif`;
       const width = this.ctx.measureText(t).width;
       this.ctx.restore();
-      x = Math.max(width / 2 + 4, Math.min(this.w - 4, at.x) - width / 2);
-      y = Math.max(fontSize * 0.6, at.y + fontSize * 0.6);
+      const cx = anchor === 'center' ? at.x : Math.min(this.w - 4, at.x) - width / 2;
+      x = Math.max(width / 2 + 4, Math.min(this.w - width / 2 - 4, cx));
+      y = Math.max(fontSize * 0.6, anchor === 'center' ? at.y + fontSize * 0.3 : at.y + fontSize * 0.6);
     } else {
       y = this.nextY * this.h;
       this.nextY = this.nextY + (fontSize * 1.5) / this.h;

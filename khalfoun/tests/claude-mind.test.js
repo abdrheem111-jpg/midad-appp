@@ -440,3 +440,31 @@ test('on Windows: the hands script parses, and really moves the mouse and reads 
     host.stop();
   }
 });
+
+test('live test fix: Claude\'s typing goes where it clicked, never back to the window before Khalfoun', async () => {
+  // On the teacher's PC the text went to the Downloads window (the one before the command box).
+  const { tools, ran } = toolsWith();
+  await tools.type_text.handler({ text: 'السلام عليكم' });
+  assert.deepEqual(ran[0], { type: 'type_text', params: { text: 'السلام عليكم', here: true } });
+  assert.equal(validateAction(ran[0]), null);
+  const order = [];
+  const { createPlatform } = await import('../src/main/actions/platform.js');
+  let clip = 'قديم';
+  const platform = createPlatform({ platform: 'win32', clipboard: { readText: () => clip, writeText: (t) => { order.push(`clip:${t}`); clip = t; } }, beforeType: () => { order.push('activate-old-window'); return 1234; } });
+  const exec = createExecutor({ platform, getSettings: () => ({ level: 3 }), hands: { call: async (op, args) => { order.push(`${op}:${args.keys}`); return { ok: true }; } } });
+  const r = await exec.run({ type: 'type_text', params: { text: 'السلام عليكم', here: true } });
+  assert.equal(r.ok, true);
+  assert.deepEqual(order, ['clip:السلام عليكم', 'keys:ctrl+v', 'clip:قديم']);
+});
+
+test('live test fix: «فوق في النص» writes centred where Claude points, letters sized in picture pixels', async () => {
+  const { tools, ui } = toolsWith();
+  await tools.screen_write.handler({ text: 'أحسنتم يا أبطال', x: 784, y: 80, size: 40, color: 'green' });
+  const p = ui[0][1];
+  assert.equal(p.anchor, 'center');
+  assert.deepEqual(p.at, { x: 640, y: 65 });
+  assert.equal(p.size, 33); // 40 picture px × 1.633 physical ÷ 2 (scale factor)
+  const persona = personaPrompt();
+  assert.match(persona, /السرعة/);
+  assert.match(persona, /نص الكلام \(الوسط\)/);
+});

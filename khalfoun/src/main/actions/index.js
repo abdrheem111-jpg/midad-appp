@@ -44,7 +44,7 @@ export function validateAction(action) {
     case 'open_download': return str(p.name, 255) && !/[\\/]|^\.\.?$/.test(p.name) ? null : 'bad_file';
     case 'volume': return ['up', 'down', 'mute'].includes(p.direction) ? null : 'bad_volume';
     case 'screenshot': return null;
-    case 'type_text': return str(p.text, 2000) ? null : 'bad_text';
+    case 'type_text': return str(p.text, 2000) && (p.here === undefined || typeof p.here === 'boolean') ? null : 'bad_text';
     case 'mouse_click':
       if (!coord(p.x) || !coord(p.y)) return 'bad_point';
       if (p.button !== undefined && !['left', 'right', 'middle'].includes(p.button)) return 'bad_point';
@@ -156,7 +156,10 @@ export function createExecutor(deps) {
         case 'search': return await platform.search(p.query.trim(), p.engine);
         case 'volume': return await platform.volume(p.direction);
         case 'screenshot': return await platform.screenshot();
-        case 'type_text': return await platform.typeText(p.text);
+        // The Claude mind clicked where the text goes: paste right there (no window switching).
+        case 'type_text':
+          if (p.here === true && deps.hands && platform.pasteHere) return await platform.pasteHere(p.text, () => hands('keys', { keys: 'ctrl+v' }));
+          return await platform.typeText(p.text);
         case 'mouse_click': return await hands('click', { x: p.x, y: p.y, button: p.button || 'left', double: p.clicks === 2, triple: p.clicks === 3, modifiers: p.modifiers || '' });
         case 'mouse_move': return await hands('move', { x: p.x, y: p.y });
         case 'mouse_drag': return await hands('drag', { x1: p.x1, y1: p.y1, x2: p.x2, y2: p.y2 });

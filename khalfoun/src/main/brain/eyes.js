@@ -7,6 +7,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { findOnScreen, layoutHint } from '../../core/screen-find.js';
+import { parseOcrOutput } from '../ocr.js';
 
 export const PICTURE_MAX = 1568;
 
@@ -65,22 +66,40 @@ export function createEyes(deps) {
     return { shot, map, display };
   }
 
+  /**
+   * Starts reading the screen's text and returns the promise: the fast way is the long-lived
+   * hands process (OCR engine already loaded), else a one-off PowerShell.
+   */
   async function ocrWords(shot) {
-    if (platform !== 'win32' || !deps.ocrImage) return [];
+    if (platform !== 'win32') return [];
     const dir = await mkdtemp(join(tmpdir(), 'khalfoun-eyes-'));
+    const file = join(dir, 's.png');
     try {
-      await writeFile(join(dir, 's.png'), shot.toPNG());
-      const r = await deps.ocrImage(join(dir, 's.png'), { words: true });
-      return r.ok ? r.data.words || [] : [];
+      await writeFile(file, shot.toPNG());
+      let r = null;
+      if (deps.hands) {
+        const h = await deps.hands.call('ocr', { path: file }, 20000);
+        r = h?.ok ? parseOcrOutput(h.data) : null;
+      }
+      if (!r && deps.ocrImage) r = await deps.ocrImage(file, { words: true });
+      return r?.ok ? r.data.words || [] : [];
     } catch { return []; } finally { rm(dir, { recursive: true, force: true }).catch(() => {}); }
   }
+
+  // The last reading, reused by find_text when nothing was done on the screen since.
+  let last = null;
+  let changes = 0;
+  const fresh = () => last && last.changes === changes && Date.now() - last.at < 4000;
 
   /** look_screen */
   async function look({ zoom } = {}) {
     const c = await capture();
     if (!c) return { ok: false, error: 'no_screen' };
     const { shot, map } = c;
-    const [words, win] = await Promise.all([ocrWords(shot), deps.activeWindow?.().catch(() => null)]);
+    const t0 = Date.now();
+    // Reading the text runs in another process while the picture is made here.
+    const reading = ocrWords(shot);
+    const winP = deps.activeWindow?.().catch(() => null);
     let img;
     if (zoom && zoom.w > 4 && zoom.h > 4) {
       const p1 = map.toPhysical(zoom.x, zoom.y); const p2 = map.toPhysical(zoom.x + zoom.w, zoom.y + zoom.h);
@@ -92,24 +111,33 @@ export function createEyes(deps) {
       img = shot.resize({ width: map.picture.width, height: map.picture.height, quality: 'best' });
     }
     const size = img.getSize();
+    const data = img.toJPEG(85).toString('base64');
+    const [words, win] = await Promise.all([reading, winP]);
+    last = { at: Date.now(), changes, words, map };
     const cur = screen.getCursorScreenPoint();
     const sf = c.display.scaleFactor || 1;
     const cursor = map.fromPhysical(Math.round(cur.x * sf), Math.round(cur.y * sf));
     const layout = layoutHint(words, { scale: map.scale, maxLines: 90 });
-    deps.log?.('claude look', `${size.width}x${size.height}`, `${words.length} words`, zoom ? 'zoom' : '');
+    deps.log?.('claude look', `${size.width}x${size.height}`, `${words.length} words`, zoom ? 'zoom' : '', `${Date.now() - t0} ms`);
     return {
-      ok: true, data: img.toJPEG(85).toString('base64'), mime: 'image/jpeg', width: size.width, height: size.height,
+      ok: true, data, mime: 'image/jpeg', width: size.width, height: size.height,
       full: map.picture, cursor, layout, window: win?.title ? `${win.title}${win.process ? ` — ${win.process}` : ''}` : '',
     };
   }
 
   /** find_text */
   async function find(text) {
-    const c = await capture();
-    if (!c) return { ok: false, error: 'no_screen' };
     if (platform !== 'win32') return { ok: false, error: 'unsupported' };
-    const words = await ocrWords(c.shot);
-    const boxes = findOnScreen(words, text, { scale: c.map.scale });
+    let words; let map;
+    if (fresh()) ({ words, map } = last);
+    else {
+      const c = await capture();
+      if (!c) return { ok: false, error: 'no_screen' };
+      words = await ocrWords(c.shot);
+      map = c.map;
+      last = { at: Date.now(), changes, words, map };
+    }
+    const boxes = findOnScreen(words, text, { scale: map.scale });
     deps.log?.('claude find', `«${String(text).slice(0, 30)}»`, `${boxes.length} of ${words.length} words`);
     return { ok: true, boxes };
   }
@@ -121,5 +149,5 @@ export function createEyes(deps) {
     pictureScale: () => current().pictureScale(),
     size: () => current().size(),
   };
-  return { look, find, screen: screenApi };
+  return { look, find, screen: screenApi, changed: () => { changes += 1; } };
 }

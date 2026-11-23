@@ -151,7 +151,8 @@ function cloudTranscribe(bytes, isWake) {
   if (!geminiEars) geminiEars = new GeminiAgent({ key: secrets.geminiKey, fetchFn: (url, init) => net.fetch(url, init) });
   return geminiEars.transcribe(bytes, { timeoutMs: isWake ? 7000 : 9000 }).then((r) => ({ ...r, service: 'gemini' }));
 }
-const cloudThinks = () => Boolean(secrets.data.use?.brain && secrets.brain);
+// With the Claude mind on (the teacher's subscription), no other cloud mind is used.
+const cloudThinks = () => settings?.mind !== 'claude' && Boolean(secrets.data.use?.brain && secrets.brain);
 /**
  * The cloud brain: Claude when its key is set, Gemini otherwise — and Gemini also steps in when
  * Claude has no credit, a bad key or is busy (seen: a Claude key without credit blocked Gemini).
@@ -650,6 +651,7 @@ function setupIpc(stores, executor) {
   // Writing a document, deck, table or diagram with the cloud brain (or the local model).
   ipcMain.handle('office:compose', async (event, payload) => {
     if (!fromApp(event)) return { ok: false, error: 'forbidden' };
+    if (settings.mind === 'claude') return { ok: false, error: 'claude_only' }; // Claude writes through its own tools
     const p = payload && typeof payload === 'object' ? payload : {};
     const kind = KIND_SET.has(p.kind) ? p.kind : 'text';
     const req = { kind, topic: String(p.topic || '').slice(0, 300), count: Number(p.count) || null, raw: String(p.raw || '').slice(0, 400) };
@@ -857,6 +859,15 @@ function setupIpc(stores, executor) {
     const mode = p.mode === 'look' ? 'look' : 'solve';
     if (!/^[A-Za-z0-9+/=]{100,8000000}$/.test(image)) return { ok: false, error: 'bad_image' };
     let res;
+    if (settings.mind === 'claude' && mind) {
+      // The Claude mind looks at the photo itself (the teacher's subscription; no other cloud).
+      const task = mode === 'look'
+        ? 'هذي صورة من كاميرا الصف. قل لي باختصار شو فيها، بدون ما تسوي أي شي على الشاشة.'
+        : 'هذي صورة من كاميرا الصف فيها مسألة أو سؤال. حلّه خطوة خطوة باختصار وبوضوح للطلاب، والجواب النهائي في الآخر. لا تسوي أي شي على الشاشة.';
+      const r = await mind.ask(task, { via: 'typed' }, { data: image, mime: 'image/jpeg' });
+      diag.write('vision (claude mind)', mode, '→', r.ok ? `${String(r.say).length} chars` : `failed: ${r.error}`);
+      return r.ok ? { ok: true, text: r.say } : { ok: false, error: r.error };
+    }
     if (secrets.brain) {
       const fetchFn = (url, init) => net.fetch(url, init);
       const chain = chainAgents([
@@ -1388,6 +1399,7 @@ async function start() {
       return r;
     },
     ocrImage,
+    hands: handsHost,
     activeWindow,
     hideWhile: async (fn) => {
       if (win && !win.isDestroyed()) win.setOpacity(0);
@@ -1402,6 +1414,9 @@ async function start() {
   });
   setupIpc(stores, executor);
   createWindow();
+  // The Claude mind starts in the background (its program, the screen reader) so the first
+  // sentence does not wait for it.
+  if (settings.mind === 'claude' && !SMOKE) setTimeout(() => mind.warm().catch(() => {}), 4000);
   // Look for a local language model now and every five minutes until one appears.
   lookForModel = async (preferred) => {
     if (chat && visionModel) return;

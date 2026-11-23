@@ -101,6 +101,45 @@ function Drag($a) {
   [K.H]::mouse_event($LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
 }
 
+# ---- Reading the screen (Windows' own OCR), kept loaded between looks: the first look pays
+# for loading WinRT, the next ones only for reading.
+$script:ocrReady = $false
+function Ocr-Init {
+  if ($script:ocrReady) { return }
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  $script:asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
+  $null = [Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime]
+  $null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
+  $null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics, ContentType = WindowsRuntime]
+  $null = [Windows.Globalization.Language, Windows.Globalization, ContentType = WindowsRuntime]
+  $script:engine = $null
+  if ([Windows.Media.Ocr.OcrEngine]::IsLanguageSupported([Windows.Globalization.Language]::new('ar'))) { $script:engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage([Windows.Globalization.Language]::new('ar')) }
+  if (-not $script:engine) { $script:engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages() }
+  $script:ocrReady = $true
+}
+function Await-Op($op, [Type]$type) { $t = $script:asTask.MakeGenericMethod($type).Invoke($null, @($op)); $t.Wait(-1) | Out-Null; $t.Result }
+function Ocr-Read([string]$path) {
+  if (-not (Test-Path -LiteralPath $path)) { throw 'no_file' }
+  Ocr-Init
+  if (-not $script:engine) { return '#NOENGINE' }
+  $file = Await-Op ([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)) ([Windows.Storage.StorageFile])
+  $stream = Await-Op ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+  try {
+    $decoder = Await-Op ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+    $bitmap = Await-Op ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+    $result = Await-Op ($script:engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+  } finally { $stream.Dispose() }
+  $sb = New-Object System.Text.StringBuilder
+  [void]$sb.AppendLine('#LANG ' + $script:engine.RecognizerLanguage.LanguageTag)
+  foreach ($line in $result.Lines) { [void]$sb.AppendLine($line.Text) }
+  $n = 0
+  foreach ($line in $result.Lines) {
+    foreach ($w in $line.Words) { $r = $w.BoundingRect; [void]$sb.AppendLine('#W ' + $n + ' ' + [int]$r.X + ' ' + [int]$r.Y + ' ' + [int]$r.Width + ' ' + [int]$r.Height + ' ' + $w.Text) }
+    $n++
+  }
+  return $sb.ToString()
+}
+
 function Send-Answer($id, [bool]$ok, $data, [string]$err) {
   $o = [ordered]@{ id = $id; ok = $ok; data = $data; error = $err }
   $json = $o | ConvertTo-Json -Compress -Depth 6
@@ -130,13 +169,15 @@ while ($true) {
         for ($i = 0; $i -lt $n; $i++) { [K.H]::mouse_event($flag, 0, 0, 120 * $sign, [UIntPtr]::Zero); Start-Sleep -Milliseconds 30 }
       }
       'keys' { Press ([string]$a.keys) ([int]$a.times) }
+      'ocr' { $data = Ocr-Read ([string]$a.path) }
+      'ocr_init' { Ocr-Init; $data = [bool]$script:engine }
       'cursor' { $pt = New-Object K.H+POINT; [void][K.H]::GetCursorPos([ref]$pt); $data = @{ x = $pt.X; y = $pt.Y } }
       default { throw 'bad_op' }
     }
     Send-Answer $id $true $data ''
   } catch {
     $msg = [string]$_.Exception.Message
-    if ($msg -notmatch '^(bad_op|bad_key|off_screen)$') { $msg = 'input: ' + $msg }
+    if ($msg -notmatch '^(bad_op|bad_key|off_screen|no_file)$') { $msg = 'input: ' + $msg }
     Send-Answer $id $false $null $msg
   }
 }
