@@ -17,7 +17,11 @@ const CLOSABLE = new Set([...APP_IDS, ...FOLDERS]);
 /** Khalfoun's own windows: the maths whiteboard and the AI notebook. */
 export const TOOLS = new Set(['board', 'notebook', 'reading']);
 export const OFFICE_FORMATS = new Set(['bold', 'italic', 'underline', 'grow', 'shrink', 'size', 'color', 'center', 'right', 'left', 'heading', 'bullets', 'numbers', 'highlight']);
-const MAX_REMINDER_MIN = 7 * 24 * 60; // «ذكرني بكرة الساعة ٧» and up to a week ahead
+const MAX_REMINDER_MIN = 7 * 24 * 60;
+/** Screen pixels: whole numbers on any realistic screen (several monitors included). */
+const coord = (v) => Number.isInteger(v) && v >= -20000 && v <= 20000;
+const KEY_NAME = '(?:ctrl|alt|shift|win|enter|tab|esc|escape|space|backspace|delete|del|insert|home|end|pageup|pagedown|left|up|right|down|printscreen|capslock|menu|apps|plus|equal|minus|comma|period|dot|slash|semicolon|quote|bracketleft|bracketright|backslash|backquote|volumemute|volumedown|volumeup|medianext|mediaprev|mediaplay|[a-z0-9]|f(?:[1-9]|1[0-2]))';
+export const KEY_COMBO = new RegExp(`^${KEY_NAME}(?:\\+${KEY_NAME}){0,3}$`); // «ذكرني بكرة الساعة ٧» and up to a week ahead
 
 /**
  * Checks shape and values. Returns an error code or null.
@@ -41,6 +45,22 @@ export function validateAction(action) {
     case 'volume': return ['up', 'down', 'mute'].includes(p.direction) ? null : 'bad_volume';
     case 'screenshot': return null;
     case 'type_text': return str(p.text, 2000) ? null : 'bad_text';
+    case 'mouse_click':
+      if (!coord(p.x) || !coord(p.y)) return 'bad_point';
+      if (p.button !== undefined && !['left', 'right', 'middle'].includes(p.button)) return 'bad_point';
+      if (p.clicks !== undefined && ![1, 2, 3].includes(p.clicks)) return 'bad_point';
+      return p.modifiers === undefined || p.modifiers === '' || /^(?:(?:ctrl|alt|shift)\+?){1,3}$/.test(p.modifiers) ? null : 'bad_point';
+    case 'mouse_move': return coord(p.x) && coord(p.y) ? null : 'bad_point';
+    case 'mouse_drag': return [p.x1, p.y1, p.x2, p.y2].every(coord) ? null : 'bad_point';
+    case 'mouse_scroll':
+      return coord(p.x) && coord(p.y) && ['up', 'down', 'left', 'right'].includes(p.direction) && Number.isInteger(p.amount) && p.amount >= 1 && p.amount <= 30 ? null : 'bad_point';
+    case 'key_combo':
+      if (typeof p.keys !== 'string' || !KEY_COMBO.test(p.keys)) return 'bad_key';
+      return p.times === undefined || (Number.isInteger(p.times) && p.times >= 1 && p.times <= 50) ? null : 'bad_key';
+    case 'open_web': {
+      if (typeof p.url !== 'string' || p.url.length > 2000) return 'bad_url';
+      try { const u = new URL(p.url); return u.protocol === 'https:' && u.hostname.includes('.') && !u.username && !u.password ? null : 'bad_url'; } catch { return 'bad_url'; }
+    }
     case 'reminder':
       if (!(Number.isFinite(p.minutes) && p.minutes >= 1 && p.minutes <= MAX_REMINDER_MIN)) return 'bad_reminder';
       if (p.repeat !== undefined && typeof p.repeat !== 'boolean') return 'bad_reminder';
@@ -88,6 +108,7 @@ export function validateAction(action) {
  */
 export function createExecutor(deps) {
   const { platform } = deps;
+  const hands = (op, args) => (deps.hands ? deps.hands.call(op, args) : Promise.resolve({ ok: false, error: 'unsupported' }));
 
   async function run(action) {
     const invalid = validateAction(action);
@@ -136,6 +157,12 @@ export function createExecutor(deps) {
         case 'volume': return await platform.volume(p.direction);
         case 'screenshot': return await platform.screenshot();
         case 'type_text': return await platform.typeText(p.text);
+        case 'mouse_click': return await hands('click', { x: p.x, y: p.y, button: p.button || 'left', double: p.clicks === 2, triple: p.clicks === 3, modifiers: p.modifiers || '' });
+        case 'mouse_move': return await hands('move', { x: p.x, y: p.y });
+        case 'mouse_drag': return await hands('drag', { x1: p.x1, y1: p.y1, x2: p.x2, y2: p.y2 });
+        case 'mouse_scroll': return await hands('scroll', { x: p.x, y: p.y, direction: p.direction, amount: p.amount });
+        case 'key_combo': return await hands('keys', { keys: p.keys, times: p.times || 1 });
+        case 'open_web': return platform.openWeb ? await platform.openWeb(p.url) : { ok: false, error: 'unsupported' };
         case 'reminder':
           deps.scheduleReminder(Math.round(p.minutes), p.note || '', Boolean(p.repeat));
           return { ok: true };

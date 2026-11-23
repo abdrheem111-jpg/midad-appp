@@ -20,6 +20,18 @@ contextBridge.exposeInMainWorld('khalfoun', {
     set: (patch) => ipcRenderer.invoke('cloud:set', patch),
     test: () => ipcRenderer.invoke('cloud:test'),
   },
+  mind: {
+    status: () => ipcRenderer.invoke('mind:status'),
+    install: () => ipcRenderer.invoke('mind:install'),
+    signIn: () => ipcRenderer.invoke('mind:signin'),
+    code: (c) => ipcRenderer.invoke('mind:code', String(c || '').slice(0, 500)),
+    signOut: () => ipcRenderer.invoke('mind:signout'),
+    ask: (text, context) => ipcRenderer.invoke('mind:ask', { text: String(text || '').slice(0, 3000), context: context && typeof context === 'object' ? context : {} }),
+    stop: () => ipcRenderer.send('mind:stop'),
+    reset: () => ipcRenderer.send('mind:reset'),
+    model: (m) => ipcRenderer.send('mind:model', String(m)),
+    reply: (id, result) => ipcRenderer.send('mind:ui-reply', { id: Number(id), result }),
+  },
   transcribe: (wav, purpose) => ipcRenderer.invoke('voice:transcribe', wav, purpose === 'wake' ? 'wake' : 'command'),
   setup: {
     status: () => ipcRenderer.invoke('setup:status'),

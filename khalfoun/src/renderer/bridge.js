@@ -25,6 +25,9 @@ function createPreviewBridge() {
   const chatCalls = [];
   const transcribeCalls = [];
   const listeners = new Set();
+  const mindAsks = [];
+  const mindReplies = new Map();
+  let mindUiId = 0;
   const emit = (ev) => listeners.forEach((cb) => cb(ev));
   const actionsRun = [];
   // Preview of the one-click setup: downloads are simulated in about two seconds.
@@ -174,12 +177,47 @@ function createPreviewBridge() {
       async set(patch) { return { ok: true, status: { claude: fakeAgent || Boolean(patch?.claudeKey), azure: Boolean(patch?.azureKey), azureRegion: patch?.azureRegion || '', use: { hear: true, brain: true, voice: true }, encryption: true } }; },
       async test() { return {}; },
     },
+    // The Claude mind in the preview: a scripted Claude (window.__fakeMind(text) → steps) so the
+    // page side (speaking, feelings, ink, questions, classroom) is checked in a browser.
+    mind: {
+      async status() {
+        const st = readJSON(SET_KEY) || {};
+        return { supported: true, installed: true, loggedIn: Boolean(window.__mindLoggedIn), on: st.mind === 'claude', model: st.mindModel || 'smart', plan: 'pro' };
+      },
+      async install() { return { ok: true }; },
+      async signIn() { window.__mindLoggedIn = true; emit({ type: 'mind', data: { type: 'login', step: 'done' } }); return { ok: true }; },
+      async code() { return { ok: true }; },
+      async signOut() { window.__mindLoggedIn = false; return { ok: true }; },
+      async ask(text, context) {
+        mindAsks.push({ text, context });
+        const steps = window.__fakeMind ? window.__fakeMind(text) : [{ text: `سمعتك: ${text}` }];
+        let last = '';
+        for (const st of steps) {
+          await new Promise((r) => setTimeout(r, 60));
+          if (st.error) return { ok: false, error: st.error };
+          if (st.text) { last = st.text; emit({ type: 'mind', data: { type: 'text', text: st.text } }); }
+          if (st.ui) {
+            const id = ++mindUiId;
+            const answer = new Promise((r) => { mindReplies.set(id, r); });
+            emit({ type: 'mind_ui', data: { id, kind: st.ui, payload: st.payload || {} } });
+            st.result = await answer;
+            window.__mindResults = [...(window.__mindResults || []), { kind: st.ui, result: st.result }];
+          }
+        }
+        return { ok: true, say: last, ms: 300 };
+      },
+      stop() { window.__mindStopped = (window.__mindStopped || 0) + 1; },
+      reset() {},
+      model() {},
+      reply(id, result) { const r = mindReplies.get(id); if (r) { mindReplies.delete(id); r(result); } },
+    },
     setInteractive() {},
     watchWindows() {},
     onEvent(cb) { listeners.add(cb); return () => listeners.delete(cb); },
     quit() {},
     // test helpers
     _emit: emit,
+    _mindAsks: mindAsks,
     _actions: actionsRun,
     _transcribeCalls: transcribeCalls,
     _chatCalls: chatCalls,

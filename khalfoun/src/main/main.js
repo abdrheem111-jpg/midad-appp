@@ -30,6 +30,7 @@ import { DiagLog } from './diag.js';
 import { ocrImage } from './ocr.js';
 import { TASK_MODES, LOOK_MODES, lookTask } from '../core/chat-prompt.js';
 import { findOnScreen, layoutHint } from '../core/screen-find.js';
+import { createClaudeMind } from './brain/index.js';
 import { Notebook } from '../core/notebook.js';
 import { OfficeHost } from './office/office-host.js';
 import { createOfficeActions } from './office/index.js';
@@ -80,7 +81,9 @@ let watcher = null;
 let chat = null; // ChatClient when a local model is found
 let chatInfo = null;
 let downloadsDirForSmoke = '';
-let officeHost = null; // the PowerShell that writes and draws inside Office (Windows) // the smoke test's own Downloads/Documents folder
+let officeHost = null; // the PowerShell that writes and draws inside Office (Windows)
+let handsHost = null; // the PowerShell that moves the mouse and presses keys for the Claude mind
+let mind = null; // the Claude mind (the teacher's own Claude subscription) // the smoke test's own Downloads/Documents folder
 let visionModel = null; // a local model that understands images (gemma3, qwen2.5vl, llava...)
 let voiceDirs = [];
 let diag = { write() {} }; // DiagLog once the profile folder is known
@@ -587,6 +590,9 @@ function sanitizeSettingsPatch(patch) {
   if ('kidsMode' in patch) out.kidsMode = !!patch.kidsMode;
   if (patch.onboarded === true) out.onboarded = true;
   if ('chatEnabled' in patch) out.chatEnabled = !!patch.chatEnabled;
+  if ('mind' in patch) out.mind = patch.mind === 'claude' ? 'claude' : 'classic';
+  if ('mindModel' in patch && ['fast', 'smart', 'best'].includes(patch.mindModel)) out.mindModel = patch.mindModel;
+  if ('digits' in patch && ['arabic', 'latin'].includes(patch.digits)) out.digits = patch.digits;
   return out;
 }
 
@@ -704,6 +710,38 @@ function setupIpc(stores, executor) {
     diag.write('settings', { level: settings.level, kidsMode: settings.kidsMode, onboarded: settings.onboarded, chatEnabled: settings.chatEnabled });
     return { ok: true, settings };
   });
+
+  // ----- the Claude mind (the teacher's own Claude subscription, signed in with Claude's own program)
+  ipcMain.handle('mind:status', async (event) => (fromApp(event) && mind ? mind.status() : null));
+  ipcMain.handle('mind:install', async (event) => {
+    if (!fromApp(event) || !mind) return { ok: false, error: 'forbidden' };
+    diag.write('claude install', 'start');
+    const r = await mind.install((done, total, phase) => send('mind', { data: { type: 'install', done, total, phase } }));
+    diag.write('claude install', r.ok ? 'ok' : `failed: ${r.error}`);
+    return r;
+  });
+  ipcMain.handle('mind:signin', async (event) => (fromApp(event) && mind ? mind.signIn() : { ok: false }));
+  ipcMain.handle('mind:code', async (event, code) => (fromApp(event) && mind ? mind.signInCode(code) : { ok: false }));
+  ipcMain.handle('mind:signout', async (event) => (fromApp(event) && mind ? mind.signOut() : { ok: false }));
+  ipcMain.handle('mind:ask', async (event, payload) => {
+    if (!fromApp(event) || !mind) return { ok: false, error: 'forbidden' };
+    if (settings.mind !== 'claude') return { ok: false, error: 'off' };
+    const text = String(payload?.text || '').slice(0, 3000);
+    if (!text.trim()) return { ok: false, error: 'empty' };
+    const c = payload?.context && typeof payload.context === 'object' ? payload.context : {};
+    const fg = await activeWindow().catch(() => null);
+    return mind.ask(text, {
+      name: String(c.name || '').slice(0, 60), via: c.via === 'typed' ? 'typed' : 'voice',
+      students: Array.isArray(c.students) ? c.students.map((x) => String(x).slice(0, 40)).slice(0, 40) : [],
+      notes: Array.isArray(c.notes) ? c.notes.map((x) => String(x).slice(0, 200)).slice(-12) : [],
+      period: String(c.period || '').slice(0, 80),
+      window: fg?.ok ? fg.data.title : '', app: fg?.ok ? fg.data.process : '',
+    });
+  });
+  ipcMain.on('mind:stop', (event) => { if (fromApp(event)) mind?.stop(); });
+  ipcMain.on('mind:reset', (event) => { if (fromApp(event)) mind?.reset(); });
+  ipcMain.on('mind:model', (event, m) => { if (fromApp(event) && ['fast', 'smart', 'best'].includes(m)) mind?.setModel(m); });
+  ipcMain.on('mind:ui-reply', (event, msg) => { if (fromApp(event) && msg && Number.isInteger(msg.id)) mind?.uiReply(msg.id, msg.result ?? null); });
 
   ipcMain.handle('action:run', async (event, action) => {
     if (!fromApp(event)) { diag.write('action refused: not from the app page'); return { ok: false, error: 'forbidden' }; }
@@ -1228,6 +1266,16 @@ async function runSmokeTest(stores) {
     await hear('امسح الشاشة');
     const compose = await js("window.khalfoun.compose({ kind: 'text', topic: 'النخلة', raw: 'اكتب عن النخلة' })");
     step('composing without a cloud key says so (no crash, no hang)', compose && compose.ok === false, compose);
+    // The Claude mind: Claude's real program runs inside the app with Khalfoun's tools; with no
+    // sign-in it must say «not signed in» cleanly (CI has no subscription).
+    const mindStatus = await js('window.khalfoun.mind.status()');
+    step('the Claude mind reports its state', mindStatus && typeof mindStatus.installed === 'boolean' && typeof mindStatus.loggedIn === 'boolean', mindStatus);
+    if (process.env.KHALFOUN_CLAUDE_EXE) {
+      settings = { ...settings, mind: 'claude' };
+      const asked = await js("window.khalfoun.mind.ask('هلا يا خلفون', { name: 'فحص' })");
+      step('Claude\'s real program answers inside the app (not signed in on CI: says so, no crash)', asked && (asked.ok === true || ['auth', 'offline', 'limit'].includes(asked.error)), asked);
+      settings = { ...settings, mind: 'classic' };
+    }
     if (process.env.KHALFOUN_SMOKE_TOOLSHOTS) {
       for (const tool of ['board', 'notebook', 'reading']) {
         if (!toolWindows[tool]) continue;
@@ -1306,8 +1354,9 @@ async function start() {
     openFiles: !SMOKE,
     log: (...a) => diag.write(...a),
   });
+  handsHost = new OfficeHost({ tempDir: join(app.getPath('temp'), 'khalfoun'), scriptPath: join(ROOT, 'src', 'main', 'brain', 'hands.ps1'), copyName: 'khalfoun-hands.ps1', sta: false, timeoutMs: 15000, log: (...a) => diag.write(...a) });
   const executor = createExecutor({
-    platform, getSettings: () => settings, downloadsDir, journal: stores.journal, scheduleReminder, office,
+    platform, getSettings: () => settings, downloadsDir, journal: stores.journal, scheduleReminder, office, hands: handsHost,
     cancelReminders: () => reminderScheduler.cancelAll(),
     readScreen,
     findOnScreen: findOnScreenWords,
@@ -1329,6 +1378,27 @@ async function start() {
     toDip: (r) => (process.platform === 'win32' ? screen.screenToDipRect(null, r) : r),
     getWorkArea: () => screen.getPrimaryDisplay().workArea,
     selfPid: process.pid,
+  });
+  mind = createClaudeMind({
+    userData: app.getPath('userData'),
+    electron: { screen, desktopCapturer },
+    run: async (action) => {
+      const r = await executor.run(action);
+      diag.write('action (claude)', action?.type, JSON.stringify(action?.params || {}).slice(0, 200), '→', r?.ok ? 'ok' : `failed: ${r?.error}`);
+      return r;
+    },
+    ocrImage,
+    activeWindow,
+    hideWhile: async (fn) => {
+      if (win && !win.isDestroyed()) win.setOpacity(0);
+      await new Promise((r) => setTimeout(r, 160));
+      try { return await fn(); } finally { if (win && !win.isDestroyed()) win.setOpacity(1); }
+    },
+    send: (channel, data) => send(channel === 'mind:event' ? 'mind' : 'mind_ui', { data }),
+    log: (...a) => diag.write(...a),
+    getSettings: () => settings,
+    fetchFn: (url, init) => net.fetch(url, init),
+    ...(SMOKE && process.env.KHALFOUN_CLAUDE_EXE ? { exePath: process.env.KHALFOUN_CLAUDE_EXE } : {}),
   });
   setupIpc(stores, executor);
   createWindow();
@@ -1382,6 +1452,8 @@ if (!app.requestSingleInstanceLock()) {
     globalShortcut.unregisterAll();
     if (fgHelper) { try { fgHelper.child.kill(); } catch { /* gone */ } }
     officeHost?.stop();
+    handsHost?.stop();
+    mind?.close();
     if (watcher) watcher.stop();
     if (reminderScheduler) reminderScheduler.stop();
   });

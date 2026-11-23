@@ -54,14 +54,30 @@ export class InkLayer {
   // ------------------------------------------------------------ voice: write and draw
 
   /** Writes a line in a marker hand; maths keeps its symbols. Animated like real writing. */
-  write(text, { color = '#1D70B8', size = 0 } = {}) {
-    const t = String(text || '').trim().slice(0, 200);
+  /**
+   * Writes on the screen. `at` {x, y}: the top-right corner of the text (Arabic starts on the
+   * right), in overlay pixels — the Claude mind places writing exactly there.
+   */
+  write(text, { color = '#1D70B8', size = 0, at = null } = {}) {
+    const t = String(text || '').trim().slice(0, 300);
     if (!t) return null;
+    const hex = COLORS[color] ? `#${COLORS[color].hex}` : (/^#[0-9a-f]{6}$/i.test(color) ? color : '#1D70B8');
     const fontSize = size || Math.max(36, Math.min(72, Math.round(this.w / (Math.max(8, t.length) * 0.9))));
-    const y = this.nextY * this.h;
-    this.nextY = this.nextY + (fontSize * 1.5) / this.h;
-    if (this.nextY > 0.8) this.nextY = 0.18;
-    const item = { kind: 'text', text: t, x: this.w / 2, y, size: fontSize, color, reveal: 0 };
+    let x = this.w / 2;
+    let y;
+    if (at && Number.isFinite(at.x) && Number.isFinite(at.y)) {
+      this.ctx.save();
+      this.ctx.font = `700 ${fontSize}px 'Tajawal', 'Segoe UI', sans-serif`;
+      const width = this.ctx.measureText(t).width;
+      this.ctx.restore();
+      x = Math.max(width / 2 + 4, Math.min(this.w - 4, at.x) - width / 2);
+      y = Math.max(fontSize * 0.6, at.y + fontSize * 0.6);
+    } else {
+      y = this.nextY * this.h;
+      this.nextY = this.nextY + (fontSize * 1.5) / this.h;
+      if (this.nextY > 0.8) this.nextY = 0.18;
+    }
+    const item = { kind: 'text', text: t, x, y, size: fontSize, color: hex, reveal: 0 };
     this.items.push(item);
     this.show();
     this.animate(item);
@@ -72,8 +88,16 @@ export class InkLayer {
    * Draws shapes in a hand-drawn style. `at`: 'pointer' puts it where the mouse is
    * (a circle «على هذا»), otherwise the middle of the screen.
    */
-  draw({ shape = 'circle', color = 'red', count = 1, text = '', at = null, outline = false }) {
+  draw({ shape = 'circle', color = 'red', count = 1, text = '', at = null, outline = false, box = null }) {
     const hex = `#${COLORS[color]?.hex || COLORS.red.hex}`;
+    if (box && box.w > 0 && box.h > 0) {
+      // A shape exactly in a box the Claude mind chose.
+      const item = { kind: 'shape', shape: SHAPES[shape] ? shape : 'circle', x: box.x + box.w / 2, y: box.y + box.h / 2, size: Math.min(box.w, box.h), color: hex, text, outline, seed: Math.floor(Math.random() * 1e6), reveal: 0 };
+      this.items.push(item);
+      this.animate(item);
+      this.show();
+      return [item];
+    }
     const n = Math.max(1, Math.min(12, count));
     const size = Math.min(220, (this.w * 0.7) / n);
     const cy = at === 'pointer' && this.pointer ? this.pointer.y : this.h * 0.5;

@@ -22,6 +22,7 @@
 
   <div id="bubble" class="bubble" role="status" aria-live="polite" hidden>
     <p id="bubble-text"></p>
+    <div id="bubble-choices" class="bubble-choices" hidden></div>
   </div>
 
   <form id="command" class="command" hidden autocomplete="off">
@@ -67,6 +68,27 @@
       <button id="st-close" type="button" class="icon-btn" aria-label="إغلاق">✕</button>
     </div>
     <label class="field"><span>اسمك</span><input id="st-name" type="text" maxlength="40"></label>
+    <section class="setup mind" aria-labelledby="md-title">
+      <h3 id="md-title">مخ Claude (من اشتراكك) <small id="md-state" class="pill"></small></h3>
+      <p class="fine">خلفون يفكر بـ Claude: يفهم أي كلام، يشوف الشاشة، يتحكم بالماوس والكيبورد، ويكتب ويرسم وين ما تبغى. يصرف من اشتراكك في Claude (Pro أو أكبر)، بدون مفاتيح ولا دفع زيادة. يستأذنك قبل الحذف والإرسال والدفع.</p>
+      <div id="md-steps" class="setup-controls">
+        <button id="md-install" type="button" class="small-btn">١. نزّل مخ Claude</button>
+        <button id="md-signin" type="button" class="small-btn">٢. اربط اشتراكي</button>
+        <button id="md-signout" type="button" class="ghost danger" hidden>افصل الاشتراك</button>
+      </div>
+      <div id="md-progress" class="progress" hidden><span></span></div>
+      <label id="md-code-row" class="field" hidden><span>إذا طلب منك الموقع تنسخ رمز، الصقه هنا</span><input id="md-code" type="text" autocomplete="off" spellcheck="false" dir="ltr" maxlength="500"></label>
+      <p id="md-result" class="fine" role="status" aria-live="polite"></p>
+      <label class="check"><input id="md-on" type="checkbox"> خلفون يفكر بمخ Claude</label>
+      <div class="row">
+        <span class="row-label">النموذج</span>
+        <div class="seg" role="radiogroup" aria-label="نموذج Claude">
+          <label><input type="radio" name="md-model" value="fast"><span>سريع</span></label>
+          <label><input type="radio" name="md-model" value="smart"><span>ذكي</span></label>
+          <label><input type="radio" name="md-model" value="best"><span>الأذكى</span></label>
+        </div>
+      </div>
+    </section>
     <fieldset class="levels">
       <legend>مستوى الإذن</legend>
       <label class="level"><input type="radio" name="st-level" value="1"><b>التعارف</b><small>يتجول ويتفاعل فقط</small></label>

@@ -24,18 +24,21 @@ export class OfficeHost {
     this.nextId = 1;
     this.waiting = new Map();
     this.buf = '';
+    this.scriptPath = opts.scriptPath || join(HERE, 'office-host.ps1');
+    this.copyName = opts.copyName || 'khalfoun-office-host.ps1';
+    this.sta = opts.sta !== false;
   }
 
   get available() { return this.platform === 'win32'; }
 
   async start() {
     if (this.child) return this.child;
-    const script = await readFile(join(HERE, 'office-host.ps1'), 'utf8');
+    const script = await readFile(this.scriptPath, 'utf8');
     await mkdir(this.tempDir, { recursive: true });
     // PowerShell cannot run a script from inside the app's archive, so it gets its own copy.
-    const file = join(this.tempDir, 'khalfoun-office-host.ps1');
+    const file = join(this.tempDir, this.copyName);
     await writeFile(file, `﻿${script}`, 'utf8');
-    const child = this.spawnFn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-STA', '-File', file], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = this.spawnFn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', ...(this.sta ? ['-STA'] : []), '-File', file], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (d) => this.onData(d));
     child.stderr?.on('data', (d) => this.log('office host stderr:', String(d).slice(0, 300)));

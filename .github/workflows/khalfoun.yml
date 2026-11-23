@@ -32,7 +32,15 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb
       - name: Real app smoke test
-        run: npm run smoke
+        shell: bash
+        run: |
+          # Claude's real program (from the SDK's platform package) runs inside the app: no
+          # subscription on CI, so it must report «not signed in» cleanly.
+          if [ "$RUNNER_OS" = "Windows" ]; then export KHALFOUN_CLAUDE_EXE="$(cygpath -w "$PWD")\\node_modules\\@anthropic-ai\\claude-agent-sdk-win32-x64\\claude.exe"; else export KHALFOUN_CLAUDE_EXE="$PWD/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude"; fi
+          npm run smoke
+      - name: Real Claude install (download from npm, verify, unpack, run)
+        if: runner.os == 'Windows'
+        run: node tools/claude-install-check.mjs
       - name: Real voice setup (download, verify, install and run whisper)
         if: runner.os == 'Windows'
         env:

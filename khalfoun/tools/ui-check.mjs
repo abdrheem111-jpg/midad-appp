@@ -922,6 +922,82 @@ await check('W: «حط دايرة على كلمة الماء» circles the word 
   await ohear('امسح الشاشة', 400);
 });
 
+// ----- the Claude mind (Khalfoun 2): a scripted Claude in the preview bridge
+await check('M: linking the subscription in settings turns the Claude mind on', async () => {
+  await opage.evaluate(() => window.__khalfoun.handle({ say: '' }));
+  await opage.evaluate(async () => { await window.__khalfoun.bridge.mind.signIn(); });
+  await opage.evaluate(async () => { const k = window.__khalfoun; await k.bridge.updateSettings({ mind: 'claude' }); k.brain.memory.set({ mind: 'claude' }); await k.mind.refresh(); k.renderMind(); });
+  assert(await opage.evaluate(() => window.__khalfoun.mind.on), 'mind not on');
+  await opage.evaluate(() => document.getElementById('settings').hidden = false);
+  const state = await opage.locator('#md-state').textContent();
+  assert(/مربوط/.test(state), state);
+  await opage.screenshot({ path: `${outDir}/m1-settings.png` });
+  await opage.evaluate(() => document.getElementById('settings').hidden = true);
+});
+
+await check('M: every sentence goes to Claude with its context; Claude\'s words show and his feeling plays', async () => {
+  await opage.evaluate(() => {
+    window.__fakeMind = (t) => [{ ui: 'feel', payload: { feeling: 'excited' } }, { text: 'حاضر يا أستاذ، بفتح الوورد.' }, { text: 'تم، الوورد مفتوح.' }];
+  });
+  await ohear('افتح لي ملف وورد جديد عشان أكتب الدرس', 900);
+  const asks = await opage.evaluate(() => window.__khalfoun.bridge._mindAsks.at(-1));
+  assert(asks.text.includes('ملف وورد'), JSON.stringify(asks));
+  assert(asks.context.via === 'voice', JSON.stringify(asks.context));
+  const b = await obubble();
+  assert(/تم، الوورد مفتوح|حاضر/.test(b), b);
+  const mood = await opage.evaluate(() => window.__khalfoun.mind.mood);
+  assert(mood === 'excited', mood);
+});
+
+await check('M: Claude writes and circles exactly where it decided on the screen; Khalfoun holds his pen', async () => {
+  await opage.evaluate(() => {
+    window.__fakeMind = () => [
+      { ui: 'ink', payload: { op: 'write', text: 'أحسنت يا سالم', at: { x: 900, y: 200 }, color: 'green' } },
+      { ui: 'ink', payload: { op: 'mark', boxes: [{ x: 500, y: 400, w: 120, h: 40 }], mark: 'circle', color: 'red' } },
+      { text: 'كتبتها وحطيت دايرة.' },
+    ];
+  });
+  await ohear('اكتب أحسنت يا سالم فوق، وحط دايرة على الجواب', 1000);
+  const items = await opage.evaluate(() => window.__khalfoun.ink.items.map((i) => ({ kind: i.kind, x: Math.round(i.x), y: Math.round(i.y), text: i.text || '' })));
+  const t = items.find((i) => i.kind === 'text');
+  assert(t && t.text === 'أحسنت يا سالم' && t.x < 900 && t.y > 200, JSON.stringify(items));
+  assert(items.some((i) => i.kind === 'mark' && i.x === 500 && i.y === 400), JSON.stringify(items));
+  const pen = await opage.evaluate(() => document.querySelector('[data-part="pen"]').getAttribute('opacity'));
+  assert(pen === '1', `pen ${pen}`);
+  await opage.screenshot({ path: `${outDir}/m2-ink.png` });
+  await ohear('امسح الشاشة', 300); // instant, not sent to Claude
+  assert((await opage.evaluate(() => window.__khalfoun.ink.items.length)) === 0, 'not cleared');
+  const last = await opage.evaluate(() => window.__khalfoun.bridge._mindAsks.at(-1).text);
+  assert(!/امسح/.test(last), 'clear went to Claude');
+});
+
+await check('M: before something risky Claude asks; «ايه» by voice answers it', async () => {
+  await opage.evaluate(() => {
+    window.__mindResults = [];
+    window.__fakeMind = () => [{ ui: 'ask', payload: { question: 'أسكّر الوورد بدون حفظ؟' } }, { text: 'تمام.' }];
+  });
+  await opage.evaluate(() => { window.__khalfoun.hear('سكر الوورد'); });
+  await opage.waitForTimeout(400);
+  assert(await opage.locator('#bubble-choices').isVisible(), 'no yes/no buttons');
+  await opage.screenshot({ path: `${outDir}/m3-ask.png` });
+  await ohear('ايه', 500);
+  const r = await opage.evaluate(() => window.__mindResults);
+  assert(r.length === 1 && r[0].result.answer === 'yes', JSON.stringify(r));
+  assert(!(await opage.locator('#bubble-choices').isVisible()), 'buttons stayed');
+});
+
+await check('M: Claude runs a ready classroom feature; when Claude is offline the classic engine answers', async () => {
+  await opage.evaluate(() => { window.__mindResults = []; window.__fakeMind = () => [{ ui: 'classroom', payload: { command: 'احتفل' } }, { text: 'يلا نحتفل!' }]; });
+  await ohear('الطلاب حلوا كلهم صح، سو لهم شي حلو', 900);
+  const r = await opage.evaluate(() => window.__mindResults[0]);
+  assert(r && r.result.understood === true, JSON.stringify(r));
+  await opage.evaluate(() => { window.__fakeMind = () => [{ error: 'offline' }]; });
+  await ohear('كم الساعة', 900);
+  const sit = await opage.evaluate(() => window.__khalfoun.lastReply?.situation);
+  assert(/time/.test(sit || ''), `classic answer: ${sit}`);
+  await opage.evaluate(async () => { const k = window.__khalfoun; await k.bridge.updateSettings({ mind: 'classic' }); k.brain.memory.set({ mind: 'classic' }); await k.mind.refresh(); delete window.__fakeMind; });
+});
+
 await check('W: «يا خلفون» opens a voice session: commands follow without his name until «خلاص»', async () => {
   await opage.evaluate(() => { window.__khalfoun.bridge._actions.length = 0; window.__fakeTranscripts = ['يا خلفون', 'افتح الحاسبة', 'ارسم دايرة زرقا', 'خلاص']; });
   const wav = () => opage.evaluate(() => window.__khalfoun.onWakeSentence(new Uint8Array(3200)));

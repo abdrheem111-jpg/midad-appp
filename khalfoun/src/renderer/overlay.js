@@ -23,6 +23,7 @@ import { STAR_MILESTONES as STAR_STEPS } from '../core/classfun.js';
 import { InkLayer } from './ink.js';
 import { COLORS } from '../core/office-plan.js';
 import { normalize } from '../core/arabic.js';
+import { MindClient } from './mind-ui.js';
 
 const CHAR_W = 170;
 const CHAR_H = 209;
@@ -118,6 +119,7 @@ function hideBubble() {
 
 // ----------------------------------------------------------------- replies
 
+let mind = null; // the Claude mind (MindClient), when the teacher linked his Claude subscription
 let lastReply = null; // for automated checks
 const recentSituations = []; // for automated checks
 
@@ -573,10 +575,22 @@ const chatOn = () => chatInfo.available && brain.memory.data.chatEnabled !== fal
 // (a slow cloud or model) is dropped instead of interrupting the newer command.
 let heardSeq = 0;
 
+// With the Claude mind on, these stay instant and local (no need to think about them).
+const INSTANT = new Set(['screen_pen', 'screen_clear', 'volume', 'stop']);
+
 function hear(text, opts = {}) {
   const t = String(text || '').trim();
   if (!t) return;
   if (!opts.viaAgent) heardSeq += 1;
+  if (mind?.on && !opts.viaAgent && !opts.local) {
+    const quick = recognize(t);
+    if (!(quick && INSTANT.has(quick.intent) && quick.confidence >= 0.9) || mind.question) {
+      followUntil = Date.now() + 9000;
+      bridge.note?.(`heard «${t}» → claude`);
+      mind.ask(t, { via: opts.typed ? 'typed' : 'voice' }).then((took) => { if (!took) hear(t, { ...opts, local: true }); });
+      return;
+    }
+  }
   const reply = brain.hear(t);
   bridge.note?.(`heard «${t}» → ${reply?.situation || 'nothing'}${reply?.action ? ` (action ${reply.action.type})` : ''}${reply?.awaitingConfirm ? ' (asks to confirm)' : ''}`);
   followUntil = Date.now() + 9000;
@@ -690,7 +704,7 @@ els.command.addEventListener('submit', (e) => {
   e.preventDefault();
   const text = els.input.value;
   els.input.value = '';
-  hear(text);
+  hear(text, { typed: true });
   armCommandTimeout();
 });
 
@@ -733,7 +747,118 @@ async function listen() {
 }
 
 els.mic.addEventListener('click', listen);
-els.bubble.addEventListener('click', () => hideBubble());
+els.bubble.addEventListener('click', (e) => { if (!e.target.closest('.bubble-choices')) hideBubble(); });
+
+/** Buttons under his question (the Claude mind asks before anything risky). */
+function showChoices(labels, onPick) {
+  const box = $('bubble-choices');
+  box.replaceChildren(...labels.map((label) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.addEventListener('click', (e) => { e.stopPropagation(); hideChoices(); onPick(label); });
+    return b;
+  }));
+  box.hidden = false;
+  els.bubble.hidden = false;
+  clearTimeout(bubbleTimer);
+  bubbleTimer = setTimeout(hideBubble, 60000);
+}
+
+function hideChoices() {
+  const box = $('bubble-choices');
+  box.hidden = true;
+  box.replaceChildren();
+}
+
+// ------------------------------------------------------- the Claude mind in settings
+
+const MIND_TEXT = {
+  install: 'ينزّل برنامج Claude الرسمي (حوالي ١٧٨ ميجا، مرة وحدة) ويتأكد من بصمته.',
+  signin: 'انفتح المتصفح على موقع Claude: سجّل دخول بحسابك (اللي فيه الاشتراك) واضغط «Authorize». خلفون ينتظر.',
+};
+
+function renderMind(e) {
+  const info = mind?.info || {};
+  const st = $('md-state');
+  if (!st) return;
+  if (!bridge.mind || info.supported === false) {
+    $('md-steps').hidden = true;
+    $('md-on').disabled = true;
+    st.textContent = 'ويندوز فقط';
+    return;
+  }
+  st.textContent = info.loggedIn ? `مربوط${info.plan ? ` · ${info.plan}` : ''}` : info.installed ? 'منزّل، مو مربوط' : 'مو منزّل';
+  st.classList.toggle('on', Boolean(info.loggedIn));
+  $('md-install').hidden = Boolean(info.installed);
+  $('md-signin').hidden = !info.installed || Boolean(info.loggedIn);
+  $('md-signout').hidden = !info.loggedIn;
+  $('md-on').checked = brain?.memory.data.mind === 'claude';
+  $('md-on').disabled = !info.loggedIn;
+  radio('md-model', info.model || brain?.memory.data.mindModel || 'smart');
+  if (e?.type === 'install') {
+    const bar = $('md-progress');
+    bar.hidden = false;
+    const pct = e.total ? Math.round((e.done / e.total) * 100) : 0;
+    bar.firstElementChild.style.width = `${pct}%`;
+    $('md-result').textContent = e.phase === 'unpack' ? 'يفك البرنامج…' : `ينزّل… ${toArabicDigits(pct)}٪`;
+  }
+  if (e?.type === 'login') {
+    if (e.step === 'browser') $('md-result').textContent = MIND_TEXT.signin;
+    if (e.step === 'code') { $('md-code-row').hidden = false; $('md-code').focus(); }
+    if (e.step === 'done') { $('md-code-row').hidden = true; $('md-result').textContent = 'تم الربط! خلفون الحين يفكر بـ Claude.'; }
+    if (e.step === 'failed') { $('md-code-row').hidden = true; $('md-result').textContent = 'ما تم الربط. جرب مرة ثانية.'; }
+  }
+}
+
+async function setMindSetting(patch) {
+  const res = await bridge.updateSettings(patch);
+  if (res?.settings) brain.memory.set({ mind: res.settings.mind, mindModel: res.settings.mindModel });
+  await mind.refresh();
+  renderMind();
+}
+
+$('md-install')?.addEventListener('click', async () => {
+  $('md-install').disabled = true;
+  $('md-result').textContent = MIND_TEXT.install;
+  const r = await bridge.mind.install();
+  $('md-install').disabled = false;
+  $('md-progress').hidden = true;
+  $('md-result').textContent = r?.ok ? 'نزل! الحين اضغط «اربط اشتراكي».' : `ما نزل (${r?.error || 'خطأ'}). تأكد من الإنترنت وجرب مرة ثانية.`;
+  await mind.refresh();
+  renderMind();
+});
+
+$('md-signin')?.addEventListener('click', async () => {
+  $('md-signin').disabled = true;
+  $('md-result').textContent = MIND_TEXT.signin;
+  const r = await bridge.mind.signIn();
+  $('md-signin').disabled = false;
+  await mind.refresh();
+  if (r?.ok) await setMindSetting({ mind: 'claude' });
+  else renderMind({ type: 'login', step: 'failed' });
+  if (r?.ok) { handle({ say: 'هلا! الحين أفكر بمخ Claude. جرّبني: قول لي أي شي.', emotion: { emotion: 'excited', intensity: 3 }, animation: 'celebrate' }); }
+});
+
+$('md-code')?.addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter') return;
+  const r = await bridge.mind.code($('md-code').value);
+  $('md-code').value = '';
+  $('md-result').textContent = r?.ok ? 'وصل الرمز، لحظة…' : 'الرمز ما انقبل.';
+});
+
+$('md-signout')?.addEventListener('click', async () => {
+  await bridge.mind.signOut();
+  await setMindSetting({ mind: 'classic' });
+  $('md-result').textContent = 'انفصل الاشتراك. خلفون رجع لمخه العادي.';
+});
+
+$('md-on')?.addEventListener('change', () => setMindSetting({ mind: $('md-on').checked ? 'claude' : 'classic' }));
+document.querySelectorAll('input[name="md-model"]').forEach((r) => r.addEventListener('change', () => {
+  if (!r.checked) return;
+  bridge.mind?.model(r.value);
+  setMindSetting({ mindModel: r.value });
+}));
 
 // ------------------------------------------------------- «يا خلفون» wake word
 
@@ -1046,6 +1171,8 @@ async function saveCloud(patch) {
 function openSettings(focus = null) {
   const d = brain.memory.data;
   renderCloud();
+  renderMind();
+  mind?.refresh().then(() => renderMind());
   $('st-name').value = d.name || '';
   radio('st-level', d.level || 1);
   radio('st-humor', d.humor);
@@ -1431,6 +1558,17 @@ async function start() {
   });
 
   voiceOut.setEnabled(!!brain.memory.data.speak);
+  mind = new MindClient({
+    bridge, brain, ink, character, animator, sounds, voiceOut, showBubble,
+    recorderActive: () => recorder.active,
+    localHear: (cmd) => { const r = brain.hear(cmd); if (r && r.situation !== 'not_understood') handle(r); return r; },
+    note: (t) => bridge.note?.(t),
+    colorHex: (c) => (COLORS[c] ? `#${COLORS[c].hex}` : null),
+    showChoices, hideChoices,
+    onSetup: (e) => renderMind(e),
+    onTool: (name) => { if (name === 'look_screen') motion.stay?.(); },
+  });
+  if (bridge.mind) mind.refresh().then(() => renderMind());
   brain.setChatAvailable(chatOn() || agentOn());
   brain.setVisionAvailable((Boolean(chatInfo.vision) && chatOn()) || agentOn());
   bridge.onEvent((ev) => {
@@ -1440,6 +1578,8 @@ async function start() {
       case 'ptt': listen(); break;
       case 'open-settings': openSettings(); break;
       case 'come': handle(brain.hear('تعال')); break;
+      case 'mind': mind?.onEvent(ev.data); break;
+      case 'mind_ui': mind?.onUi(ev.data); break;
       case 'windows': lastWindows = Array.isArray(ev.list) ? ev.list : []; applyWindows(); noticeWindows(lastWindows); break;
       case 'download': if (!panelsOpen()) handle(brain.event('download_new', { name: ev.name, kind: ev.kind })); break;
       case 'resume': handle(brain.event('resume')); motion.come(); break;
@@ -1492,7 +1632,7 @@ async function start() {
   else handle(brain.start());
 
   // Hooks for automated UI tests and debugging.
-  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, ink, startSession, endSession, onWakeSentence, get inSession() { return inSession(); }, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut };
+  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, ink, startSession, endSession, onWakeSentence, get inSession() { return inSession(); }, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut, get mind() { return mind; }, renderMind };
   document.documentElement.dataset.ready = '1';
 }
 

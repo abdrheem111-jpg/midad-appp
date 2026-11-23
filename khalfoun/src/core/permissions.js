@@ -47,6 +47,13 @@ export const ACTION_RISK = {
   reminder: 'none',
   cancel_reminders: 'none',
   type_text: 'modify',
+  // Claude's hands (the Claude mind): the mouse and keyboard as a person uses them.
+  mouse_click: 'modify',
+  mouse_move: 'none',
+  mouse_drag: 'modify',
+  mouse_scroll: 'none',
+  key_combo: 'modify', // closing/deleting combos are asked for first (core/claude-persona keysNeedConsent)
+  open_web: 'open', // an https page in the browser
   pdf_write: 'modify',
   organize_downloads: 'modify',
   undo_organize: 'modify',
