@@ -429,6 +429,7 @@ async function writePdf(text, position, dirs, page = 1) {
 /** Hands keyboard focus back to the program the person was using before pasting. */
 let focusTimer = null;
 let returnPid = null; // the program that was in front when Khalfoun took the focus (Windows)
+let returnHwnd = null; // its exact window (one program can have several, like Notepad)
 
 /**
  * Before typing or pressing keys: hands the focus back to the person's program.
@@ -448,9 +449,14 @@ function releaseFocus() {
  * The command box closed: the focus goes back to exactly the program the person was in.
  * (blur alone lets Windows pick the next window, often a folder left open behind.)
  */
-function giveFocusBack() {
+async function giveFocusBack() {
   const pid = releaseFocus();
-  if (pid && process.platform === 'win32') foregroundInfo(`act ${pid}`).catch(() => {});
+  if (!pid || process.platform !== 'win32') return null;
+  // The exact window first (Notepad keeps several windows in one program), else the program.
+  let fg = returnHwnd ? await foregroundInfo(`acth ${returnHwnd}`).catch(() => null) : null;
+  if (!fg || fg.pid !== pid) fg = await foregroundInfo(`act ${pid}`).catch(() => null);
+  diag.write('focus given back to', fg?.process || '?', `«${String(fg?.title || '').slice(0, 50)}»`, fg?.hwnd === returnHwnd ? '(same window)' : '');
+  return fg;
 }
 
 /**
@@ -465,13 +471,31 @@ Add-Type -Name F -Namespace K -MemberDefinition @'
 [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+[DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
+[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint f, UIntPtr extra);
 '@
 while ($null -ne ($line = [Console]::In.ReadLine())) {
   if ($line -match '^act (\\d+)$') { try { [void]$ws.AppActivate([int]$Matches[1]); Start-Sleep -Milliseconds 120 } catch {} }
+  if ($line -match '^acth (\\d+)$') {
+    # The exact window (a program can have several, like Notepad): a tap of Alt lets Windows
+    # hand the foreground over, then that window comes forward.
+    try {
+      $w = [IntPtr][long]$Matches[1]
+      if ([K.F]::IsWindow($w)) {
+        if ([K.F]::IsIconic($w)) { [void][K.F]::ShowWindow($w, 9) }
+        [K.F]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [K.F]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
+        [void][K.F]::SetForegroundWindow($w)
+        Start-Sleep -Milliseconds 120
+      }
+    } catch {}
+  }
   $h = [K.F]::GetForegroundWindow(); $p = 0; [void][K.F]::GetWindowThreadProcessId($h, [ref]$p)
   $sb = New-Object System.Text.StringBuilder 512; [void][K.F]::GetWindowText($h, $sb, 512)
   $n = ''; try { $n = (Get-Process -Id $p -ErrorAction Stop).ProcessName } catch {}
-  [Console]::Out.WriteLine("$p\t$n\t" + ($sb.ToString() -replace '[\r\n\t]', ' ')); [Console]::Out.Flush()
+  [Console]::Out.WriteLine("$p\t$n\t$([long]$h)\t" + ($sb.ToString() -replace '[\r\n\t]', ' ')); [Console]::Out.Flush()
 }
 `;
 function foregroundInfo(request = 'fg') {
@@ -485,11 +509,11 @@ function foregroundInfo(request = 'fg') {
       fgHelper.buf += d;
       let nl;
       while ((nl = fgHelper.buf.indexOf('\n')) >= 0) {
-        const [pidText, proc = '', ...title] = fgHelper.buf.slice(0, nl).replace(/\r$/, '').split('\t');
+        const [pidText, proc = '', hwndText = '', ...title] = fgHelper.buf.slice(0, nl).replace(/\r$/, '').split('\t');
         fgHelper.buf = fgHelper.buf.slice(nl + 1);
         const pid = Number(pidText);
         const next = fgHelper.waiting.shift();
-        if (next) next(Number.isInteger(pid) && pid > 0 ? { pid, process: proc, title: title.join(' ').trim() } : null);
+        if (next) next(Number.isInteger(pid) && pid > 0 ? { pid, process: proc, hwnd: /^\d+$/.test(hwndText) ? hwndText : null, title: title.join(' ').trim() } : null);
       }
     });
     const reset = () => { if (fgHelper) for (const w of fgHelper.waiting) w(null); fgHelper = null; };
@@ -501,7 +525,7 @@ function foregroundInfo(request = 'fg') {
     const timer = setTimeout(() => { const k = helper.waiting.indexOf(done); if (k >= 0) helper.waiting.splice(k, 1); resolve(null); }, 2500);
     function done(info) { clearTimeout(timer); resolve(info); }
     helper.waiting.push(done);
-    try { helper.child.stdin.write(`${/^act \d+$/.test(request) ? request : 'fg'}\n`); } catch { done(null); }
+    try { helper.child.stdin.write(`${/^acth? \d+$/.test(request) ? request : 'fg'}\n`); } catch { done(null); }
   });
 }
 const foregroundPid = async () => (await foregroundInfo())?.pid ?? null;
@@ -576,7 +600,7 @@ async function focusOverlay() {
     const info = await foregroundInfo();
     const pid = info?.pid ?? null;
     const own = new Set([process.pid, ...app.getAppMetrics().map((m) => m.pid)]);
-    if (pid && !own.has(pid)) { returnPid = pid; lastOther = { process: info.process, title: info.title }; }
+    if (pid && !own.has(pid)) { returnPid = pid; returnHwnd = info.hwnd || null; lastOther = { process: info.process, title: info.title }; }
     diag.write('focus taken from program', pid ?? 'unknown', info?.process || '');
   }
   win.setFocusable(true);
@@ -1396,10 +1420,16 @@ async function start() {
     run: async (action) => {
       // Keys and typing must reach the teacher's program, never Khalfoun's own window.
       if (['type_text', 'key_combo'].includes(action?.type) && win && !win.isDestroyed() && win.isFocused()) {
-        giveFocusBack();
-        await new Promise((r) => setTimeout(r, 250));
+        await giveFocusBack();
+        await new Promise((r) => setTimeout(r, 150));
       }
       const r = await executor.run(action);
+      // Tell Claude which window the typing really went to, so it never claims a wrong result.
+      if (action?.type === 'type_text' && process.platform === 'win32') {
+        const fg = await foregroundInfo().catch(() => null);
+        const own = new Set([process.pid, ...app.getAppMetrics().map((m) => m.pid)]);
+        if (r?.ok && fg) r.data = { ...(r.data || {}), window: own.has(fg.pid) ? 'خلفون نفسه (ما وصلت لأي برنامج!)' : `${fg.title || ''} — ${fg.process || ''}` };
+      }
       diag.write('action (claude)', action?.type, JSON.stringify(action?.params || {}).slice(0, 200), '→', r?.ok ? 'ok' : `failed: ${r?.error}`);
       return r;
     },

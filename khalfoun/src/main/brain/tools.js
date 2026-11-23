@@ -47,7 +47,8 @@ export function khalfounTools(ctx) {
   const act = async (action, okText) => {
     const res = await ctx.run(action);
     log('claude action', action.type, res.ok ? 'ok' : `failed: ${res.error}`);
-    return res.ok ? text(okText || 'تم.') : fail(`ما زبط: ${why(res)}`);
+    if (!res.ok) return fail(`ما زبط: ${why(res)}`);
+    return text(`${okText || 'تم.'}${res.data?.window ? ` النافذة اللي انكتب فيها: ${res.data.window}` : ''}`);
   };
   const ask = async (question) => {
     const r = await ctx.ui('ask', { question }, 60000);
