@@ -283,6 +283,8 @@ function createWindow() {
     },
   });
   win.setAlwaysOnTop(true, 'floating');
+  // A watchdog: if another program pushed Khalfoun behind it, he comes back on top.
+  setInterval(() => { if (win && !win.isDestroyed() && win.isVisible() && !win.isFocused()) keepOnTop(); }, 5000);
   if (process.platform === 'darwin') win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
   win.setIgnoreMouseEvents(true, { forward: true });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -436,12 +438,24 @@ let returnHwnd = null; // its exact window (one program can have several, like N
  * Returns that program's process id when Khalfoun had the focus, so the action
  * can bring exactly that program forward (blur alone does not always do it).
  */
+/**
+ * Khalfoun stays above every window. On Windows, changing whether the window can take the
+ * focus (and other programs coming forward) can drop it behind them: put it back on top,
+ * without taking the focus.
+ */
+function keepOnTop() {
+  if (!win || win.isDestroyed()) return;
+  win.setAlwaysOnTop(true, 'floating');
+  win.moveTop();
+}
+
 function releaseFocus() {
   if (!win || !win.isFocused()) return null;
   win.setFocusable(false);
   win.blur();
+  keepOnTop();
   clearTimeout(focusTimer);
-  focusTimer = setTimeout(() => { if (win && !win.isDestroyed()) win.setFocusable(true); }, 1500);
+  focusTimer = setTimeout(() => { if (win && !win.isDestroyed()) { win.setFocusable(true); keepOnTop(); } }, 1500);
   return returnPid;
 }
 
@@ -456,6 +470,7 @@ async function giveFocusBack() {
   let fg = returnHwnd ? await foregroundInfo(`acth ${returnHwnd}`).catch(() => null) : null;
   if (!fg || fg.pid !== pid) fg = await foregroundInfo(`act ${pid}`).catch(() => null);
   diag.write('focus given back to', fg?.process || '?', `«${String(fg?.title || '').slice(0, 50)}»`, fg?.hwnd === returnHwnd ? '(same window)' : '');
+  keepOnTop();
   return fg;
 }
 
@@ -606,6 +621,7 @@ async function focusOverlay() {
   win.setFocusable(true);
   win.show();
   win.focus();
+  keepOnTop();
 }
 
 function sanitizeSettingsPatch(patch) {
