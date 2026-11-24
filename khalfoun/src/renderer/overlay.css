@@ -465,11 +465,14 @@ html.preview body {
 .camera-status { color: var(--ink-soft); margin: 6px 0; font-weight: 700; }
 .camera-answer { white-space: pre-wrap; line-height: 1.8; font-size: 18px; background: #fff; border: 2px solid var(--line); border-radius: 14px; padding: 12px 16px; max-height: 34vh; overflow: auto; unicode-bidi: plaintext; }
 .camera-panel.busy .camera-status::after { content: ' ⏳'; }
-.camera-panel .row, .voice-test .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
-.camera-panel button, .voice-test button { font: inherit; font-weight: 700; padding: 9px 18px; border-radius: 999px; border: 2px solid var(--ink); background: var(--paper); color: var(--ink); cursor: pointer; }
-.camera-panel button.primary, .voice-test button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.camera-panel button:disabled, .voice-test button:disabled { opacity: 0.5; cursor: progress; }
+.camera-panel .row, .voice-test .row, .ear-trainer .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.camera-panel button, .voice-test button, .ear-trainer button { font: inherit; font-weight: 700; padding: 9px 18px; border-radius: 999px; border: 2px solid var(--ink); background: var(--paper); color: var(--ink); cursor: pointer; }
+.camera-panel button.primary, .voice-test button.primary, .ear-trainer button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.camera-panel button:disabled, .voice-test button:disabled, .ear-trainer button:disabled { opacity: 0.5; cursor: progress; }
 .voice-test { width: min(560px, calc(100vw - 32px)); }
+.ear-trainer { width: min(600px, calc(100vw - 32px)); }
+.ear-tip { text-align: center; color: var(--accent); font-weight: 700; min-height: 24px; margin: 0 0 6px; }
+.ear-counts { margin-top: 12px; }
 .vt-count { margin: 4px 0; color: var(--ink-soft); font-weight: 700; }
 .vt-phrase { font-size: 30px; font-weight: 700; text-align: center; margin: 14px 0 6px; }
 .vt-heard { text-align: center; min-height: 24px; color: var(--ink-soft); }

@@ -21,6 +21,7 @@ export class Recorder {
    * @param {(level: number) => void} [onLevel] loudness 0..1 for the UI
    * @param {{maxMs?: number, silenceMs?: number|null, noSpeechMs?: number, worklet?: string, onChunk?: (samples: Float32Array) => void}} [opts]
    *   silenceMs null: keep recording through pauses (a student reading) until stop() or maxMs.
+   *   trim: return only the spoken part (ms = its length).
    */
   async record(onLevel, opts = {}) {
     const maxMs = opts.maxMs || MAX_MS;
@@ -58,12 +59,21 @@ export class Recorder {
       });
       node.port.onmessage = null;
       src.disconnect();
-      const total = chunks.reduce((n, c) => n + c.length, 0);
+      // trim: keep only the spoken part (with a little air around it), for training clips.
+      let keep = chunks;
+      if (opts.trim && spoke) {
+        const loud = chunks.map((c) => rms(c) > SILENCE_RMS);
+        const first = loud.indexOf(true);
+        const last = loud.lastIndexOf(true);
+        const pad = Math.ceil((0.15 * ctx.sampleRate) / (chunks[0]?.length || 128));
+        keep = chunks.slice(Math.max(0, first - pad), Math.min(chunks.length, last + 1 + pad));
+      }
+      const total = keep.reduce((n, c) => n + c.length, 0);
       const all = new Float32Array(total);
       let off = 0;
-      for (const c of chunks) { all.set(c, off); off += c.length; }
+      for (const c of keep) { all.set(c, off); off += c.length; }
       const wav = encodeWav(downsample(all, ctx.sampleRate, TARGET_RATE), TARGET_RATE);
-      return { wav, spoke };
+      return { wav, spoke, ms: (total / ctx.sampleRate) * 1000 };
     } finally {
       this.active = false;
       this.finish = null;

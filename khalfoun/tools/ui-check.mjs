@@ -3,7 +3,7 @@
 // Needs Playwright: npm i -D playwright && npx playwright install chromium
 
 import { createRequire } from 'node:module';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodeWav } from '../src/renderer/wav.js';
@@ -1024,6 +1024,79 @@ await check('W: words outside a session are only checked for his name', async ()
   await opage.waitForTimeout(600);
   const types = await opage.evaluate(() => window.__khalfoun.bridge._actions.map((x) => x.type));
   assert(!types.includes('open_app'), types.join(','));
+});
+
+await check('R: the presenter remote: one press teaches Khalfoun its button; typing keys are refused', async () => {
+  await opage.evaluate(() => window.__khalfoun.bridge._emit({ type: 'open-settings' }));
+  await opage.waitForTimeout(300);
+  await opage.click('#rm-learn');
+  assert(await opage.evaluate(() => window.__remotePaused === true), 'old button not paused while learning');
+  await opage.keyboard.press('b');
+  await opage.waitForTimeout(150);
+  assert(/حرف/.test(await opage.locator('#rm-result').textContent()), await opage.locator('#rm-result').textContent());
+  await opage.keyboard.press('F9');
+  await opage.waitForTimeout(300);
+  const calls = await opage.evaluate(() => window.__remoteCalls || []);
+  assert(calls.at(-1) === 'F9', JSON.stringify(calls));
+  assert(/F9/.test(await opage.locator('#rm-result').textContent()), await opage.locator('#rm-result').textContent());
+  assert(await opage.evaluate(() => window.__remotePaused === false), 'remote not resumed');
+  assert(!(await opage.locator('#rm-forget').isHidden()), 'no forget button');
+  await opage.screenshot({ path: `${outDir}/r1-remote.png` });
+  await opage.click('#rm-forget');
+  await opage.waitForTimeout(200);
+  assert((await opage.evaluate(() => window.__remoteCalls)).at(-1) === null, 'not forgotten');
+});
+
+await check('E: «علّم خلفون صوتك» records his calls one after another and keeps them', async () => {
+  await opage.click('#ear-open');
+  await opage.waitForTimeout(300);
+  assert(await opage.locator('.ear-trainer').isVisible(), 'no ear panel');
+  assert(/يا خلفون/.test(await opage.locator('.ear-trainer .vt-phrase').textContent()), 'no phrase');
+  await opage.click('.ear-trainer button.primary');
+  await untilOn(opage, () => (window.__earSaved || []).length >= 2, 20000);
+  await opage.screenshot({ path: `${outDir}/e1-ear.png` });
+  await opage.click('.ear-trainer button:has-text("وقّف")');
+  await opage.waitForTimeout(400);
+  const saved = await opage.evaluate(() => window.__earSaved);
+  assert(saved.every((x) => x.kind === 'call' && x.bytes > 44), JSON.stringify(saved));
+  assert(/عندي: [٠-٩]+ نداء/.test(await opage.locator('.ear-counts').textContent()), 'no counts');
+  await opage.click('.ear-trainer button:has-text("أصوات Azure")');
+  await opage.waitForTimeout(400);
+  assert(/٣٢٠/.test(await opage.locator('.ear-trainer .vt-heard').textContent()), await opage.locator('.ear-trainer .vt-heard').textContent());
+  await opage.click('.ear-trainer button:has-text("سكّر")');
+  assert(await opage.locator('.ear-trainer').count() === 0, 'panel still open');
+});
+
+await check('L: Khalfoun\'s own ear runs in the page and decides which sentences reach the cloud', async () => {
+  const expected = JSON.parse(await readFile(new URL('../tests/fixtures/ear/expected.json', import.meta.url), 'utf8'));
+  await opage.evaluate(async () => {
+    window.__khalfoun.wake.stop();
+    window.__earModelUrls = { mel: '/assets/ear/melspectrogram.onnx', emb: '/assets/ear/embedding_model.onnx', cls: '/tests/fixtures/ear/test-ear.onnx' };
+    window.__earConfig = { mode: 'on', threshold: 0.5, high: 0.85, version: 'test' };
+    await window.__khalfoun.loadEar();
+  });
+  assert(await opage.evaluate(() => Boolean(window.__khalfoun.ear)), 'ear not loaded');
+  // the same scores as the training code, in the page's WebAssembly runtime
+  const best = await opage.evaluate(async () => {
+    const ear = window.__khalfoun.ear;
+    ear.stream.reset();
+    const n = 32000; const a = new Float32Array(n);
+    for (let i = 0; i < n; i += 1) { const t = i / 16000; a[i] = (3000 * Math.sin(2 * Math.PI * 220 * t) * Math.sin(2 * Math.PI * 1.5 * t) + 400 * Math.sin(2 * Math.PI * 1700 * t)) / 32767; }
+    return ear.stream.push(a);
+  });
+  assert(Math.abs(best - Math.max(...expected.scores)) < 2e-3, `${best} vs ${Math.max(...expected.scores)}`);
+  // trusted ear: a sentence without his name heard is not sent anywhere; with it, it is checked
+  const calls0 = await opage.evaluate(() => { window.__khalfoun.endFollow(); window.__khalfoun.ear.hitAt = 0; return window.__khalfoun.bridge._transcribeCalls.length; });
+  await opage.evaluate(() => window.__khalfoun.onWakeSentence(new Uint8Array(3200), new Uint8Array(3200), 1200));
+  await opage.waitForTimeout(300);
+  assert(await opage.evaluate(() => window.__khalfoun.bridge._transcribeCalls.length) === calls0, 'sentence sent without the ear hearing the name');
+  await opage.evaluate(() => { window.__fakeTranscripts = ['يا خلفون']; window.__khalfoun.ear.hitAt = Date.now(); });
+  await opage.evaluate(() => window.__khalfoun.onWakeSentence(new Uint8Array(3200), new Uint8Array(3200), 1200));
+  await opage.waitForTimeout(500);
+  // no cloud in the preview: the ear alone opens the session (the next sentence is the command)
+  assert(await opage.evaluate(() => window.__khalfoun.inSession), 'no session after the ear heard the name');
+  assert(await opage.evaluate(() => window.__khalfoun.bridge._transcribeCalls.length) === calls0, 'sent to the cloud without one');
+  await opage.evaluate(() => window.__khalfoun.endSession('words'));
 });
 
 await browser.close();

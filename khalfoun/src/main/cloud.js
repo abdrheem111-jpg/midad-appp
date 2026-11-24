@@ -84,6 +84,30 @@ export async function speakAzure(cfg, text, { fetchFn = fetch, timeoutMs = 8000,
   return { ok: false, error: last };
 }
 
+/**
+ * One training clip for Khalfoun's own ear: an Azure voice says a short phrase, as 16 kHz WAV.
+ * @param {{voice: string, text: string, rate?: string, pitch?: string}} clip
+ * @returns {Promise<{ok: true, wav: Uint8Array} | {ok: false, error: string}>}
+ */
+export async function sampleAzure(cfg, clip, { fetchFn = fetch, timeoutMs = 10000 } = {}) {
+  if (!cfg?.key || !AZURE_REGION_RE.test(cfg.region || '')) return { ok: false, error: 'not_configured' };
+  if (!/^ar-[A-Z]{2}-[A-Za-z]+Neural$/.test(clip?.voice || '')) return { ok: false, error: 'bad_voice' };
+  const pct = (v) => (/^[+-]\d{1,2}%$/.test(v || '') ? v : '+0%');
+  const ssml = `<speak version="1.0" xml:lang="${clip.voice.slice(0, 5)}"><voice name="${clip.voice}"><prosody rate="${pct(clip.rate)}" pitch="${pct(clip.pitch)}">${escapeXml(String(clip.text || '').slice(0, 80))}</prosody></voice></speak>`;
+  try {
+    const res = await withTimeout(fetchFn, `https://${cfg.region}.tts.speech.microsoft.com/cognitiveservices/v1`, {
+      method: 'POST',
+      headers: { 'Ocp-Apim-Subscription-Key': cfg.key, 'Content-Type': 'application/ssml+xml', 'X-Microsoft-OutputFormat': 'riff-16khz-16bit-mono-pcm', 'User-Agent': 'Khalfoun' },
+      body: ssml,
+    }, timeoutMs);
+    if (res.status === 401 || res.status === 403) return { ok: false, error: 'bad_key' };
+    if (!res.ok) return { ok: false, error: `http_${res.status}` };
+    return { ok: true, wav: new Uint8Array(await res.arrayBuffer()) };
+  } catch (err) {
+    return { ok: false, error: errorName(err) };
+  }
+}
+
 /** Checks an Azure key quickly (issues a short-lived token; nothing is billed). */
 export async function verifyAzure(cfg, { fetchFn = fetch } = {}) {
   if (!cfg?.key || !AZURE_REGION_RE.test(cfg.region || '')) return { ok: false, error: 'not_configured' };

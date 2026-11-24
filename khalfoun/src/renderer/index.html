@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; media-src 'self' blob:; connect-src 'self'; worker-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self'; media-src 'self' blob:; connect-src 'self'; worker-src 'self'">
   <title>خلفون</title>
   <link rel="stylesheet" href="../../assets/fonts/fonts.css">
   <link rel="stylesheet" href="overlay.css">
@@ -108,6 +108,17 @@
     <label class="check"><input id="st-sounds" type="checkbox"> أصوات خلفون (همهمات ومؤثرات بدون كلام)</label>
     <label class="check"><input id="st-windows" type="checkbox"> يمشي فوق النوافذ المفتوحة</label>
     <label class="check"><input id="st-listen" type="checkbox"> استمع لندائي «يا خلفون» دائماً (دون ضغط زر)</label>
+    <section class="setup remote" aria-labelledby="rm-title">
+      <h3 id="rm-title">الريموت وأذن خلفون <small id="rm-state" class="pill"></small></h3>
+      <p class="fine">ريموت العرض (الكليكر): اضغط «علّم خلفون زر الريموت» وبعدها اضغط في الريموت الزر اللي تبغاه. من بعدها هذا الزر يخلي خلفون يسمعك من أي مكان، حتى لو الشاشة كاملة للـ PDF.</p>
+      <div class="setup-controls">
+        <button id="rm-learn" type="button" class="small-btn">🎛️ علّم خلفون زر الريموت</button>
+        <button id="rm-forget" type="button" class="ghost danger" hidden>انسَ الزر</button>
+      </div>
+      <p id="rm-result" class="fine" role="status" aria-live="polite"></p>
+      <p class="fine">أذن خلفون الخاصة: تسمع اسمه على جهازك بدون إنترنت. سجّل صوتك وأنت تناديه، وأنا أدرّبها عليه.</p>
+      <div class="setup-controls"><button id="ear-open" type="button" class="ghost">👂 علّم خلفون صوتك وهو تناديه</button></div>
+    </section>
     <label class="check"><input id="st-chat" type="checkbox"> عقل خلفون: يسولف بحرية عبر نموذج على جهازك</label>
     <section class="setup cloud" aria-labelledby="cl-title">
       <h3 id="cl-title">السرعة والذكاء (السحابة)</h3>

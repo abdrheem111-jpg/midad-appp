@@ -12,11 +12,16 @@ export const HEAD_MS = 2500;
 
 export class WakeListener {
   /**
-   * @param {{onSentence: (wav: Uint8Array, ms: number, head: Uint8Array) => void, onError?: (err: Error) => void}} opts
+   * @param {{onSentence: (wav: Uint8Array, ms: number, head: Uint8Array) => void, onError?: (err: Error) => void,
+   *   onAudio?: (samples16k: Float32Array) => void}} opts
    *   head: the first HEAD_MS of the sentence (enough to hear his name, a fraction of the cost)
+   *   onAudio: all the sound at 16 kHz, in batches of about 85 ms (Khalfoun's own ear listens to it)
    */
   constructor(opts) {
     this.onSentence = opts.onSentence;
+    this.onAudio = opts.onAudio || null;
+    this.batch = [];
+    this.batchLen = 0;
     this.onError = opts.onError || (() => {});
     this.active = false;
     this.paused = false;
@@ -35,6 +40,17 @@ export class WakeListener {
       this.node = new AudioWorkletNode(this.ctx, 'khalfoun-recorder');
       this.node.port.onmessage = (e) => {
         if (this.paused) return;
+        if (this.onAudio) {
+          this.batch.push(e.data);
+          this.batchLen += e.data.length;
+          if (this.batchLen >= this.ctx.sampleRate * 0.085) {
+            const all = new Float32Array(this.batchLen);
+            let off = 0;
+            for (const c of this.batch) { all.set(c, off); off += c.length; }
+            this.batch = []; this.batchLen = 0;
+            this.onAudio(downsample(all, this.ctx.sampleRate, TARGET_RATE));
+          }
+        }
         for (const ev of this.vad.push(e.data)) {
           if (ev.type === 'segment' && ev.ms >= MIN_SENTENCE_MS) {
             const pcm = downsample(ev.samples, this.ctx.sampleRate, TARGET_RATE);

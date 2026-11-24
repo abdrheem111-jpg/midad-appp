@@ -1,7 +1,7 @@
 {
   "name": "khalfoun",
   "productName": "خلفون",
-  "version": "2.0.8",
+  "version": "2.0.9",
   "description": "خلفون: مساعد كرتوني عُماني يعيش على سطح المكتب، يسمع الأوامر الصوتية وينفذها ويتفاعل بالمشاعر.",
   "type": "module",
   "main": "src/main/main.js",
@@ -37,7 +37,12 @@
       "src/**/*",
       "assets/**/*",
       "package.json",
-      "!node_modules/@anthropic-ai/claude-agent-sdk-*{,/**/*}"
+      "!node_modules/@anthropic-ai/claude-agent-sdk-*{,/**/*}",
+      "!node_modules/onnxruntime-web/{lib,docs}{,/**/*}",
+      "!node_modules/onnxruntime-web/dist/**/*",
+      "node_modules/onnxruntime-web/dist/ort.wasm.min.mjs",
+      "node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs",
+      "node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm"
     ],
     "extraMetadata": {
       "main": "src/main/main.js"
@@ -88,6 +93,7 @@
     "@modelcontextprotocol/sdk": "^1.32.2",
     "docx": "^9.16.0",
     "jszip": "^3.10.1",
+    "onnxruntime-web": "1.20.1",
     "pdf-lib": "1.17.1",
     "pptxgenjs": "^4.0.1",
     "zod": "^4.6.7"

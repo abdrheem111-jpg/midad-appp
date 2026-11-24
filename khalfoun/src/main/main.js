@@ -9,7 +9,7 @@ import {
   app, BrowserWindow, ipcMain, protocol, screen, shell, clipboard, desktopCapturer, Tray, Menu,
   nativeImage, globalShortcut, dialog, Notification, session, net, powerMonitor, safeStorage,
 } from 'electron';
-import { readFile, mkdtemp, writeFile, mkdir, stat, rm } from 'node:fs/promises';
+import { readFile, readdir, mkdtemp, writeFile, mkdir, stat, rm } from 'node:fs/promises';
 import { watch as watchFolder } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join, extname, normalize, relative, sep, basename } from 'node:path';
@@ -19,7 +19,7 @@ import { JsonStore } from './storage.js';
 import { createPlatform } from './actions/platform.js';
 import { createExecutor } from './actions/index.js';
 import { findWhisper, transcribe, wavSeconds } from './stt.js';
-import { transcribeAzure, speakAzure, verifyAzure, ClaudeAgent, GeminiAgent, chainAgents, screenPrompt } from './cloud.js';
+import { transcribeAzure, speakAzure, sampleAzure, verifyAzure, ClaudeAgent, GeminiAgent, chainAgents, screenPrompt } from './cloud.js';
 import { CloudSecrets, DEFAULT_CLOUD } from './secrets.js';
 import { WindowWatcher } from './windows-watcher.js';
 import { ChatClient, findLocalModel, pickVisionModel } from './chat.js';
@@ -32,6 +32,8 @@ import { TASK_MODES, LOOK_MODES, lookTask } from '../core/chat-prompt.js';
 import { findOnScreen, layoutHint } from '../core/screen-find.js';
 import { createClaudeMind } from './brain/index.js';
 import { FG_SCRIPT } from './foreground-script.js';
+import { REMOTE_ACCEL } from '../core/remote-keys.js';
+import { EAR_KINDS, EAR_VOICES, earTtsPlan } from '../core/ear-plan.js';
 import { Notebook } from '../core/notebook.js';
 import { OfficeHost } from './office/office-host.js';
 import { createOfficeActions } from './office/index.js';
@@ -55,7 +57,10 @@ const MIME = {
   '.webmanifest': 'application/manifest+json', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.woff': 'font/woff',
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2',
+  '.mjs': 'text/javascript; charset=utf-8', '.wasm': 'application/wasm',
 };
+// The ear's WebAssembly runtime: exactly these three files of onnxruntime-web, nothing else of node_modules.
+const ORT_FILES = new Set(['ort.wasm.min.mjs', 'ort-wasm-simd-threaded.mjs', 'ort-wasm-simd-threaded.wasm'].map((f) => join('node_modules', 'onnxruntime-web', 'dist', f)));
 const DEFAULT_SETTINGS = { onboarded: false, level: 0, kidsMode: false };
 
 protocol.registerSchemesAsPrivileged([
@@ -114,7 +119,7 @@ function serveAppProtocol() {
     } else {
       file = normalize(join(ROOT, path));
       const rel = relative(ROOT, file);
-      const allowed = rel.startsWith(`src${sep}renderer${sep}`) || rel.startsWith(`src${sep}core${sep}`) || rel.startsWith(`src${sep}notebook${sep}`) || rel.startsWith(`src${sep}reading${sep}`) || rel.startsWith(`assets${sep}`);
+      const allowed = rel.startsWith(`src${sep}renderer${sep}`) || rel.startsWith(`src${sep}core${sep}`) || rel.startsWith(`src${sep}notebook${sep}`) || rel.startsWith(`src${sep}reading${sep}`) || rel.startsWith(`assets${sep}`) || ORT_FILES.has(rel);
       if (!allowed || rel.startsWith('..')) return new Response('forbidden', { status: 403 });
     }
     try {
@@ -339,6 +344,28 @@ function registerShortcuts() {
   const ok2 = globalShortcut.register('CommandOrControl+Shift+K', () => { if (win) { focusOverlay(); send('open-command'); } });
   if (!ok1 || !ok2) console.warn('Some keyboard shortcuts are taken by another program.');
   diag.write('shortcuts', { 'Ctrl+Shift+Space': ok1, 'Ctrl+Shift+K': ok2 });
+  if (settings.remoteKey) diag.write('remote button', settings.remoteKey, registerRemote(settings.remoteKey) ? 'ready' : 'taken by another program');
+}
+
+// The teacher's presenter remote: one learned button makes Khalfoun listen, from anywhere.
+let remoteAccel = null;
+let remoteLast = 0;
+function registerRemote(accel) {
+  if (remoteAccel) { try { globalShortcut.unregister(remoteAccel); } catch { /* already gone */ } remoteAccel = null; }
+  if (!accel || !REMOTE_ACCEL.test(accel)) return false;
+  let ok = false;
+  try {
+    ok = globalShortcut.register(accel, () => {
+      // A remote can repeat a held key: one press is one listen.
+      if (Date.now() - remoteLast < 700 || !win) return;
+      remoteLast = Date.now();
+      diag.write('remote button pressed');
+      win.showInactive();
+      send('ptt');
+    });
+  } catch { ok = false; }
+  if (ok) remoteAccel = accel;
+  return ok;
 }
 
 /**
@@ -604,7 +631,7 @@ function sanitizeSettingsPatch(patch) {
   if ('mind' in patch) out.mind = patch.mind === 'claude' ? 'claude' : 'classic';
   if ('mindModel' in patch && ['fast', 'smart', 'best'].includes(patch.mindModel)) out.mindModel = patch.mindModel;
   if ('digits' in patch && ['arabic', 'latin'].includes(patch.digits)) out.digits = patch.digits;
-  return out;
+  return out; // remoteKey is set through remote:set (checked and registered there)
 }
 
 async function confirmRaise(message, detail) {
@@ -721,6 +748,101 @@ function setupIpc(stores, executor) {
     await stores.settings.write(settings);
     diag.write('settings', { level: settings.level, kidsMode: settings.kidsMode, onboarded: settings.onboarded, chatEnabled: settings.chatEnabled });
     return { ok: true, settings };
+  });
+
+  // ----- Khalfoun's own ear: the teacher's recordings (and Azure voices) to train it on his name.
+  // Kept on his computer in userData/wake-data; nothing is sent anywhere from here.
+  const earDir = join(app.getPath('userData'), 'wake-data');
+  ipcMain.handle('ear:save', async (event, kind, bytes) => {
+    if (!fromApp(event) || !['call', 'other', 'room'].includes(kind)) return { ok: false, error: 'forbidden' };
+    const b = bytes instanceof Uint8Array ? bytes : null;
+    if (!b || b.length < 44 || b.length > 12e6 || String.fromCharCode(...b.subarray(0, 4)) !== 'RIFF') return { ok: false, error: 'bad_audio' };
+    await mkdir(join(earDir, kind), { recursive: true });
+    const name = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.wav`;
+    await writeFile(join(earDir, kind, name), b);
+    return { ok: true, name };
+  });
+  ipcMain.handle('ear:stats', async (event) => {
+    if (!fromApp(event)) return null;
+    const out = {};
+    for (const k of EAR_KINDS) { try { out[k] = (await readdir(join(earDir, k))).filter((n) => n.endsWith('.wav')).length; } catch { out[k] = 0; } }
+    out.azure = Boolean(secrets.azure);
+    return out;
+  });
+  // The trained ear (khalfoun-ear.onnx + ear.json in userData/ear), with the two shared models.
+  ipcMain.handle('ear:models', async (event) => {
+    if (!fromApp(event)) return null;
+    const dir = join(app.getPath('userData'), 'ear');
+    let cls; let config = {};
+    try { cls = await readFile(join(dir, 'khalfoun-ear.onnx')); } catch { return null; }
+    try { config = JSON.parse(await readFile(join(dir, 'ear.json'), 'utf8')); } catch { /* defaults */ }
+    const num = (v, d, lo, hi) => (Number.isFinite(Number(v)) ? Math.min(hi, Math.max(lo, Number(v))) : d);
+    const [mel, emb] = await Promise.all([readFile(join(ROOT, 'assets', 'ear', 'melspectrogram.onnx')), readFile(join(ROOT, 'assets', 'ear', 'embedding_model.onnx'))]);
+    const out = {
+      mel: new Uint8Array(mel), emb: new Uint8Array(emb), cls: new Uint8Array(cls),
+      config: { mode: config.mode === 'on' ? 'on' : 'shadow', threshold: num(config.threshold, 0.5, 0.05, 0.99), high: num(config.high, 0.85, 0.1, 1), version: String(config.version || '').slice(0, 40) },
+    };
+    diag.write('ear model', out.config);
+    return out;
+  });
+  let earTtsRunning = false;
+  ipcMain.handle('ear:tts', async (event) => {
+    if (!fromApp(event)) return { ok: false, error: 'forbidden' };
+    if (!secrets.azure) return { ok: false, error: 'not_configured' };
+    if (earTtsRunning) return { ok: false, error: 'busy' };
+    earTtsRunning = true;
+    const plan = earTtsPlan();
+    const skipVoices = new Set(); // not offered in this Azure region
+    let done = 0; let failed = 0; let made = 0;
+    try {
+      for (const k of ['tts-call', 'tts-other']) await mkdir(join(earDir, k), { recursive: true });
+      const queue = [...plan];
+      const worker = async () => {
+        while (queue.length) {
+          const c = queue.shift();
+          const file = join(earDir, c.kind, `${c.name}.wav`);
+          if (skipVoices.has(c.voice) || (await stat(file).then(() => true, () => false))) { done += 1; continue; }
+          const r = await sampleAzure(secrets.azure, c);
+          if (r.ok) { await writeFile(file, r.wav); made += 1; } else {
+            failed += 1;
+            if (r.error === 'http_400' || r.error === 'http_404') skipVoices.add(c.voice);
+            if (r.error === 'bad_key') { queue.length = 0; }
+          }
+          done += 1;
+          if (done % 5 === 0 || !queue.length) send('ear-progress', { done, total: plan.length });
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
+      diag.write('ear voices', { made, failed, skipped: [...skipVoices] });
+      return { ok: true, made, failed, voices: EAR_VOICES.length - skipVoices.size };
+    } finally { earTtsRunning = false; }
+  });
+
+  // ----- the presenter remote: learn one button (the page sends the key it saw), or forget it
+  ipcMain.handle('remote:set', async (event, accel) => {
+    if (!fromApp(event)) return { ok: false, error: 'forbidden' };
+    if (accel === null) {
+      registerRemote(null);
+      settings = { ...settings }; delete settings.remoteKey;
+      await stores.settings.write(settings);
+      diag.write('remote button', 'forgotten');
+      return { ok: true };
+    }
+    if (typeof accel !== 'string' || !REMOTE_ACCEL.test(accel)) return { ok: false, error: 'bad_key' };
+    if (!registerRemote(accel)) {
+      if (settings.remoteKey) registerRemote(settings.remoteKey); // keep the old one working
+      return { ok: false, error: 'taken' };
+    }
+    settings = { ...settings, remoteKey: accel };
+    await stores.settings.write(settings);
+    diag.write('remote button', accel, 'learned');
+    return { ok: true, accel };
+  });
+  // While he presses the remote in settings, the learned button must not fire: paused, then back.
+  ipcMain.handle('remote:pause', async (event, on) => {
+    if (!fromApp(event)) return false;
+    if (on) registerRemote(null); else if (settings.remoteKey) registerRemote(settings.remoteKey);
+    return true;
   });
 
   // ----- the Claude mind (the teacher's own Claude subscription, signed in with Claude's own program)
@@ -1314,6 +1436,25 @@ async function runSmokeTest(stores) {
       const asked = await js("window.khalfoun.mind.ask('هلا يا خلفون', { name: 'فحص' })");
       step('Claude\'s real program answers inside the app (not signed in on CI: says so, no crash)', asked && (asked.ok === true || ['auth', 'offline', 'limit'].includes(asked.error)), asked);
       settings = { ...settings, mind: 'classic' };
+    }
+    // Khalfoun's own ear: the WebAssembly runtime and the three models load inside the real app
+    // (packaged on CI) and score a known sound exactly as the training code does.
+    {
+      const earDir = join(app.getPath('userData'), 'ear');
+      await mkdir(earDir, { recursive: true });
+      await writeFile(join(earDir, 'khalfoun-ear.onnx'), await readFile(join(ROOT, 'assets', 'ear', 'selftest-ear.onnx')));
+      await writeFile(join(earDir, 'ear.json'), JSON.stringify({ mode: 'shadow', version: 'selftest' }));
+      const expected = JSON.parse(await readFile(join(ROOT, 'assets', 'ear', 'selftest.json'), 'utf8')).max;
+      await js('window.__khalfoun.loadEar()');
+      const best = await js(`(async () => {
+        const e = window.__khalfoun.ear; if (!e) return null;
+        e.stream.reset();
+        const a = new Float32Array(32000);
+        for (let i = 0; i < a.length; i += 1) { const t = i / 16000; a[i] = (3000 * Math.sin(2 * Math.PI * 220 * t) * Math.sin(2 * Math.PI * 1.5 * t) + 400 * Math.sin(2 * Math.PI * 1700 * t)) / 32767; }
+        return e.stream.push(a);
+      })()`);
+      step('Khalfoun\'s own ear loads in the app and scores sound like the training code', typeof best === 'number' && Math.abs(best - expected) < 2e-3, { best, expected, error: await js('window.__khalfoun.earError') });
+      await rm(earDir, { recursive: true, force: true });
     }
     if (process.env.KHALFOUN_SMOKE_TOOLSHOTS) {
       for (const tool of ['board', 'notebook', 'reading']) {

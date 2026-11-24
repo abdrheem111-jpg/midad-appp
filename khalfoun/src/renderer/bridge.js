@@ -93,6 +93,33 @@ function createPreviewBridge() {
       };
     },
     async saveMemory(data) { writeJSON(MEM_KEY, data); return true; },
+    ear: {
+      async save(kind, bytes) {
+        const st = window.__earStats || (window.__earStats = { call: 0, other: 0, room: 0, 'tts-call': 0, 'tts-other': 0, azure: true });
+        st[kind] = (st[kind] || 0) + 1;
+        window.__earSaved = [...(window.__earSaved || []), { kind, bytes: bytes.length }];
+        return { ok: true };
+      },
+      async stats() { return { ...(window.__earStats || { call: 0, other: 0, room: 0, 'tts-call': 0, 'tts-other': 0, azure: true }) }; },
+      async voices() { const st = window.__earStats || (window.__earStats = {}); st['tts-call'] = 120; st['tts-other'] = 200; return { ok: true, made: 320, voices: 20 }; },
+      async models() {
+        const u = window.__earModelUrls; // set by the UI tests: { mel, emb, cls }
+        if (!u) return null;
+        const get = async (url) => new Uint8Array(await (await fetch(url)).arrayBuffer());
+        return { mel: await get(u.mel), emb: await get(u.emb), cls: await get(u.cls), config: window.__earConfig || { mode: 'shadow', threshold: 0.5, high: 0.85, version: 'test' } };
+      },
+    },
+    remote: {
+      async set(accel) {
+        window.__remoteCalls = [...(window.__remoteCalls || []), accel];
+        if (accel === 'F9' && window.__remoteTaken) return { ok: false, error: 'taken' };
+        const cur = readJSON(SET_KEY) || {};
+        if (accel === null) delete cur.remoteKey; else cur.remoteKey = accel;
+        writeJSON(SET_KEY, cur);
+        return accel === null ? { ok: true } : { ok: true, accel };
+      },
+      async pause(on) { window.__remotePaused = Boolean(on); return true; },
+    },
     async updateSettings(patch) {
       const cur = readJSON(SET_KEY) || { onboarded: false, level: 0, kidsMode: false };
       const next = { ...cur, ...patch };

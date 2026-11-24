@@ -7,6 +7,16 @@ contextBridge.exposeInMainWorld('khalfoun', {
   loadState: () => ipcRenderer.invoke('state:load'),
   saveMemory: (data) => ipcRenderer.invoke('memory:save', data),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
+  ear: {
+    save: (kind, bytes) => ipcRenderer.invoke('ear:save', String(kind || ''), bytes instanceof Uint8Array ? bytes : new Uint8Array(0)),
+    stats: () => ipcRenderer.invoke('ear:stats'),
+    voices: () => ipcRenderer.invoke('ear:tts'),
+    models: () => ipcRenderer.invoke('ear:models'),
+  },
+  remote: {
+    set: (accel) => ipcRenderer.invoke('remote:set', accel === null ? null : String(accel || '').slice(0, 40)),
+    pause: (on) => ipcRenderer.invoke('remote:pause', on === true),
+  },
   runAction: (action) => ipcRenderer.invoke('action:run', action),
   chat: (payload) => ipcRenderer.invoke('chat:reply', payload),
   chatTask: (payload) => ipcRenderer.invoke('chat:task', payload),

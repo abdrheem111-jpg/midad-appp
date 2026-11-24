@@ -18,12 +18,15 @@ import { getBridge } from './bridge.js';
 import { SoundPlayer, ANIMATION_SOUND } from './sounds.js';
 import { Effects } from './effects.js';
 import { NameWheel, RaceBoard, NoiseGauge, CameraPanel, VoiceTestPanel } from './classroom-ui.js';
+import { EarTrainerPanel } from './ear-ui.js';
+import { EarStream, EarTrigger } from './ear-model.js';
 import { GUIDE } from '../core/guide.js';
 import { STAR_MILESTONES as STAR_STEPS } from '../core/classfun.js';
 import { InkLayer } from './ink.js';
 import { COLORS } from '../core/office-plan.js';
 import { normalize } from '../core/arabic.js';
 import { MindClient } from './mind-ui.js';
+import { remoteKeyFrom, REMOTE_REFUSAL } from '../core/remote-keys.js';
 
 const CHAR_W = 170;
 const CHAR_H = 209;
@@ -301,6 +304,25 @@ const voiceTest = new VoiceTestPanel({
   onClose: () => {},
   note: (t) => bridge.note?.(t),
 });
+
+// «علّم خلفون صوتك»: recordings for Khalfoun's own ear (stay on this computer).
+const earTrainer = new EarTrainerPanel({
+  record: (o) => recorder.record((level) => els.micLevel.style.setProperty('--level', String(1 + level * 0.6)), { ...o, trim: !o.silenceMs && o.silenceMs !== null }),
+  stop: () => recorder.stop(),
+  save: (kind, wav) => (bridge.ear ? bridge.ear.save(kind, wav) : Promise.resolve({ ok: false })),
+  stats: () => (bridge.ear ? bridge.ear.stats() : Promise.resolve({})),
+  voices: () => (bridge.ear ? bridge.ear.voices() : Promise.resolve({ ok: false })),
+  onOpen: () => { wake.stop?.(); setInteractive(true); },
+  onClose: () => updateWake(),
+  note: (t) => bridge.note?.(t),
+});
+function openEarTrainer() {
+  closeSettings();
+  closeCommand();
+  hideGuide();
+  voiceOut.stop();
+  earTrainer.show();
+}
 
 function openVoiceTest() {
   closeSettings();
@@ -879,7 +901,8 @@ document.querySelectorAll('input[name="md-model"]').forEach((r) => r.addEventLis
 
 let wakeBusy = false;
 const wake = new WakeListener({
-  onSentence: (wav, ms, head) => { onWakeSentence(wav, head); },
+  onSentence: (wav, ms, head) => { onWakeSentence(wav, head, ms); },
+  onAudio: (samples) => onEarAudio(samples),
   onError: (err) => {
     // The microphone can be busy for a moment (a call, another app): try again instead of
     // switching listening off for good. After a few failures in a row, tell him once.
@@ -891,6 +914,45 @@ const wake = new WakeListener({
   },
 });
 let wakeFailures = 0;
+
+// ---------------------------------------------------------------- Khalfoun's own ear
+// A small model trained on the teacher's voice, listening on this computer for «يا خلفون».
+// 'shadow': it only writes what it thinks beside the cloud's answer (to check it before
+// trusting it); 'on': only sentences it heard his name in are checked in the cloud.
+let ear = null;
+let earError = null;
+const cloudHearsNow = () => Boolean((cloudInfo?.azure || cloudInfo?.gemini) && cloudInfo.use?.hear !== false);
+async function loadEar() {
+  const m = await bridge.ear?.models?.().catch(() => null);
+  if (!m?.cls) return;
+  try {
+    const ort = await import('../../node_modules/onnxruntime-web/dist/ort.wasm.min.mjs');
+    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.wasmPaths = new URL('../../node_modules/onnxruntime-web/dist/', import.meta.url).href;
+    const stream = await EarStream.create(ort, m);
+    ear = { stream, trigger: new EarTrigger(m.config), mode: m.config.mode, hitAt: 0, steps: 0, ms: 0, version: m.config.version };
+    bridge.note?.(`ear ready: ${ear.mode}, threshold ${m.config.threshold}, ${m.config.version || 'no version'}`);
+  } catch (err) {
+    ear = null;
+    earError = String(err?.message || err).slice(0, 300);
+    bridge.note?.(`ear failed to load: ${earError}`);
+  }
+}
+function onEarAudio(samples) {
+  if (!ear || inSession() || brain.dictation) return;
+  const t0 = performance.now();
+  ear.stream.push(samples).then((score) => {
+    if (!ear || score === null) return;
+    ear.ms += performance.now() - t0;
+    ear.steps += 1;
+    if (ear.trigger.feed(score)) {
+      ear.hitAt = Date.now();
+      bridge.note?.(`ear: heard his name (${score.toFixed(2)})`);
+      if (ear.mode === 'on') { els.ear.classList.add('heard'); setTimeout(() => els.ear.classList.remove('heard'), 900); }
+    }
+    if (ear.steps % 3750 === 0) bridge.note?.(`ear: ${(ear.ms / ear.steps).toFixed(1)} ms per batch over ${ear.steps} batches`); // every ~5 min
+  }).catch(() => {});
+}
 
 /** Starts or stops always-on listening to match the setting. */
 function updateWake() {
@@ -939,20 +1001,22 @@ setInterval(() => { if (sessionUntil && !inSession()) endSession('timeout'); }, 
 
 // Sentences heard while the previous one is still being read wait their turn (two at most).
 const wakeQueue = [];
-async function onWakeSentence(wav, head = wav) {
+async function onWakeSentence(wav, head = wav, ms = 0) {
   // His own voice coming back through the speakers is not a command.
   if (recorder.active || panelsOpen() || voiceOut.speaking) return;
-  if (wakeBusy) { if (wakeQueue.length < 2 && (inSession() || brain.dictation)) wakeQueue.push([wav, head]); return; }
+  // Did the ear hear his name during this sentence (or just before it)?
+  const meta = { earHit: Boolean(ear && ear.hitAt && ear.hitAt >= Date.now() - (ms || 3000) - 1500) };
+  if (wakeBusy) { if (wakeQueue.length < 2 && (inSession() || brain.dictation || meta.earHit)) wakeQueue.push([wav, head, meta]); return; }
   wakeBusy = true;
   try {
-    await readWakeSentence(wav, head);
+    await readWakeSentence(wav, head, meta);
     while (wakeQueue.length) await readWakeSentence(...wakeQueue.shift());
   } finally {
     wakeBusy = false;
   }
 }
 
-async function readWakeSentence(wav, head = wav) {
+async function readWakeSentence(wav, head = wav, meta = {}) {
   if (brain.dictation) {
     // Dictation: every sentence counts, read with the accurate model.
     const res = await bridge.transcribe(wav, 'command');
@@ -967,8 +1031,29 @@ async function readWakeSentence(wav, head = wav) {
   const session = inSession();
   // A sentence starts the screenshot now, while it is being turned into words (seconds saved).
   if (session && mind?.on) bridge.mind?.prefetch?.();
+  // Khalfoun's own ear decides first whether his name was in it: when it is trusted ('on'), a
+  // sentence it did not hear his name in is not sent anywhere (no cost, no limit).
+  let peak = null;
+  if (ear && !session) {
+    peak = ear.trigger.takePeak();
+    if (ear.mode === 'on' && !meta.earHit && Date.now() >= followUntil) return;
+    if (ear.mode === 'on' && meta.earHit && !cloudHearsNow()) {
+      // No cloud to read it: the ear alone opens the session, the next sentence is the command.
+      bridge.note?.(`ear: opened the session (peak ${peak.toFixed(2)})`);
+      handle(brain.event('session_start'));
+      startSession();
+      return;
+    }
+  }
   // Outside a session only the first seconds are checked for «يا خلفون» (a fraction of the cost).
   let res = await bridge.transcribe(session ? wav : head, session ? 'command' : 'wake');
+  if (ear && !session) bridge.note?.(`ear check: peak ${peak === null ? '-' : peak.toFixed(2)} ${meta.earHit ? 'HIT' : 'no'} → «${res?.text || ''}» ${findWakeWord(res?.text || '').found ? 'NAME' : 'other'}`);
+  if (ear?.mode === 'on' && meta.earHit && !session && res?.ok && !res.text) {
+    // The cloud gave nothing back (its daily time is up): the ear heard him, so trust it.
+    handle(brain.event('session_start'));
+    startSession();
+    return;
+  }
   if (!res?.ok || !res.text) return;
   let hit = findWakeWord(res.text);
   if (!session && hit.found && head !== wav) {
@@ -1044,7 +1129,7 @@ function setInteractive(on) {
   bridge.setInteractive(on);
 }
 
-const panelsOpen = () => !els.onboarding.hidden || !els.settings.hidden || !$('guide').hidden || cameraPanel.open || voiceTest.open;
+const panelsOpen = () => !els.onboarding.hidden || !els.settings.hidden || !$('guide').hidden || cameraPanel.open || voiceTest.open || earTrainer.open;
 
 let lastMouseX = null;
 document.addEventListener('mousemove', (e) => {
@@ -1108,6 +1193,7 @@ document.addEventListener('keydown', (e) => {
     if (ink.pen) handle(brain.hear('وقف القلم'));
     else if (cameraPanel.open) cameraPanel.close();
     else if (voiceTest.open) voiceTest.close();
+    else if (earTrainer.open) earTrainer.close();
     else if (!$('guide').hidden) hideGuide();
     else if (!els.settings.hidden) closeSettings();
     else closeCommand();
@@ -1215,6 +1301,7 @@ function openSettings(focus = null) {
   $('st-sounds').checked = d.sounds !== false;
   $('st-speak').checked = !!d.speak;
   $('st-listen').disabled = !voiceAvailable;
+  renderRemote();
   refreshSetup().then(() => { if (focus === 'setup') $('su-title').scrollIntoView({ block: 'start', behavior: 'smooth' }); });
   renderLog();
   renderAliases();
@@ -1442,6 +1529,52 @@ $('st-windows').addEventListener('change', () => {
   brain.memory.set({ walkOnWindows: $('st-windows').checked });
   updateWindowWatch();
 });
+// ---------------------------------------------------------------- the presenter remote
+let remoteKey = null;
+let remoteLearning = null; // { stop() } while he presses the remote
+function renderRemote(note) {
+  const label = remoteKey ? remoteKeyLabel(remoteKey) : null;
+  $('rm-state').textContent = remoteKey ? 'جاهز' : 'ما فيه';
+  $('rm-forget').hidden = !remoteKey;
+  $('rm-learn').textContent = remoteLearning ? '⏳ اضغط زر الريموت الحين…' : remoteKey ? '🎛️ غيّر زر الريموت' : '🎛️ علّم خلفون زر الريموت';
+  if (note !== undefined) $('rm-result').textContent = note;
+  else if (!remoteLearning) $('rm-result').textContent = label ? `الزر: ${label}. اضغطه في أي وقت وخلفون يسمعك.` : '';
+}
+const remoteKeyLabel = (accel) => accel.replace(/Ctrl/g, 'Ctrl').replace('PageDown', 'الصفحة التالية').replace('PageUp', 'الصفحة السابقة').replace('MediaPlayPause', 'زر التشغيل');
+function learnRemote() {
+  if (remoteLearning) { remoteLearning.stop('ألغيت.'); return; }
+  bridge.remote?.pause(true);
+  const onKey = async (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const k = remoteKeyFrom(e);
+    if (!k.ok) { if (k.why !== 'modifier') renderRemote(REMOTE_REFUSAL[k.why]); return; }
+    window.removeEventListener('keydown', onKey, true);
+    const r = await bridge.remote?.set(k.accel);
+    if (r?.ok) {
+      remoteKey = k.accel;
+      done(`تمام! الزر «${k.label}» صار زر خلفون: اضغطه وخلفون يسمعك.${k.warn ? ` ملاحظة: ${k.warn}` : ''}`);
+    } else done(r?.error === 'taken' ? 'هذا الزر ماخذه برنامج ثاني في جهازك. جرّب زر ثاني.' : 'ما قدرت آخذ هذا الزر. جرّب زر ثاني.');
+  };
+  const timer = setTimeout(() => done('ما وصلني شي من الريموت. تأكد إنه شغال وموصول، وجرّب مرة ثانية.'), 20000);
+  function done(note) {
+    clearTimeout(timer);
+    window.removeEventListener('keydown', onKey, true);
+    remoteLearning = null;
+    bridge.remote?.pause(false);
+    renderRemote(note);
+  }
+  remoteLearning = { stop: done };
+  window.addEventListener('keydown', onKey, true);
+  window.focus();
+  renderRemote('اضغط الحين في الريموت الزر اللي تبغاه لخلفون (مثل زر بدء العرض). عندك ٢٠ ثانية.');
+}
+$('rm-learn').addEventListener('click', learnRemote);
+$('ear-open').addEventListener('click', () => openEarTrainer());
+$('rm-forget').addEventListener('click', async () => {
+  const r = await bridge.remote?.set(null);
+  if (r?.ok) { remoteKey = null; renderRemote('نسيت الزر.'); }
+});
+
 $('st-listen').addEventListener('change', () => {
   brain.updateSettings({ alwaysListen: $('st-listen').checked });
   updateWake();
@@ -1577,6 +1710,7 @@ async function start() {
   cloudInfo = loaded?.cloud || cloudInfo;
   applyCloud();
   renderCloud();
+  remoteKey = loaded?.settings?.remoteKey || null;
   const memoryData = { ...(loaded?.memory || {}), ...(loaded?.settings || {}) };
   let saveTimer = null;
   brain = new Brain({
@@ -1638,6 +1772,7 @@ async function start() {
         $('st-listen').disabled = !voiceAvailable;
         updateWake();
         break;
+      case 'ear-progress': earTrainer.progress(ev); break;
       case 'wake-limit':
         showBubble('خلص وقت سماع «يا خلفون» لليوم. الأوامر تشتغل بالزر أو Ctrl+Shift+Space، وبكرة يرجع السماع.', 'sorry', true);
         break;
@@ -1680,12 +1815,13 @@ async function start() {
   }
   sounds.setEnabled(brain.memory.data.sounds !== false);
   updateWake();
+  loadEar(); // Khalfoun's own ear, if one has been trained for this teacher
   updateWindowWatch();
   if (!brain.memory.data.onboarded) startOnboarding();
   else handle(brain.start());
 
   // Hooks for automated UI tests and debugging.
-  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, ink, startSession, endSession, onWakeSentence, get inSession() { return inSession(); }, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut, get mind() { return mind; }, renderMind };
+  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, ink, startSession, endSession, onWakeSentence, get inSession() { return inSession(); }, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut, get mind() { return mind; }, renderMind, get ear() { return ear; }, get earError() { return earError; }, loadEar, onEarAudio, earTrainer, endFollow: () => { followUntil = 0; } };
   document.documentElement.dataset.ready = '1';
 }
 
