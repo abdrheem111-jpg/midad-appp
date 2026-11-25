@@ -2,10 +2,13 @@
 // from the cloud (set `remote`); otherwise the Arabic voice Windows already has, through
 // the browser speech API. Off by default.
 
-/** Text as it should be spoken: no emoji, no «(قول ...)» hints, no symbols read aloud. */
+import { spokenMath, sentenceChunks } from '../core/speech-text.js';
+
+/** Text as it should be spoken: no emoji, no «(قول ...)» hints, maths read as words. */
 export function speakableText(text) {
-  return String(text || '')
-    .replace(/\([^)]*\)/g, ' ')
+  return spokenMath(String(text || '')
+    .replace(/\[[a-z]+\]\s*/gi, ' ')
+    .replace(/\((?:قول|اكتب|مثلاً|مثلا)[^)]*\)/g, ' '))
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, ' ')
     .replace(/[«»"“”*#_~|<>]/g, ' ')
     .replace(/[⏱⭐🥁]/gu, ' ')
@@ -39,6 +42,7 @@ export class VoiceOut {
     this.AudioCtor = deps.Audio ?? (typeof Audio !== 'undefined' ? Audio : null);
     this.seq = 0;
     this.audio = null;
+    this.lines = []; // sentences still to say: {text, audio: Promise} (cloud) or strings (Windows voice)
   }
 
   get voice() {
@@ -65,44 +69,79 @@ export class VoiceOut {
     const line = speakableText(text);
     if (!line) return false;
     this.stop();
-    if (this.remote && this.AudioCtor) {
-      const token = ++this.seq;
-      this.speaking = true;
-      this.onStart?.();
-      const done = () => { if (token === this.seq) { this.speaking = false; this.audio = null; this.onEnd?.(); } };
-      this.remote(line).then((res) => {
-        if (token !== this.seq) return;
-        if (!res?.ok || !res.audio) { this.speaking = false; this.onEnd?.(); this.speakLocal(line); return; }
-        const url = URL.createObjectURL(new Blob([res.audio], { type: 'audio/mpeg' }));
-        const a = new this.AudioCtor(url);
-        this.audio = a;
-        const end = () => { URL.revokeObjectURL(url); done(); };
-        a.onended = end;
-        a.onerror = end;
-        a.play().catch(end);
-      }).catch(() => { if (token === this.seq) { this.speaking = false; this.onEnd?.(); this.speakLocal(line); } });
-      return true;
-    }
+    if (this.remote && this.AudioCtor) return this.queue(text);
     return this.speakLocal(line);
   }
 
+  /**
+   * Adds a reply to what he is saying: read sentence by sentence with the cloud voice, the next
+   * sentence's sound fetched while this one plays, so there are no pauses between them.
+   */
+  queue(text) {
+    if (!this.enabled || !this.available) return false;
+    const chunks = sentenceChunks(speakableText(text)).filter(Boolean);
+    if (!chunks.length) return false;
+    if (!(this.remote && this.AudioCtor)) { for (const c of chunks) this.lines.push(c); this.pumpLocal(); return true; }
+    const token = this.seq;
+    for (const c of chunks) this.lines.push({ text: c, audio: null });
+    this.prefetch(token);
+    if (!this.speaking) this.playNext(token);
+    return true;
+  }
+
+  prefetch(token) {
+    // the next two sentences are being fetched at any time
+    for (const item of this.lines.slice(0, 2)) {
+      if (!item.audio) item.audio = this.remote(item.text).catch(() => null);
+    }
+    void token;
+  }
+
+  playNext(token) {
+    if (token !== this.seq) return;
+    const item = this.lines.shift();
+    if (!item) { if (this.speaking) { this.speaking = false; this.audio = null; this.onEnd?.(); } return; }
+    if (!this.speaking) { this.speaking = true; this.onStart?.(); }
+    if (!item.audio) item.audio = this.remote(item.text).catch(() => null);
+    this.prefetch(token);
+    item.audio.then((res) => {
+      if (token !== this.seq) return;
+      if (!res?.ok || !res.audio) { this.speakLocal(item.text, () => this.playNext(token)); return; }
+      const url = URL.createObjectURL(new Blob([res.audio], { type: 'audio/mpeg' }));
+      const a = new this.AudioCtor(url);
+      this.audio = a;
+      const next = () => { URL.revokeObjectURL(url); if (token === this.seq) this.playNext(token); };
+      a.onended = next;
+      a.onerror = next;
+      a.play().catch(next);
+    });
+    return true;
+  }
+
+  pumpLocal() {
+    if (this.synth?.speaking) return;
+    const line = this.lines.shift();
+    if (typeof line === 'string') this.speakLocal(line, () => this.pumpLocal());
+  }
+
   /** The Windows voice. */
-  speakLocal(line) {
-    if (!this.localAvailable) return false;
+  speakLocal(line, after) {
+    if (!this.localAvailable) { after?.(); return false; }
     const u = new this.Utterance(line);
     u.voice = this.voice;
     u.lang = u.voice.lang;
     u.rate = 1.02;
     u.pitch = 1.3; // a little higher: a cartoon voice
     u.onstart = () => { this.speaking = true; this.onStart?.(); };
-    u.onend = () => { this.speaking = false; this.onEnd?.(); };
-    u.onerror = () => { this.speaking = false; this.onEnd?.(); };
+    u.onend = () => { this.speaking = false; this.onEnd?.(); after?.(); };
+    u.onerror = () => { this.speaking = false; this.onEnd?.(); after?.(); };
     this.synth.speak(u);
     return true;
   }
 
   stop() {
     this.seq += 1;
+    this.lines = [];
     if (this.audio) { try { this.audio.pause(); } catch { /* gone */ } this.audio = null; }
     if (this.synth && (this.speaking || this.synth.speaking)) this.synth.cancel();
     if (this.speaking) { this.speaking = false; this.onEnd?.(); }

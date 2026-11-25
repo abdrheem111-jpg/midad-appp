@@ -6,7 +6,8 @@
 
 const CLAUDE_URL = 'https://api.anthropic.com/v1/messages';
 export const CLAUDE_MODEL = 'claude-haiku-5-5';
-export const AZURE_VOICES = ['ar-OM-AbdullahNeural', 'ar-AE-HamdanNeural', 'ar-SA-HamedNeural'];
+// Hamed (ar-SA) first: Microsoft improved its Arabic diacritics model, so it reads most correctly.
+export const AZURE_VOICES = ['ar-SA-HamedNeural', 'ar-OM-AbdullahNeural', 'ar-AE-HamdanNeural'];
 export const AZURE_REGION_RE = /^[a-z]{2,20}[a-z0-9]{0,6}$/;
 
 async function withTimeout(fetchFn, url, init, ms) {
@@ -67,7 +68,8 @@ export async function speakAzure(cfg, text, { fetchFn = fetch, timeoutMs = 8000,
   let last = 'no_voice';
   for (const voice of voices) {
     const lang = voice.slice(0, 5);
-    const ssml = `<speak version="1.0" xml:lang="${lang}"><voice name="${voice}"><prosody rate="+6%" pitch="+12%">${escapeXml(line)}</prosody></voice></speak>`;
+    // A natural pace and only a little higher than the voice's own pitch (a big shift sounds robotic).
+    const ssml = `<speak version="1.0" xml:lang="${lang}"><voice name="${voice}"><prosody rate="+0%" pitch="+4%">${escapeXml(line)}</prosody></voice></speak>`;
     try {
       const res = await withTimeout(fetchFn, `https://${cfg.region}.tts.speech.microsoft.com/cognitiveservices/v1`, {
         method: 'POST',

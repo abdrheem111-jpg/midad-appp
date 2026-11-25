@@ -20,6 +20,7 @@ import { Effects } from './effects.js';
 import { NameWheel, RaceBoard, NoiseGauge, CameraPanel, VoiceTestPanel } from './classroom-ui.js';
 import { EarTrainerPanel } from './ear-ui.js';
 import { EarStream, EarTrigger } from './ear-model.js';
+import { ScreenFx } from './screen-fx.js';
 import { GUIDE } from '../core/guide.js';
 import { STAR_MILESTONES as STAR_STEPS } from '../core/classfun.js';
 import { InkLayer } from './ink.js';
@@ -27,6 +28,7 @@ import { COLORS } from '../core/office-plan.js';
 import { normalize } from '../core/arabic.js';
 import { MindClient } from './mind-ui.js';
 import { remoteKeyFrom, REMOTE_REFUSAL } from '../core/remote-keys.js';
+import { VOICE_CHOICES, VOICE_IDS } from '../core/speech-text.js';
 
 const CHAR_W = 170;
 const CHAR_H = 209;
@@ -233,6 +235,8 @@ function handle(reply) {
 // ------------------------------------------------------- speaking voice
 
 const voiceOut = new VoiceOut();
+// Playful effects on any piece of the screen (a question crumpled into a ball…).
+const screenFx = new ScreenFx(document.body, { celebrate: (kind, x, y) => { if (kind === 'pop') sounds.cue?.('pop'); void x; void y; } });
 // While he speaks, the always-on listener pauses so he does not hear himself.
 // While he speaks, his own voice must not come back as a command (also through the phone).
 voiceOut.onStart = () => { if (wake.active || wake.external) wake.pause(); };
@@ -1365,6 +1369,7 @@ function openSettings(focus = null) {
   $('st-windows').checked = d.walkOnWindows !== false;
   $('st-sounds').checked = d.sounds !== false;
   $('st-speak').checked = !!d.speak;
+  renderVoiceChoice();
   $('st-listen').disabled = !voiceAvailable;
   renderRemote();
   refreshMics();
@@ -1587,6 +1592,54 @@ $('cl-forget').addEventListener('click', () => saveCloud({ claudeKey: '', gemini
 for (const [id, key] of [['cl-use-hear', 'hear'], ['cl-use-brain', 'brain'], ['cl-use-voice', 'voice']]) {
   $(id).addEventListener('change', () => saveCloud({ use: { [key]: $(id).checked } }));
 }
+
+// ---------------------------------------------------------------- what Khalfoun has learned about him
+const LEARNED_KIND = { word: 'كلمة', like: 'يحب', fix: 'تصحيح', fact: 'معلومة' };
+async function renderLearned() {
+  const list = $('learned-list');
+  const r = await bridge.mind?.learned?.().catch(() => null);
+  if (!r) { list.replaceChildren(); return; }
+  const item = (label, text, id) => {
+    const li = document.createElement('li');
+    const tag = document.createElement('b'); tag.textContent = label;
+    const span = document.createElement('span'); span.textContent = text;
+    const del = document.createElement('button'); del.type = 'button'; del.className = 'icon-btn'; del.textContent = '✕'; del.setAttribute('aria-label', 'احذف');
+    del.addEventListener('click', async () => { await bridge.mind.forget(id); renderLearned(); });
+    li.append(tag, span, del);
+    return li;
+  };
+  const rows = [
+    ...r.habits.map((h) => item('أمر', `«${h.phrase}» (${h.count} مرات)`, h.id)),
+    ...r.notes.map((n) => item(LEARNED_KIND[n.kind] || 'معلومة', n.text, n.id)),
+  ];
+  if (!rows.length) { const li = document.createElement('li'); li.className = 'fine'; li.textContent = 'لسا ما تعلم شي. استخدمه وهو يتعلمك.'; rows.push(li); }
+  list.replaceChildren(...rows);
+}
+$('learned-box').addEventListener('toggle', () => { if ($('learned-box').open) renderLearned(); });
+
+// ---------------------------------------------------------------- choosing his voice
+function renderVoiceChoice() {
+  const sel = $('voice-choice');
+  if (!sel.options.length) sel.replaceChildren(...VOICE_CHOICES.map((v) => new Option(v.label, v.id)));
+  sel.value = VOICE_IDS.includes(sysVoice) ? sysVoice : VOICE_IDS[0];
+  $('voice-row').hidden = !(cloudInfo?.azure && cloudInfo.use?.voice !== false);
+}
+let sysVoice = null;
+$('voice-choice').addEventListener('change', async () => {
+  sysVoice = $('voice-choice').value;
+  await bridge.updateSettings?.({ voiceName: sysVoice });
+  tryVoice();
+});
+async function tryVoice() {
+  voiceOut.stop();
+  const r = await bridge.previewVoice?.($('voice-choice').value).catch(() => null);
+  if (!r?.ok || !r.audio) { showBubble('ما قدرت أجرب الصوت الحين.', 'sorry'); return; }
+  const url = URL.createObjectURL(new Blob([r.audio], { type: 'audio/mpeg' }));
+  const a = new Audio(url);
+  a.onended = () => URL.revokeObjectURL(url);
+  a.play().catch(() => URL.revokeObjectURL(url));
+}
+$('voice-try').addEventListener('click', tryVoice);
 
 $('st-speak').addEventListener('change', () => {
   handle(brain.hear($('st-speak').checked ? 'تكلم' : 'لا تتكلم'));
@@ -1826,6 +1879,7 @@ async function start() {
   applyCloud();
   renderCloud();
   remoteKey = loaded?.settings?.remoteKey || null;
+  sysVoice = loaded?.settings?.voiceName || null;
   const memoryData = { ...(loaded?.memory || {}), ...(loaded?.settings || {}) };
   let saveTimer = null;
   brain = new Brain({
@@ -1838,7 +1892,7 @@ async function start() {
 
   voiceOut.setEnabled(!!brain.memory.data.speak);
   mind = new MindClient({
-    bridge, brain, ink, character, animator, sounds, voiceOut, showBubble,
+    bridge, brain, ink, character, animator, sounds, voiceOut, showBubble, screenFx, effects,
     recorderActive: () => recorder.active,
     localHear: (cmd, o = {}) => {
       // Claude's «classroom» tool is for the games and class tools only: opening a program or a
@@ -1940,7 +1994,7 @@ async function start() {
   else handle(brain.start());
 
   // Hooks for automated UI tests and debugging.
-  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, ink, startSession, endSession, onWakeSentence, get inSession() { return inSession(); }, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut, get mind() { return mind; }, renderMind, get ear() { return ear; }, get earError() { return earError; }, onPhoneStatus, onPhoneAudio, onPhoneSay, get phoneLive() { return phoneLive(); }, loadEar, onEarAudio, earTrainer, endFollow: () => { followUntil = 0; } };
+  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, ink, startSession, endSession, onWakeSentence, get inSession() { return inSession(); }, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut, get mind() { return mind; }, renderMind, screenFx, get ear() { return ear; }, get earError() { return earError; }, onPhoneStatus, onPhoneAudio, onPhoneSay, get phoneLive() { return phoneLive(); }, loadEar, onEarAudio, earTrainer, endFollow: () => { followUntil = 0; } };
   document.documentElement.dataset.ready = '1';
 }
 

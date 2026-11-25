@@ -5,6 +5,7 @@
 
 import { normalize } from '../core/arabic.js';
 import { splitFeeling } from '../core/claude-persona.js';
+import { stripTashkeel } from '../core/speech-text.js';
 
 /** Claude's feelings → Khalfoun's face and body. */
 export const FEELING_LOOK = {
@@ -57,13 +58,19 @@ export class MindClient {
   say(text, { long = false } = {}) {
     const t = String(text || '').trim();
     if (!t) return;
-    this.d.showBubble(t, this.mood, long || t.length > 140);
+    // The bubble without tashkeel; the voice with it (Claude writes it for a correct reading).
+    const shown = stripTashkeel(t);
+    this.d.showBubble(shown, this.mood, long || shown.length > 140);
     if (this.d.voiceOut.enabled) this.speech.push(t);
   }
 
   speakNext() {
-    if (!this.speech.length || this.d.voiceOut.speaking || this.d.recorderActive?.()) return;
-    this.d.voiceOut.speak(this.speech.shift());
+    if (!this.speech.length || this.d.recorderActive?.()) return;
+    // Each reply joins what he is saying: read on without a gap (the voice fetches ahead).
+    const next = this.speech.shift();
+    if (this.d.voiceOut.queue) this.d.voiceOut.queue(next);
+    else if (!this.d.voiceOut.speaking) this.d.voiceOut.speak(next);
+    else this.speech.unshift(next);
   }
 
   feel(feeling) {
@@ -96,7 +103,7 @@ export class MindClient {
     const thinking = setTimeout(() => { if (this.busy && !this.spoken) this.d.showBubble('…', 'focused'); }, 900);
     const m = this.d.brain.memory.data;
     const res = await this.d.bridge.mind.ask(text, {
-      via: opts.via || 'voice', session: Boolean(opts.session), name: m.name || '', students: m.classroom?.students || [], notes: m.claudeNotes || [],
+      via: opts.via || 'voice', session: Boolean(opts.session), voice: Boolean(this.d.voiceOut?.enabled), name: m.name || '', students: m.classroom?.students || [], notes: m.claudeNotes || [],
       period: this.d.periodNow?.() || '',
     });
     clearTimeout(thinking);
@@ -151,6 +158,7 @@ export class MindClient {
         case 'ask': return this.ask_(id, p.question, reply);
         case 'classroom': return reply(this.classroom(p.command));
         case 'remember': return reply(this.remember(p.fact));
+        case 'fx': return reply(this.fx(p));
         default: return reply({ ok: false });
       }
     } catch (err) {
@@ -159,10 +167,21 @@ export class MindClient {
     }
   }
 
+  /** A playful effect: on a piece of the screen, or a celebration over all of it. */
+  fx(p) {
+    if (p.op === 'celebrate') { this.d.effects?.play(p.name); this.d.animator.play('celebrate'); return { ok: true }; }
+    if (p.op === 'region' && this.d.screenFx) {
+      this.d.screenFx.play(p).catch(() => {});
+      this.d.animator.play(['crumple', 'pop', 'shatter'].includes(p.effect) ? 'laugh' : 'point');
+      return { ok: true };
+    }
+    return { ok: false };
+  }
+
   ink(p) {
     const { ink, character, animator } = this.d;
     const hexOf = (c) => (c && /^[a-z]+$/.test(c) ? c : 'blue');
-    if (p.op === 'clear') { ink.clear(); return { ok: true }; }
+    if (p.op === 'clear') { ink.clear(); this.d.screenFx?.clear(); return { ok: true }; }
     if (p.op === 'write') ink.write(p.text, { at: p.at, anchor: p.anchor || 'right', size: p.size || 0, color: hexOf(p.color) });
     else if (p.op === 'shape') ink.draw({ shape: p.shape, color: p.color, box: p.box, text: p.label || '' });
     else if (p.op === 'mark') ink.mark(p.boxes, { mark: p.mark, color: p.color });

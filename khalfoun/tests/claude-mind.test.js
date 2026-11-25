@@ -150,6 +150,7 @@ function toolsWith(over = {}) {
     screen: { ...screenMap({ bounds: { x: 0, y: 0, width: 1280, height: 720 }, workArea: { x: 0, y: 0 }, scaleFactor: 2 }) },
     ui: async (kind, payload) => { ui.push([kind, payload]); return over.ui ? over.ui(kind, payload) : { ok: true }; },
     sleep: async () => {},
+    snap: async (r) => ({ ok: true, image: 'data:image/png;base64,AAAA', rect: { x: r.x / 2, y: r.y / 2, w: r.w / 2, h: r.h / 2 } }),
   };
   const tools = Object.fromEntries(khalfounTools(ctx).map((t) => [t.name, t]));
   return { tools, ran, ui, ctx };
@@ -735,4 +736,30 @@ test('wake listening sends only the first seconds; the daily cloud time is large
   const { WAKE_SECONDS_PER_DAY } = await import('../src/main/secrets.js');
   assert.ok(HEAD_MS <= 3000);
   assert.equal(WAKE_SECONDS_PER_DAY, 30 * 60);
+});
+
+test('screen_fx: a piece of any window is pictured and animated; a celebration covers the screen', async () => {
+  const { tools, ui, ran } = toolsWith();
+  const r = await tools.screen_fx.handler({ effect: 'crumple', x: 200, y: 100, w: 600, h: 160 });
+  assert.match(r.content[0].text, /سويتها/);
+  const [kind, p] = ui.at(-1);
+  assert.equal(kind, 'fx');
+  assert.equal(p.op, 'region');
+  assert.equal(p.effect, 'crumple');
+  assert.deepEqual(p.rect, { x: 100, y: 50, w: 300, h: 80 });
+  assert.match(p.image, /^data:image\/png/);
+  assert.equal(ran.length, 0); // nothing is done to the window itself
+  await tools.screen_fx.handler({ effect: 'flip', x: 10, y: 10, w: 100, h: 50, text: 'س = ٤', keep: true });
+  assert.equal(ui.at(-1)[1].text, 'س = ٤');
+  assert.equal(ui.at(-1)[1].keep, true);
+  const c = await tools.screen_fx.handler({ effect: 'fireworks' });
+  assert.match(c.content[0].text, /احتفلنا/);
+  assert.deepEqual(ui.at(-1), ['fx', { op: 'celebrate', name: 'fireworks' }]);
+  const bad = await tools.screen_fx.handler({ effect: 'burn' });
+  assert.equal(bad.isError, true);
+});
+
+test('persona: playful effects and learning the teacher are part of how Khalfoun works', () => {
+  const p = personaPrompt({});
+  for (const must of ['screen_fx', 'crumple', 'learn', 'تتعلّم المعلم']) assert.ok(p.includes(must), must);
 });

@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('khalfoun', {
   camera: (payload) => ipcRenderer.invoke('vision:camera', { image: String(payload?.image || ''), mode: payload?.mode === 'look' ? 'look' : 'solve' }),
   agent: (payload) => ipcRenderer.invoke('agent:respond', payload),
   speak: (text) => ipcRenderer.invoke('voice:speak', String(text || '').slice(0, 600)),
+  previewVoice: (voice) => ipcRenderer.invoke('voice:preview', String(voice || '').slice(0, 40)),
   cloud: {
     status: () => ipcRenderer.invoke('cloud:status'),
     set: (patch) => ipcRenderer.invoke('cloud:set', patch),
@@ -44,6 +45,8 @@ contextBridge.exposeInMainWorld('khalfoun', {
     ask: (text, context) => ipcRenderer.invoke('mind:ask', { text: String(text || '').slice(0, 3000), context: context && typeof context === 'object' ? context : {} }),
     stop: () => ipcRenderer.send('mind:stop'),
     prefetch: () => ipcRenderer.send('mind:prefetch'),
+    learned: () => ipcRenderer.invoke('mind:learned'),
+    forget: (id) => ipcRenderer.invoke('mind:forget', id),
     reset: () => ipcRenderer.send('mind:reset'),
     model: (m) => ipcRenderer.send('mind:model', String(m)),
     reply: (id, result) => ipcRenderer.send('mind:ui-reply', { id: Number(id), result }),

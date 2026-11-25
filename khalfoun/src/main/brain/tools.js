@@ -248,6 +248,30 @@ Any item may have color (${COLOR_IDS.join(', ')}) and width. Write maths the Oma
       },
     },
     {
+      name: 'screen_fx',
+      description: `A playful effect to change the mood of the lesson, on ANY piece of the screen (a question in the PDF, a slide, a picture, a word…) or over all of it. The real window is never changed: Khalfoun animates a picture of that piece.
+Region effects (x,y,w,h = the piece in picture pixels, from the screenshot): crumple (crumpled into a paper ball and thrown in a bin), shatter (breaks like glass), burn (burns away), plane (folds into a paper plane and flies off), flip (a card that flips to show text: put the answer in "text"), zoom (a magnifying lens), spotlight (everything dark except it), shake (shakes to draw attention), pop (blows up like a balloon and bursts), melt (melts down).
+The piece looks gone for a few seconds (hold, 1-60) then the screen shows again; keep:true keeps it hidden until screen_clear.
+Over the whole screen (no x,y,w,h): confetti, fireworks, balloons, stars, hearts, bubbles, snow, rain, lanterns, national (Omani flag).`,
+      schema: {
+        effect: z.enum(['crumple', 'shatter', 'burn', 'plane', 'flip', 'zoom', 'spotlight', 'shake', 'pop', 'melt', 'confetti', 'fireworks', 'balloons', 'stars', 'hearts', 'bubbles', 'snow', 'rain', 'lanterns', 'national']),
+        x: z.number().optional(), y: z.number().optional(), w: z.number().optional(), h: z.number().optional(),
+        text: z.string().max(80).optional(), hold: z.number().min(1).max(60).optional(), keep: z.boolean().optional(),
+        color: z.enum(COLOR_IDS).optional(),
+      },
+      handler: async ({ effect, x, y, w, h, text: label, hold, keep, color }) => {
+        if (!['crumple', 'shatter', 'burn', 'plane', 'flip', 'zoom', 'spotlight', 'shake', 'pop', 'melt'].includes(effect)) {
+          await ctx.ui('fx', { op: 'celebrate', name: effect });
+          return text('احتفلنا!');
+        }
+        if (![x, y, w, h].every(Number.isFinite) || w < 8 || h < 8) return fail('حدد مكان الشي في الشاشة (x,y,w,h) من صورة الشاشة.');
+        const shot = await ctx.snap?.({ x, y, w, h });
+        if (!shot?.ok) return fail('ما قدرت آخذ صورة لهالجزء من الشاشة.');
+        await ctx.ui('fx', { op: 'region', effect, rect: shot.rect, image: shot.image, text: label || '', hold, keep: Boolean(keep), color: color ? COLORS[color] || color : undefined });
+        return text(keep ? 'سويتها، وبيبقى مخفي لين تمسح الشاشة.' : 'سويتها!');
+      },
+    },
+    {
       name: 'screen_clear',
       description: 'Erase everything Khalfoun wrote or drew on the screen.',
       schema: {},
@@ -320,7 +344,13 @@ Any item may have color (${COLOR_IDS.join(', ')}) and width. Write maths the Oma
       name: 'remember',
       description: 'Remember something lasting the teacher said about himself, his school, classes or students (it will appear in your context next time). Not passwords or private numbers.',
       schema: { fact: z.string().min(2).max(200) },
-      handler: async ({ fact }) => { await ctx.ui('remember', { fact }); return text('حفظتها.'); },
+      handler: async ({ fact }) => { await ctx.ui('remember', { fact }); await ctx.learn?.('fact', fact); return text('حفظتها.'); },
+    },
+    {
+      name: 'learn',
+      description: 'Learn something lasting about how this teacher works, so you understand him better every time (read back to you at the start of every session). kind: "word" (a word or phrase of his and what he means by it), "like" (how he likes things done: colours, sizes, steps, length of replies), "fix" (something he corrected you on), "fact" (his classes, students, files). Do it quietly while working; never passwords or private numbers.',
+      schema: { kind: z.enum(['word', 'like', 'fix', 'fact']), note: z.string().min(3).max(240) },
+      handler: async ({ kind, note }) => { await ctx.learn?.(kind, note); return text('تعلمتها.'); },
     },
     {
       name: 'ask_user',

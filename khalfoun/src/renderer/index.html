@@ -88,6 +88,11 @@
           <label><input type="radio" name="md-model" value="best"><span>الأذكى (أبطأ)</span></label>
         </div>
       </div>
+      <details id="learned-box">
+        <summary>🧠 شو تعلّم خلفون عني</summary>
+        <p class="fine">كل ما تستخدمه يتعلمك أكثر: كلماتك، وطريقتك اللي تحبها، والأشياء اللي صحّحتها له، والأوامر اللي تكررها (يسويها على طول بعد مرتين). تقدر تحذف أي شي.</p>
+        <ul id="learned-list" class="learned-list"></ul>
+      </details>
     </section>
     <fieldset class="levels">
       <legend>مستوى الإذن</legend>
@@ -105,6 +110,10 @@
     </div>
     <label class="check"><input id="st-kids" type="checkbox"> وضع الأطفال</label>
     <label class="check"><input id="st-speak" type="checkbox"> خلفون يتكلم بصوت</label>
+    <div id="voice-row" class="setup-controls" hidden>
+      <label class="fine">صوته: <select id="voice-choice"></select></label>
+      <button id="voice-try" type="button" class="ghost">🔊 جرّب</button>
+    </div>
     <label class="check"><input id="st-sounds" type="checkbox"> أصوات خلفون (همهمات ومؤثرات بدون كلام)</label>
     <label class="check"><input id="st-windows" type="checkbox"> يمشي فوق النوافذ المفتوحة</label>
     <label class="check"><input id="st-listen" type="checkbox"> استمع لندائي «يا خلفون» دائماً (دون ضغط زر)</label>

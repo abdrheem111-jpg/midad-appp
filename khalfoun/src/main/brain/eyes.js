@@ -91,6 +91,24 @@ export function createEyes(deps) {
   let changes = 0;
   const fresh = () => last && last.changes === changes && Date.now() - last.at < 4000;
 
+  /**
+   * A piece of the screen as a picture, for a playful effect on it (a question crumpled into a
+   * ball...): the region in picture pixels → a PNG at the overlay's size and where it sits there.
+   */
+  async function snap(region) {
+    const c = await capture();
+    if (!c) return { ok: false, error: 'no_screen' };
+    const { shot, map } = c;
+    const p1 = map.toPhysical(region.x, region.y); const p2 = map.toPhysical(region.x + region.w, region.y + region.h);
+    const size = shot.getSize();
+    const x = Math.max(0, Math.min(size.width - 8, p1.x)); const y = Math.max(0, Math.min(size.height - 8, p1.y));
+    const rect = { x, y, width: Math.max(8, Math.min(size.width - x, p2.x - p1.x)), height: Math.max(8, Math.min(size.height - y, p2.y - p1.y)) };
+    let img = shot.crop(rect);
+    if (rect.width > 1800) img = img.resize({ width: 1800, quality: 'good' }); // plenty for an animation
+    const o1 = map.toOverlay(region.x, region.y); const o2 = map.toOverlay(region.x + region.w, region.y + region.h);
+    return { ok: true, image: `data:image/png;base64,${img.toPNG().toString('base64')}`, rect: { x: o1.x, y: o1.y, w: Math.max(4, o2.x - o1.x), h: Math.max(4, o2.y - o1.y) } };
+  }
+
   /** look_screen */
   async function look({ zoom } = {}) {
     const c = await capture();
@@ -149,5 +167,5 @@ export function createEyes(deps) {
     pictureScale: () => current().pictureScale(),
     size: () => current().size(),
   };
-  return { look, find, screen: screenApi, changed: () => { changes += 1; } };
+  return { look, find, snap, screen: screenApi, changed: () => { changes += 1; } };
 }

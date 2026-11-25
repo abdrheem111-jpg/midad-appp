@@ -19,7 +19,7 @@ import { JsonStore } from './storage.js';
 import { createPlatform } from './actions/platform.js';
 import { createExecutor } from './actions/index.js';
 import { findWhisper, transcribe, wavSeconds } from './stt.js';
-import { transcribeAzure, speakAzure, sampleAzure, verifyAzure, ClaudeAgent, GeminiAgent, chainAgents, screenPrompt } from './cloud.js';
+import { transcribeAzure, speakAzure, sampleAzure, verifyAzure, AZURE_VOICES, ClaudeAgent, GeminiAgent, chainAgents, screenPrompt } from './cloud.js';
 import { CloudSecrets, DEFAULT_CLOUD } from './secrets.js';
 import { WindowWatcher } from './windows-watcher.js';
 import { ChatClient, findLocalModel, pickVisionModel } from './chat.js';
@@ -35,6 +35,9 @@ import { FG_SCRIPT } from './foreground-script.js';
 import { REMOTE_ACCEL } from '../core/remote-keys.js';
 import { EAR_KINDS, EAR_VOICES, earTtsPlan } from '../core/ear-plan.js';
 import { createPhoneMic } from './phone-mic.js';
+import { VOICE_IDS } from '../core/speech-text.js';
+// The voice he chose first, then the others as fallbacks (a region may not offer one).
+const voiceOrder = (chosen) => [...new Set([VOICE_IDS.includes(chosen) ? chosen : VOICE_IDS[0], ...AZURE_VOICES])];
 import { request as httpsRequest } from 'node:https';
 import selfsigned from 'selfsigned';
 import QRCode from 'qrcode';
@@ -636,6 +639,7 @@ function sanitizeSettingsPatch(patch) {
   if ('mind' in patch) out.mind = patch.mind === 'claude' ? 'claude' : 'classic';
   if ('mindModel' in patch && ['fast', 'smart', 'best'].includes(patch.mindModel)) out.mindModel = patch.mindModel;
   if ('digits' in patch && ['arabic', 'latin'].includes(patch.digits)) out.digits = patch.digits;
+  if ('voiceName' in patch && VOICE_IDS.includes(patch.voiceName)) out.voiceName = patch.voiceName;
   return out; // remoteKey is set through remote:set (checked and registered there)
 }
 
@@ -718,9 +722,15 @@ function setupIpc(stores, executor) {
   ipcMain.handle('voice:speak', async (event, text) => {
     if (!fromApp(event)) return { ok: false, error: 'forbidden' };
     if (!secrets.data.use.voice || !secrets.azure) return { ok: false, error: 'not_configured' };
-    const res = await speakAzure(secrets.azure, String(text || ''));
+    const res = await speakAzure(secrets.azure, String(text || ''), { voices: voiceOrder(settings.voiceName) });
     if (!res.ok) diag.write('cloud voice failed', res.error);
     return res;
+  });
+  // «جرّب الصوت» in settings: a sample line in the voice he is looking at.
+  ipcMain.handle('voice:preview', async (event, voice) => {
+    if (!fromApp(event) || !VOICE_IDS.includes(voice)) return { ok: false, error: 'forbidden' };
+    if (!secrets.azure) return { ok: false, error: 'not_configured' };
+    return speakAzure(secrets.azure, 'هَلَا وَاللّٰه يَا أُسْتَاذ! أَنَا خَلْفُون، وَهٰذَا صَوْتِي. ثَلَاثَةٌ زَائِد أَرْبَعَة يُسَاوِي سَبْعَة.', { voices: [voice] });
   });
 
   ipcMain.handle('memory:save', async (event, data) => {
@@ -900,7 +910,7 @@ function setupIpc(stores, executor) {
     const c = payload?.context && typeof payload.context === 'object' ? payload.context : {};
     const fg = await activeWindow().catch(() => null);
     return mind.ask(text, {
-      name: String(c.name || '').slice(0, 60), via: c.via === 'typed' ? 'typed' : 'voice', session: c.session === true,
+      name: String(c.name || '').slice(0, 60), via: c.via === 'typed' ? 'typed' : 'voice', session: c.session === true, voice: c.voice === true,
       students: Array.isArray(c.students) ? c.students.map((x) => String(x).slice(0, 40)).slice(0, 40) : [],
       notes: Array.isArray(c.notes) ? c.notes.map((x) => String(x).slice(0, 200)).slice(-12) : [],
       period: String(c.period || '').slice(0, 80),
@@ -908,6 +918,9 @@ function setupIpc(stores, executor) {
     });
   });
   ipcMain.on('mind:stop', (event) => { if (fromApp(event)) mind?.stop(); });
+  // «شو تعلّم خلفون عني»: the notes and habits, and forgetting one of them.
+  ipcMain.handle('mind:learned', async (event) => (fromApp(event) && mind ? mind.learned() : null));
+  ipcMain.handle('mind:forget', async (event, id) => (fromApp(event) && mind && (typeof id === 'string' || typeof id === 'number') ? mind.forget(String(id).slice(0, 200)) : false));
   // A voice sentence just ended: take the screenshot while its words are recognised.
   ipcMain.on('mind:prefetch', (event) => { if (fromApp(event) && settings.mind === 'claude') mind?.prefetch(); });
   ipcMain.on('mind:reset', (event) => { if (fromApp(event)) mind?.reset(); });
@@ -1490,6 +1503,16 @@ async function runSmokeTest(stores) {
       })()`);
       step('Khalfoun\'s own ear loads in the app and scores sound like the training code', typeof best === 'number' && Math.abs(best - expected) < 2e-3, { best, expected, error: await js('window.__khalfoun.earError') });
       await rm(earDir, { recursive: true, force: true });
+    }
+    // A playful effect through Claude's own tool: a real picture of a piece of the screen, sent
+    // to the page and animated there.
+    {
+      const tool = mind?.tools?.find((t) => t.name === 'screen_fx');
+      const r = tool ? await tool.handler({ effect: 'crumple', x: 100, y: 100, w: 300, h: 120 }).catch((err) => ({ isError: true, content: [{ text: String(err?.message || err) }] })) : null;
+      await new Promise((res) => setTimeout(res, 600));
+      const busy = await js('window.__khalfoun.screenFx.busy');
+      step('a piece of the screen is pictured and animated (screen_fx crumple)', Boolean(r && !r.isError && busy), { said: r?.content?.[0]?.text, busy });
+      await js('window.__khalfoun.screenFx.clear()');
     }
     // The phone microphone: Khalfoun's own certificate, the QR code and the page with its key.
     {

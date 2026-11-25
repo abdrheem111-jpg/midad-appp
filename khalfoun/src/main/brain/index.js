@@ -12,6 +12,7 @@ import { khalfounTools, khalfounServer } from './tools.js';
 import { createEyes } from './eyes.js';
 import { installClaude, claudeExePath, claudeInstalled, CLAUDE_PROGRAM } from './claude-setup.js';
 import { personaPrompt, userTurn, speakable, needsScreen } from '../../core/claude-persona.js';
+import { TeacherNotes } from './teacher-notes.js';
 import { normalize } from '../../core/arabic.js';
 
 /** The environment Claude's program runs in: the person's own, minus API keys (the subscription pays). */
@@ -77,7 +78,16 @@ export function createClaudeMind(deps) {
   }, platform, log });
   // Anything done on the screen makes the last reading of it stale.
   const runAction = async (action) => { eyes.changed(); return deps.run(action); };
-  const tools = khalfounTools({ digits: () => deps.getSettings().digits || 'arabic', run: runAction, look: eyes.look, find: eyes.find, screen: eyes.screen, ui: (k, p, ms) => { if (k === 'ink') eyes.changed(); return ui(k, p, ms); }, log });
+  // What Khalfoun has learned about the teacher (notes + habits), on his computer.
+  const notes = deps.notes || new TeacherNotes(join(deps.userData, 'teacher-notes.json'));
+  const notesReady = notes.load().catch(() => notes);
+  let turnSteps = null; // the tools Claude used in the current turn, to learn habits from
+  const tools = khalfounTools({
+    digits: () => deps.getSettings().digits || 'arabic', run: runAction, look: eyes.look, find: eyes.find, screen: eyes.screen, snap: eyes.snap,
+    ui: (k, p, ms) => { if (k === 'ink') eyes.changed(); return ui(k, p, ms); }, log,
+    learn: async (kind, note) => { await notesReady; const n = await notes.add(kind, note); if (n) log('learned', kind, `«${n.text.slice(0, 80)}»`); return n; },
+  }).map((t) => ({ ...t, handler: async (a) => { const r = await t.handler(a); turnSteps?.push({ name: t.name, input: a, ok: !r?.isError }); return r; } }));
+  const toolByName = new Map(tools.map((t) => [t.name, t]));
 
   function makeBrain() {
     const s = deps.getSettings();
@@ -88,7 +98,7 @@ export function createClaudeMind(deps) {
       toolNames: tools.map((t) => t.name),
       persona: () => {
         const st = deps.getSettings();
-        return personaPrompt({ kidsMode: !!st.kidsMode, level: st.level || 1, digits: st.digits || 'arabic' });
+        return personaPrompt({ kidsMode: !!st.kidsMode, level: st.level || 1, digits: st.digits || 'arabic', learned: notes.promptBlock() });
       },
       model: MODELS[s.mindModel] || MODELS.smart,
       effort: 'low',
@@ -204,8 +214,45 @@ export function createClaudeMind(deps) {
     early = { at: Date.now(), promise: eyes.look().catch(() => null) };
   }
 
+  // Commands done at once from his habits, told to Claude in his next message (so it knows).
+  let doneAlone = [];
+  let lastAlone = null;
+
+  /** A command he gives often, done again exactly as Claude did it: no waiting for Claude. */
+  async function fromHabit(text, image) {
+    await notesReady;
+    const said = normalize(text);
+    // «لا / مو كذا / غلط» right after one: that habit was wrong, Claude takes it from here.
+    if (lastAlone && Date.now() - lastAlone.at < 30000 && /^(لا|مو كذا|مب كذا|غلط|خطا|مو هذا|مب هذا)( |$)/.test(said)) {
+      await notes.forgetHabit(lastAlone.text);
+      log('habit forgotten (he corrected it)', `«${lastAlone.text.slice(0, 60)}»`);
+      lastAlone = null;
+      return null;
+    }
+    const h = image || needsScreen(said) ? null : notes.habitFor(text);
+    if (!h) return null;
+    const t0 = Date.now();
+    for (const step of h.plan) {
+      const tool = toolByName.get(step.name);
+      const r = tool ? await tool.handler(step.input).catch(() => ({ isError: true })) : { isError: true };
+      if (r?.isError) {
+        log('habit failed, asking Claude', step.name);
+        await notes.forgetHabit(text);
+        return null;
+      }
+    }
+    await notes.used(text);
+    doneAlone.push(`«${String(text).slice(0, 80)}» → ${h.plan.map((p) => p.name).join('، ')}`);
+    lastAlone = { text, at: Date.now() };
+    log('habit done at once', `«${String(text).slice(0, 60)}»`, `${Date.now() - t0} ms`);
+    const words = ['[happy] تم.', '[happy] حاضر، تم.', '[proud] سويتها.'];
+    return { ok: true, say: speakable(words[Math.floor(Math.random() * words.length)]), ms: Date.now() - t0, habit: true };
+  }
+
   async function ask(text, ctx = {}, image = null) {
     if (!warmed && deps.hands && platform === 'win32') { warmed = true; deps.hands.call('ocr_init', {}, 30000).catch(() => {}); }
+    const quick = await fromHabit(text, image);
+    if (quick) return quick;
     if (!brain) {
       await mkdir(join(deps.userData, 'claude-work'), { recursive: true }).catch(() => {});
       brain = makeBrain();
@@ -213,6 +260,7 @@ export function createClaudeMind(deps) {
     const t0 = Date.now();
     // «اكتب هنا», «كمل وراي», «حل هذي»: the screen goes with the sentence (one round trip less).
     let turn = userTurn(text, ctx);
+    if (doneAlone.length) { turn = `[سويتها لحالي من عاداته قبل شوي: ${doneAlone.join(' | ')}]\n${turn}`; doneAlone = []; }
     let pic = image;
     const ready = early && Date.now() - early.at < 15000 ? early : null;
     early = null;
@@ -225,7 +273,14 @@ export function createClaudeMind(deps) {
         log('claude look (with the sentence)', `${seen.width}x${seen.height}`, `${Date.now() - t0} ms`);
       }
     }
+    turnSteps = [];
     const res = await brain.ask(turn, pic ? { image: pic } : {});
+    const steps = turnSteps;
+    turnSteps = null;
+    if (res.ok) {
+      const h = await notes.record(text, steps).catch(() => null);
+      if (h?.count === 2) log('habit learned', `«${String(text).slice(0, 60)}»`, h.plan.map((p) => p.name).join(', '));
+    }
     log('claude turn', `«${String(text).slice(0, 80)}»`, '→', res.ok ? `ok ${((Date.now() - t0) / 1000).toFixed(1)} s «${String(res.text).slice(0, 120)}»` : `failed: ${res.error}`);
     if (!res.ok && res.error === 'auth') auth = { ...auth, loggedIn: false, checked: Date.now() };
     return res.ok ? { ok: true, say: speakable(res.text), ms: Date.now() - t0 } : { ok: false, error: res.error };
@@ -242,6 +297,8 @@ export function createClaudeMind(deps) {
 
   return {
     status, install, signIn, signInCode, signOut, ask, prefetch, ui, uiReply, checkAuth, warm,
+    learned: async () => { await notesReady; return notes.list(); },
+    forget: async (id) => { await notesReady; return notes.remove(id); },
     stop: () => brain?.stop(),
     reset: () => brain?.reset(),
     setModel: (m) => brain?.setModel(m),

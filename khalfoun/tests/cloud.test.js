@@ -32,14 +32,14 @@ test('Azure hearing: silence is empty, bad key / quota / offline / slow are repo
   assert.equal((await transcribeAzure({ key: 'x', region: 'bad region!' }, wav)).error, 'not_configured');
 });
 
-test('Azure voice: Omani voice first, the next voice if a region lacks it, text escaped', async () => {
+test('Azure voice: Hamed (clearest reading) first, the next voice if a region lacks it, text escaped', async () => {
   const bodies = [];
   const fetchFn = async (url, init) => { bodies.push(init.body); return bodies.length === 1 ? reply(400, {}) : reply(200, {}, new Uint8Array([1, 2, 3]).buffer); };
   const r = await speakAzure(AZ, 'هلا <والله> & مرحبا', { fetchFn });
   assert.equal(r.ok, true);
   assert.equal(r.voice, AZURE_VOICES[1]);
   assert.deepEqual([...r.audio], [1, 2, 3]);
-  assert.match(bodies[0], /ar-OM-AbdullahNeural/);
+  assert.match(bodies[0], /ar-SA-HamedNeural/);
   assert.match(bodies[0], /&lt;والله&gt; &amp;/);
   assert.equal((await verifyAzure(AZ, { fetchFn: async () => reply(200, {}) })).ok, true);
   assert.equal((await verifyAzure(AZ, { fetchFn: async () => reply(401, {}) })).error, 'bad_key');

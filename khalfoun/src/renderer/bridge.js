@@ -224,6 +224,8 @@ function createPreviewBridge() {
       async signIn() { window.__mindLoggedIn = true; emit({ type: 'mind', data: { type: 'login', step: 'done' } }); return { ok: true }; },
       async code() { return { ok: true }; },
       async signOut() { window.__mindLoggedIn = false; return { ok: true }; },
+      async learned() { return window.__learned || { notes: [{ id: 1, kind: 'word', text: '«الكتاب» يعني ملف كتاب الطالب PDF', at: 1, uses: 2 }], habits: [{ id: 'افتح الكتاب', phrase: 'افتح الكتاب', count: 3, steps: ['open_file'] }] }; },
+      async forget(id) { const l = await this.learned(); window.__learned = { notes: l.notes.filter((n) => String(n.id) !== String(id)), habits: l.habits.filter((h) => h.id !== id) }; return true; },
       prefetch() { window.__mindPrefetch = (window.__mindPrefetch || 0) + 1; },
       async ask(text, context) {
         mindAsks.push({ text, context });

@@ -1170,6 +1170,42 @@ await check('P2: the phone page opens, takes the microphone and sends its sound 
   } finally { await ctx.close(); mic.stop(); }
 });
 
+await check('F: playful effects on a piece of the screen, «شو تعلّم خلفون عني», choosing his voice', async () => {
+  // a piece of the screen crumpled into a ball: it animates and finishes, then the screen is back
+  const t0 = Date.now();
+  const drawn = await opage.evaluate(async () => {
+    const c = document.createElement('canvas'); c.width = 400; c.height = 120; const x = c.getContext('2d');
+    x.fillStyle = '#fff'; x.fillRect(0, 0, 400, 120); x.fillStyle = '#000'; x.font = '28px Tahoma'; x.fillText('٢س + ٣ = ١١', 120, 70);
+    const fx = window.__khalfoun.screenFx;
+    const done = fx.play({ effect: 'crumple', rect: { x: 300, y: 200, w: 400, h: 120 }, image: c.toDataURL(), hold: 1 });
+    await new Promise((r) => setTimeout(r, 600));
+    const px = fx.ctx.getImageData(0, 0, fx.canvas.width, fx.canvas.height).data;
+    let ink = 0; for (let i = 3; i < px.length; i += 4 * 50) if (px[i] > 0) ink += 1;
+    await done;
+    return ink;
+  });
+  assert(drawn > 50, `nothing drawn (${drawn})`);
+  assert(Date.now() - t0 < 6000, 'effect did not finish');
+  await opage.waitForTimeout(1700);
+  assert(!(await opage.evaluate(() => window.__khalfoun.screenFx.busy)), 'the screen did not come back');
+  // the same through Claude's ui channel
+  await opage.evaluate(() => window.__khalfoun.mind?.fx?.({ op: 'celebrate', name: 'confetti' }));
+  // settings: what he has learned, deletable
+  await opage.evaluate(() => window.__khalfoun.bridge._emit({ type: 'open-settings' }));
+  await opage.waitForTimeout(300);
+  await opage.evaluate(() => { const d = document.getElementById('learned-box'); d.open = true; d.dispatchEvent(new Event('toggle')); });
+  await opage.waitForTimeout(300);
+  assert(/الكتاب/.test(await opage.locator('#learned-list').textContent()), 'learned list empty');
+  const n0 = await opage.locator('#learned-list li').count();
+  await opage.locator('#learned-list li button').first().click();
+  await opage.waitForTimeout(300);
+  assert(await opage.locator('#learned-list li').count() === n0 - 1, 'not deleted');
+  assert(await opage.locator('#voice-choice option').count() === 8, 'no voice choice');
+  assert(/حامد/.test(await opage.locator('#voice-choice option').first().textContent()), 'Hamed not first');
+  await opage.screenshot({ path: `${outDir}/f1-learned.png` });
+  await opage.evaluate(() => document.getElementById('st-close').click());
+});
+
 await browser.close();
 server.close();
 if (problems.length) {
