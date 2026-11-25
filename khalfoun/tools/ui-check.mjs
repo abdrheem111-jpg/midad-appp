@@ -1043,7 +1043,7 @@ await check('R: the presenter remote: one press teaches Khalfoun its button; typ
   assert(!(await opage.locator('#rm-forget').isHidden()), 'no forget button');
   await opage.screenshot({ path: `${outDir}/r1-remote.png` });
   // the call comes first; when it cannot be heard, he is pointed to the remote's button
-  await opage.evaluate(() => { window.__khalfoun.closeSettings?.(); window.__khalfoun.bridge._emit({ type: 'wake-limit' }); });
+  await opage.evaluate(() => { document.getElementById('st-close').click(); window.__khalfoun.bridge._emit({ type: 'wake-limit' }); });
   await untilOn(opage, () => /الريموت/.test(document.getElementById('bubble-text').textContent), 8000);
   await opage.evaluate(() => window.__khalfoun.bridge._emit({ type: 'open-settings' }));
   await opage.waitForTimeout(300);
@@ -1102,6 +1102,72 @@ await check('L: Khalfoun\'s own ear runs in the page and decides which sentences
   assert(await opage.evaluate(() => window.__khalfoun.inSession), 'no session after the ear heard the name');
   assert(await opage.evaluate(() => window.__khalfoun.bridge._transcribeCalls.length) === calls0, 'sent to the cloud without one');
   await opage.evaluate(() => window.__khalfoun.endSession('words'));
+});
+
+await check('P: the phone as the microphone: QR in settings, its sentences are heard, its button sends a command', async () => {
+  await opage.evaluate(() => window.__khalfoun.bridge._emit({ type: 'open-settings' }));
+  await opage.waitForTimeout(300);
+  await opage.click('#phone-on');
+  await opage.waitForTimeout(300);
+  assert(await opage.locator('#phone-qr').isVisible(), 'no QR code');
+  assert(/192\.168\.43\.10/.test(await opage.locator('#phone-url').textContent()), 'no address');
+  assert(await opage.locator('#mic-choice').count() === 1, 'no microphone choice');
+  await opage.screenshot({ path: `${outDir}/p1-phone-qr.png` });
+  await opage.evaluate(() => document.getElementById('st-close').click());
+  // the phone starts streaming: the computer microphone gives way (the trusted test ear from L is
+  // put back to «shadow», so it does not hold the sentence back)
+  await opage.evaluate(() => { if (window.__khalfoun.ear) window.__khalfoun.ear.mode = 'shadow'; window.__khalfoun.onPhoneStatus({ connected: true, streaming: true }); });
+  assert(await opage.evaluate(() => window.__khalfoun.phoneLive && window.__khalfoun.wake.external), 'phone not the microphone');
+  // its sound goes through the same steps: a spoken sentence becomes a check for «يا خلفون»
+  const calls0 = await opage.evaluate(() => window.__khalfoun.bridge._transcribeCalls.length);
+  await opage.evaluate(() => {
+    window.__fakeTranscripts = ['يا خلفون'];
+    const send = (on, ms) => { const n = Math.round(16 * ms); const b = new Int16Array(n); for (let i = 0; i < n; i += 1) b[i] = on ? Math.round(9000 * Math.sin(i / 3) * Math.sin(i / 400)) : Math.round(Math.sin(i) * 20); return new Uint8Array(b.buffer); };
+    const chunks = [send(false, 600), send(false, 400), send(true, 400), send(true, 400), send(true, 300), send(false, 400), send(false, 400), send(false, 400)];
+    for (const c of chunks) window.__khalfoun.onPhoneAudio(c);
+  });
+  await untilOn(opage, () => window.__khalfoun.bridge._transcribeCalls.length > 0, 6000).catch(() => {});
+  assert(await opage.evaluate(() => window.__khalfoun.bridge._transcribeCalls.length) > calls0, 'phone sentence not heard');
+  await opage.evaluate(() => window.__khalfoun.endSession?.('words'));
+  // the phone's own button: a command recorded on the phone
+  const n1 = await opage.evaluate(() => window.__khalfoun.bridge._transcribeCalls.length);
+  await opage.evaluate(() => { window.__fakeTranscripts = ['افتح الوورد']; const w = new Uint8Array(3244); w.set([82, 73, 70, 70], 0); window.__khalfoun.onPhoneSay(w); });
+  await untilOn(opage, () => window.__khalfoun.bridge._transcribeCalls.length > 0, 4000).catch(() => {});
+  assert(await opage.evaluate(() => window.__khalfoun.bridge._transcribeCalls.length) > n1, 'phone command not heard');
+  await opage.evaluate(() => window.__khalfoun.onPhoneStatus({ connected: false, streaming: false }));
+  assert(!(await opage.evaluate(() => window.__khalfoun.wake.external)), 'computer microphone not back');
+});
+
+await check('P2: the phone page opens, takes the microphone and sends its sound with the key', async () => {
+  const { createPhoneMic } = await import('../src/main/phone-mic.js');
+  const selfsigned = createRequire(import.meta.url)('selfsigned');
+  const got = { audio: 0, say: 0, hello: 0 };
+  const mic = createPhoneMic({
+    dir: outDir, pagePath: new URL('../src/phone/index.html', import.meta.url),
+    makeCert: (a, o) => selfsigned.generate(a, o), toQr: async (u) => u,
+    onAudio: (pcm) => { got.audio += pcm.length; }, onSay: () => { got.say += 1; }, onStatus: () => { got.hello += 1; },
+    addresses: () => [{ address: '127.0.0.1' }], ports: [0],
+  });
+  const info = await mic.start();
+  const ctx = await browser.newContext({ ignoreHTTPSErrors: true, permissions: ['microphone'], viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true });
+  const phone = await ctx.newPage();
+  try {
+    await phone.goto(info.url);
+    await phone.click('#start');
+    await untilOn(phone, () => !document.getElementById('main').hidden, 8000);
+    await phone.waitForTimeout(1800); // «استماع دائم» streams by itself
+    assert(got.audio > 16000, `phone sent ${got.audio} bytes`);
+    assert(/متصل/.test(await phone.locator('#state').textContent()), await phone.locator('#state').textContent());
+    await phone.screenshot({ path: `${outDir}/p2-phone-page.png` });
+    // hold the button, talk, let go: one command
+    const box = await phone.locator('#talk').boundingBox();
+    await phone.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await phone.mouse.down();
+    await phone.waitForTimeout(1200);
+    await phone.mouse.up();
+    await phone.waitForTimeout(800);
+    assert(got.say === 1, `say ${got.say}`);
+  } finally { await ctx.close(); mic.stop(); }
 });
 
 await browser.close();

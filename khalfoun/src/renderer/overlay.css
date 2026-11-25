@@ -536,3 +536,10 @@ html.preview body {
 .setup.mind .pill.on { background: #1f8a70; color: #fff; }
 .progress { height: 8px; border-radius: 999px; background: #eee3cf; overflow: hidden; margin: 6px 0; }
 .progress > span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #1f8a70, #c9962c); transition: width 0.3s; }
+
+/* the phone microphone and the microphone choice (settings) */
+#phone-box { text-align: center; margin-top: 8px; }
+#phone-qr { display: block; margin: 6px auto; border-radius: 10px; background: #fff; padding: 6px; }
+#phone-url { font-size: 12px; word-break: break-all; opacity: 0.8; }
+#mic-choice { max-width: 260px; font: inherit; }
+.ear.phone::after { content: '📱'; position: absolute; font-size: 12px; inset-inline-end: -6px; bottom: -6px; }

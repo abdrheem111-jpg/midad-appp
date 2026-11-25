@@ -1,6 +1,7 @@
 // Push-to-talk microphone recording that stops by itself after the person
 // stops speaking, then returns a 16 kHz WAV for speech recognition.
 
+import { micChoice } from './wake-listener.js';
 import { downsample, encodeWav, rms } from './wav.js';
 
 const TARGET_RATE = 16000;
@@ -32,7 +33,7 @@ export class Recorder {
     let stream;
     let ctx;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, ...micChoice() } });
       ctx = new AudioContext();
       await ctx.audioWorklet.addModule(opts.worklet || 'recorder-worklet.js');
       const src = ctx.createMediaStreamSource(stream);

@@ -13,6 +13,11 @@ contextBridge.exposeInMainWorld('khalfoun', {
     voices: () => ipcRenderer.invoke('ear:tts'),
     models: () => ipcRenderer.invoke('ear:models'),
   },
+  phone: {
+    start: () => ipcRenderer.invoke('phone:start'),
+    stop: () => ipcRenderer.invoke('phone:stop'),
+    info: () => ipcRenderer.invoke('phone:info'),
+  },
   remote: {
     set: (accel) => ipcRenderer.invoke('remote:set', accel === null ? null : String(accel || '').slice(0, 40)),
     pause: (on) => ipcRenderer.invoke('remote:pause', on === true),

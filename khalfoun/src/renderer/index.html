@@ -116,6 +116,19 @@
         <button id="rm-forget" type="button" class="ghost danger" hidden>انسَ الزر</button>
       </div>
       <p id="rm-result" class="fine" role="status" aria-live="polite"></p>
+      <h3 id="mic-title">المايك</h3>
+      <label class="fine">المايك اللي يسمع منه خلفون: <select id="mic-choice"><option value="">مايك الجهاز (الافتراضي)</option></select></label>
+      <p class="fine">لو عندك مايك لاسلكي، اختاره هني وهو يكون الأول. لو ما فيه، التلفون يصير المايك.</p>
+      <div class="setup-controls">
+        <button id="phone-on" type="button" class="small-btn">📱 خلّ التلفون مايك</button>
+        <button id="phone-off" type="button" class="ghost danger" hidden>وقّف مايك التلفون</button>
+      </div>
+      <div id="phone-box" hidden>
+        <img id="phone-qr" alt="رمز QR لصفحة مايك التلفون" width="200" height="200">
+        <p class="fine" id="phone-state" role="status" aria-live="polite"></p>
+        <p class="fine">١. خلّ الكمبيوتر والتلفون على نفس الشبكة (أسهل شي: الكمبيوتر يتصل بنقطة اتصال التلفون).<br>٢. امسح الرمز بكاميرا التلفون. لو المتصفح قال «الاتصال غير آمن»: اختار «متقدم» ثم «متابعة»، لأن الشهادة من خلفون نفسه.<br>٣. لو ويندوز سألك عن الجدار الناري، اختار «السماح».</p>
+        <p class="fine" id="phone-url" dir="ltr"></p>
+      </div>
       <p class="fine">أذن خلفون الخاصة: تسمع اسمه على جهازك بدون إنترنت. سجّل صوتك وأنت تناديه، وأنا أدرّبها عليه.</p>
       <div class="setup-controls"><button id="ear-open" type="button" class="ghost">👂 علّم خلفون صوتك وهو تناديه</button></div>
     </section>

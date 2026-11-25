@@ -8,7 +8,7 @@ import { Animator, EMOTION_ANIMATION } from './animations.js';
 import { Motion } from './motion.js';
 import { visiblePlatforms } from './platforms.js';
 import { Recorder } from './recorder.js';
-import { WakeListener } from './wake-listener.js';
+import { WakeListener, setMicChoice } from './wake-listener.js';
 import { findWakeWord } from '../core/wake.js';
 import { recognize } from '../core/intents.js';
 import { toArabicDigits } from '../core/arabic.js';
@@ -234,8 +234,9 @@ function handle(reply) {
 
 const voiceOut = new VoiceOut();
 // While he speaks, the always-on listener pauses so he does not hear himself.
-voiceOut.onStart = () => { if (wake.active) wake.pause(); };
-voiceOut.onEnd = () => { if (wake.active) wake.resume(); };
+// While he speaks, his own voice must not come back as a command (also through the phone).
+voiceOut.onStart = () => { if (wake.active || wake.external) wake.pause(); };
+voiceOut.onEnd = () => { if (wake.active || wake.external) wake.resume(); };
 
 // -------------------------------------------------------- classroom joy
 
@@ -757,28 +758,71 @@ async function listen() {
   handle(brain.event('listening'));
   els.mic.classList.add('recording');
   sounds.cue('start');
+  // The phone is the microphone: its next sentence is the command (no second microphone).
+  if (phoneLive()) {
+    phoneCommandUntil = Date.now() + 9000;
+    setTimeout(() => { if (phoneCommandUntil && Date.now() >= phoneCommandUntil) { phoneCommandUntil = 0; els.mic.classList.remove('recording'); } }, 9200);
+    return;
+  }
   try {
     const { wav, spoke } = await recorder.record((level) => els.micLevel.style.setProperty('--level', String(1 + level * 0.6)));
     els.mic.classList.remove('recording');
     sounds.cue('stop');
     if (!spoke) { bridge.note?.(`mic: no speech detected (${wav?.length || 0} bytes recorded)`); handle(brain.event('stt_empty')); return; }
-    showBubble('…', 'focused');
-    // The screenshot is taken now, while the words are being recognised (seconds saved).
-    if (mind?.on) bridge.mind?.prefetch?.();
-    const t0 = performance.now();
-    const res = await bridge.transcribe(wav, 'command');
-    if (res?.ok && res.text) showHeard(res.text, (performance.now() - t0) / 1000);
-    if (!res?.ok) { handle(brain.event(res?.error === 'stt_unavailable' ? 'stt_unavailable' : /^stt_failed/.test(res?.error || '') ? 'stt_failed' : 'stt_empty')); return; }
-    if (!res.text) { bridge.note?.('mic: speech recorded but whisper heard no words'); handle(brain.event('stt_empty')); return; }
-    els.input.value = res.text;
-    setTimeout(() => { if (els.input.value === res.text) els.input.value = ''; }, 2500);
-    hear(res.text);
+    await useCommandWav(wav);
   } catch (err) {
     els.mic.classList.remove('recording');
     console.warn('microphone error', err);
     bridge.note?.(`mic error: ${err?.name || ''} ${err?.message || err}`);
     handle(brain.event('mic_error'));
   }
+}
+
+/** A spoken command (from the button, the remote or the phone) → words → Khalfoun. */
+async function useCommandWav(wav) {
+  showBubble('…', 'focused');
+  // The screenshot is taken now, while the words are being recognised (seconds saved).
+  if (mind?.on) bridge.mind?.prefetch?.();
+  const t0 = performance.now();
+  const res = await bridge.transcribe(wav, 'command');
+  if (res?.ok && res.text) showHeard(res.text, (performance.now() - t0) / 1000);
+  if (!res?.ok) { handle(brain.event(res?.error === 'stt_unavailable' ? 'stt_unavailable' : /^stt_failed/.test(res?.error || '') ? 'stt_failed' : 'stt_empty')); return; }
+  if (!res.text) { bridge.note?.('mic: speech recorded but whisper heard no words'); handle(brain.event('stt_empty')); return; }
+  els.input.value = res.text;
+  setTimeout(() => { if (els.input.value === res.text) els.input.value = ''; }, 2500);
+  hear(res.text);
+}
+
+// ---------------------------------------------------------------- the phone as the microphone
+let phoneState = { connected: false, streaming: false };
+let phoneCommandUntil = 0;
+const phoneLive = () => phoneState.streaming && !preferredMicPresent;
+let preferredMicPresent = false; // a wireless microphone he chose is plugged in: it comes first
+function onPhoneStatus(st) {
+  const was = phoneLive();
+  phoneState = { connected: Boolean(st.connected), streaming: Boolean(st.streaming) };
+  const now = phoneLive();
+  if (now !== was) {
+    wake.useExternal(now);
+    bridge.note?.(now ? 'phone mic: listening through the phone' : 'phone mic: back to the computer microphone');
+  }
+  els.ear.classList.toggle('phone', now);
+  els.ear.hidden = !(wake.active || now);
+  renderPhone();
+}
+function onPhoneAudio(pcm) {
+  if (!phoneLive()) return;
+  const b = pcm instanceof Uint8Array ? pcm : new Uint8Array(pcm || []);
+  const i16 = new Int16Array(b.buffer, b.byteOffset, Math.floor(b.length / 2));
+  const f = new Float32Array(i16.length);
+  for (let i = 0; i < i16.length; i += 1) f[i] = i16[i] / 32768;
+  wake.feed(f);
+}
+function onPhoneSay(wav) {
+  if (panelsOpen()) return;
+  voiceOut.stop();
+  const b = wav instanceof Uint8Array ? wav : new Uint8Array(wav || []);
+  useCommandWav(b);
 }
 
 els.mic.addEventListener('click', listen);
@@ -1006,6 +1050,14 @@ setInterval(() => { if (sessionUntil && !inSession()) endSession('timeout'); }, 
 // Sentences heard while the previous one is still being read wait their turn (two at most).
 const wakeQueue = [];
 async function onWakeSentence(wav, head = wav, ms = 0) {
+  // He pressed the mic button or the remote while the phone is the microphone: this is it.
+  if (phoneCommandUntil && Date.now() < phoneCommandUntil) {
+    phoneCommandUntil = 0;
+    els.mic.classList.remove('recording');
+    sounds.cue('stop');
+    useCommandWav(wav);
+    return;
+  }
   // His own voice coming back through the speakers is not a command.
   if (recorder.active || panelsOpen() || voiceOut.speaking) return;
   // Did the ear hear his name during this sentence (or just before it)?
@@ -1315,6 +1367,8 @@ function openSettings(focus = null) {
   $('st-speak').checked = !!d.speak;
   $('st-listen').disabled = !voiceAvailable;
   renderRemote();
+  refreshMics();
+  renderPhone();
   refreshSetup().then(() => { if (focus === 'setup') $('su-title').scrollIntoView({ block: 'start', behavior: 'smooth' }); });
   renderLog();
   renderAliases();
@@ -1588,6 +1642,54 @@ $('rm-forget').addEventListener('click', async () => {
   if (r?.ok) { remoteKey = null; renderRemote('نسيت الزر.'); }
 });
 
+// ---------------------------------------------------------------- choosing the microphone
+async function refreshMics() {
+  const sel = $('mic-choice');
+  let mics = [];
+  try { mics = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications'); } catch { /* no devices */ }
+  const want = brain.memory.data.micId || '';
+  sel.replaceChildren(new Option('مايك الجهاز (الافتراضي)', ''), ...mics.map((d, i) => new Option(d.label || `مايك ${i + 1}`, d.deviceId)));
+  sel.value = mics.some((d) => d.deviceId === want) ? want : '';
+  preferredMicPresent = Boolean(want && mics.some((d) => d.deviceId === want));
+  setMicChoice(preferredMicPresent ? want : '');
+  if (preferredMicPresent && phoneState.streaming) onPhoneStatus(phoneState); // the wireless mic comes first
+}
+$('mic-choice').addEventListener('change', async () => {
+  brain.updateSettings({ micId: $('mic-choice').value });
+  await refreshMics();
+  // listen again through the chosen microphone
+  if (wake.active) { wake.stop(); updateWake(); }
+  onPhoneStatus(phoneState);
+});
+navigator.mediaDevices?.addEventListener?.('devicechange', () => { refreshMics().then(() => { if (wake.active) { wake.stop(); updateWake(); } onPhoneStatus(phoneState); }); });
+
+// ---------------------------------------------------------------- the phone page (QR code)
+async function renderPhone(info) {
+  if (info === undefined && !els.settings.hidden) info = await bridge.phone?.info?.().catch(() => null);
+  if (info === undefined) return;
+  const on = Boolean(info?.ok);
+  $('phone-on').hidden = on;
+  $('phone-off').hidden = !on;
+  $('phone-box').hidden = !on;
+  if (!on) return;
+  if (info.qr) $('phone-qr').src = info.qr;
+  $('phone-url').textContent = (info.urls || [info.url]).join('  ·  ');
+  $('phone-state').textContent = phoneLive() ? '✓ التلفون هو المايك الحين' : phoneState.connected ? '✓ التلفون متصل (فعّل «استماع دائم» في التلفون، أو اضغط الزر فيه وتكلم)' : preferredMicPresent && phoneState.streaming ? 'المايك اللاسلكي هو الأول، والتلفون احتياط' : 'امسح الرمز بالتلفون…';
+}
+$('phone-on').addEventListener('click', async () => {
+  $('phone-on').disabled = true;
+  const r = await bridge.phone?.start?.().catch(() => null);
+  $('phone-on').disabled = false;
+  if (!r?.ok) { $('phone-state').textContent = r?.error === 'no_network' ? 'الجهاز مو متصل بشبكة. وصّله بنقطة اتصال التلفون وجرب.' : 'ما قدرت أشغّل مايك التلفون.'; $('phone-box').hidden = false; return; }
+  await renderPhone(r);
+  $('phone-box').scrollIntoView({ block: 'center', behavior: 'smooth' });
+});
+$('phone-off').addEventListener('click', async () => {
+  await bridge.phone?.stop?.();
+  onPhoneStatus({ connected: false, streaming: false });
+  renderPhone({ ok: false });
+});
+
 $('st-listen').addEventListener('change', () => {
   brain.updateSettings({ alwaysListen: $('st-listen').checked });
   updateWake();
@@ -1786,6 +1888,9 @@ async function start() {
         updateWake();
         break;
       case 'ear-progress': earTrainer.progress(ev); break;
+      case 'phone-status': onPhoneStatus(ev); break;
+      case 'phone-audio': onPhoneAudio(ev.pcm); break;
+      case 'phone-say': onPhoneSay(ev.wav); break;
       case 'wake-limit':
         showBubble(`خلص وقت سماع «يا خلفون» لليوم. ${fallbackHint()}، وبكرة يرجع السماع.`, 'sorry', true);
         break;
@@ -1829,12 +1934,13 @@ async function start() {
   sounds.setEnabled(brain.memory.data.sounds !== false);
   updateWake();
   loadEar(); // Khalfoun's own ear, if one has been trained for this teacher
+  refreshMics(); // a wireless microphone he chose comes first
   updateWindowWatch();
   if (!brain.memory.data.onboarded) startOnboarding();
   else handle(brain.start());
 
   // Hooks for automated UI tests and debugging.
-  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, ink, startSession, endSession, onWakeSentence, get inSession() { return inSession(); }, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut, get mind() { return mind; }, renderMind, get ear() { return ear; }, get earError() { return earError; }, loadEar, onEarAudio, earTrainer, endFollow: () => { followUntil = 0; } };
+  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, ink, startSession, endSession, onWakeSentence, get inSession() { return inSession(); }, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut, get mind() { return mind; }, renderMind, get ear() { return ear; }, get earError() { return earError; }, onPhoneStatus, onPhoneAudio, onPhoneSay, get phoneLive() { return phoneLive(); }, loadEar, onEarAudio, earTrainer, endFollow: () => { followUntil = 0; } };
   document.documentElement.dataset.ready = '1';
 }
 

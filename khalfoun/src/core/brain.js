@@ -182,6 +182,8 @@ export class Brain {
     if ('kidsMode' in patch) allowed.kidsMode = !!patch.kidsMode;
     if ('humor' in patch) allowed.humor = Math.min(2, Math.max(0, Number(patch.humor) || 0));
     if ('alwaysListen' in patch) allowed.alwaysListen = !!patch.alwaysListen;
+    // The microphone he chose (a wireless one): a browser device id, kept as an opaque string.
+    if ('micId' in patch) allowed.micId = typeof patch.micId === 'string' ? patch.micId.slice(0, 200) : '';
     this.memory.set(allowed);
     if ('level' in allowed) return this.reply('level_set', { vars: { level: LEVEL_INFO[allowed.level].name } });
     return null;

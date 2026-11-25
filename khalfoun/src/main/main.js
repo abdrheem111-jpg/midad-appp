@@ -34,6 +34,10 @@ import { createClaudeMind } from './brain/index.js';
 import { FG_SCRIPT } from './foreground-script.js';
 import { REMOTE_ACCEL } from '../core/remote-keys.js';
 import { EAR_KINDS, EAR_VOICES, earTtsPlan } from '../core/ear-plan.js';
+import { createPhoneMic } from './phone-mic.js';
+import { request as httpsRequest } from 'node:https';
+import selfsigned from 'selfsigned';
+import QRCode from 'qrcode';
 import { Notebook } from '../core/notebook.js';
 import { OfficeHost } from './office/office-host.js';
 import { createOfficeActions } from './office/index.js';
@@ -348,6 +352,7 @@ function registerShortcuts() {
 }
 
 // The teacher's presenter remote: one learned button makes Khalfoun listen, from anywhere.
+let phoneMic = null;
 let remoteAccel = null;
 let remoteLast = 0;
 function registerRemote(accel) {
@@ -817,6 +822,36 @@ function setupIpc(stores, executor) {
       return { ok: true, made, failed, voices: EAR_VOICES.length - skipVoices.size };
     } finally { earTtsRunning = false; }
   });
+
+  // ----- the teacher's phone as a wireless microphone (only while he turns it on)
+  phoneMic = createPhoneMic({
+    dir: app.getPath('userData'),
+    pagePath: join(ROOT, 'src', 'phone', 'index.html'),
+    makeCert: (attrs, opts) => selfsigned.generate(attrs, opts),
+    toQr: (url) => QRCode.toDataURL(url, { margin: 1, width: 280, errorCorrectionLevel: 'M' }),
+    onAudio: (pcm) => send('phone-audio', { pcm }),
+    onSay: (wav) => { if (win) win.showInactive(); send('phone-say', { wav }); },
+    onStatus: (st) => { diag.write('phone mic', st); send('phone-status', st); },
+    log: (...a) => diag.write(...a),
+  });
+  const phoneAnswer = async () => {
+    const info = await phoneMic.info();
+    return info.ok ? info : { ok: false, error: info.error };
+  };
+  ipcMain.handle('phone:start', async (event) => {
+    if (!fromApp(event)) return { ok: false, error: 'forbidden' };
+    const r = await phoneMic.start().catch((err) => ({ ok: false, error: String(err?.message || err) }));
+    if (r.ok) { settings = { ...settings, phoneMic: true }; await stores.settings.write(settings); }
+    return r.ok ? phoneAnswer() : r;
+  });
+  ipcMain.handle('phone:stop', async (event) => {
+    if (!fromApp(event)) return { ok: false };
+    phoneMic.stop();
+    settings = { ...settings, phoneMic: false }; await stores.settings.write(settings);
+    return { ok: true };
+  });
+  ipcMain.handle('phone:info', async (event) => (fromApp(event) ? phoneAnswer() : null));
+  if (settings.phoneMic && !SMOKE) phoneMic.start().catch((err) => diag.write('phone mic failed to start', String(err?.message || err)));
 
   // ----- the presenter remote: learn one button (the page sends the key it saw), or forget it
   ipcMain.handle('remote:set', async (event, accel) => {
@@ -1456,6 +1491,21 @@ async function runSmokeTest(stores) {
       step('Khalfoun\'s own ear loads in the app and scores sound like the training code', typeof best === 'number' && Math.abs(best - expected) < 2e-3, { best, expected, error: await js('window.__khalfoun.earError') });
       await rm(earDir, { recursive: true, force: true });
     }
+    // The phone microphone: Khalfoun's own certificate, the QR code and the page with its key.
+    {
+      const ph = await js('window.khalfoun.phone.start()');
+      let page = null;
+      if (ph?.ok) {
+        const local = ph.url.replace(/^https:\/\/[^/:]+/, 'https://127.0.0.1');
+        page = await new Promise((resolve) => {
+          const req = httpsRequest(local, { rejectUnauthorized: false }, (res) => { let t = ''; res.on('data', (c) => { t += c; }); res.on('end', () => resolve({ status: res.statusCode, ok: /مايك خلفون/.test(t) })); });
+          req.on('error', (err) => resolve({ error: err.message }));
+          req.end();
+        });
+      }
+      step('the phone microphone page is served with its pairing key (or no network on this machine)', (ph?.ok && /^data:image\/png/.test(ph.qr || '') && page?.status === 200 && page.ok) || ph?.error === 'no_network', { url: ph?.url, error: ph?.error, page });
+      await js('window.khalfoun.phone.stop()');
+    }
     if (process.env.KHALFOUN_SMOKE_TOOLSHOTS) {
       for (const tool of ['board', 'notebook', 'reading']) {
         if (!toolWindows[tool]) continue;
@@ -1653,6 +1703,7 @@ if (!app.requestSingleInstanceLock()) {
     if (fgHelper) { try { fgHelper.child.kill(); } catch { /* gone */ } }
     officeHost?.stop();
     handsHost?.stop();
+    phoneMic?.stop();
     mind?.close();
     if (watcher) watcher.stop();
     if (reminderScheduler) reminderScheduler.stop();
