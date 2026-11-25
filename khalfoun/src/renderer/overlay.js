@@ -909,11 +909,15 @@ const wake = new WakeListener({
     console.warn('wake listener stopped', err);
     bridge.note?.(`wake listener stopped: ${err?.message || err}`);
     wakeFailures += 1;
-    if (wakeFailures === 3) handle(brain.event('mic_error'));
+    if (wakeFailures === 3) { handle(brain.event('mic_error')); setTimeout(() => showBubble(`${fallbackHint()}.`, 'sorry', true), 4000); }
     setTimeout(() => updateWake(), Math.min(60000, 5000 * wakeFailures));
   },
 });
 let wakeFailures = 0;
+let wakeCloudFails = 0;
+let fallbackToldAt = 0;
+/** The other way to make him listen: the remote's button if one was learned, else the shortcut. */
+const fallbackHint = () => (remoteKey ? 'اضغط زر الريموت وأنا أسمعك' : 'اضغط زر المايك أو Ctrl+Shift+Space وأنا أسمعك');
 
 // ---------------------------------------------------------------- Khalfoun's own ear
 // A small model trained on the teacher's voice, listening on this computer for «يا خلفون».
@@ -1047,6 +1051,15 @@ async function readWakeSentence(wav, head = wav, meta = {}) {
   }
   // Outside a session only the first seconds are checked for «يا خلفون» (a fraction of the cost).
   let res = await bridge.transcribe(session ? wav : head, session ? 'command' : 'wake');
+  // The call is the first way; when hearing keeps failing (no internet, the service slow), he
+  // is reminded of the fallback: the remote's button (or the keyboard shortcut), once an hour.
+  if (!res?.ok) {
+    wakeCloudFails += 1;
+    if (wakeCloudFails >= 3 && Date.now() - fallbackToldAt > 3600000) {
+      fallbackToldAt = Date.now();
+      showBubble(`ما أقدر أسمع ندائي زين الحين (يمكن الإنترنت). ${fallbackHint()}.`, 'sorry', true);
+    }
+  } else wakeCloudFails = 0;
   if (ear && !session) bridge.note?.(`ear check: peak ${peak === null ? '-' : peak.toFixed(2)} ${meta.earHit ? 'HIT' : 'no'} → «${res?.text || ''}» ${findWakeWord(res?.text || '').found ? 'NAME' : 'other'}`);
   if (ear?.mode === 'on' && meta.earHit && !session && res?.ok && !res.text) {
     // The cloud gave nothing back (its daily time is up): the ear heard him, so trust it.
@@ -1774,7 +1787,7 @@ async function start() {
         break;
       case 'ear-progress': earTrainer.progress(ev); break;
       case 'wake-limit':
-        showBubble('خلص وقت سماع «يا خلفون» لليوم. الأوامر تشتغل بالزر أو Ctrl+Shift+Space، وبكرة يرجع السماع.', 'sorry', true);
+        showBubble(`خلص وقت سماع «يا خلفون» لليوم. ${fallbackHint()}، وبكرة يرجع السماع.`, 'sorry', true);
         break;
       case 'chat-ready':
         chatInfo = { available: !!ev.available, model: ev.model || null, vision: ev.vision || null };

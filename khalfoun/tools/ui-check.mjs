@@ -1042,6 +1042,11 @@ await check('R: the presenter remote: one press teaches Khalfoun its button; typ
   assert(await opage.evaluate(() => window.__remotePaused === false), 'remote not resumed');
   assert(!(await opage.locator('#rm-forget').isHidden()), 'no forget button');
   await opage.screenshot({ path: `${outDir}/r1-remote.png` });
+  // the call comes first; when it cannot be heard, he is pointed to the remote's button
+  await opage.evaluate(() => { window.__khalfoun.closeSettings?.(); window.__khalfoun.bridge._emit({ type: 'wake-limit' }); });
+  await untilOn(opage, () => /الريموت/.test(document.getElementById('bubble-text').textContent), 8000);
+  await opage.evaluate(() => window.__khalfoun.bridge._emit({ type: 'open-settings' }));
+  await opage.waitForTimeout(300);
   await opage.click('#rm-forget');
   await opage.waitForTimeout(200);
   assert((await opage.evaluate(() => window.__remoteCalls)).at(-1) === null, 'not forgotten');
