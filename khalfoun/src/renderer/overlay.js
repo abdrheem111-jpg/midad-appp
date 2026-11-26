@@ -21,6 +21,10 @@ import { NameWheel, RaceBoard, NoiseGauge, CameraPanel, VoiceTestPanel } from '.
 import { EarTrainerPanel } from './ear-ui.js';
 import { EarStream, EarTrigger } from './ear-model.js';
 import { ScreenFx } from './screen-fx.js';
+import { CameraPick } from './camera-pick.js';
+import { StepsDeck, stepWord } from './steps.js';
+import { DocView } from './doc-view.js';
+import { GraphPanel } from './graph-panel.js';
 import { GUIDE } from '../core/guide.js';
 import { STAR_MILESTONES as STAR_STEPS } from '../core/classfun.js';
 import { InkLayer } from './ink.js';
@@ -28,7 +32,7 @@ import { COLORS } from '../core/office-plan.js';
 import { normalize } from '../core/arabic.js';
 import { MindClient } from './mind-ui.js';
 import { remoteKeyFrom, REMOTE_REFUSAL } from '../core/remote-keys.js';
-import { VOICE_CHOICES, VOICE_IDS } from '../core/speech-text.js';
+import { VOICE_CHOICES, VOICE_IDS, stripTashkeel } from '../core/speech-text.js';
 
 const CHAR_W = 170;
 const CHAR_H = 209;
@@ -83,6 +87,8 @@ let bubbleShownAt = -1e9; // his little chatter sounds follow a new bubble for a
 let framesThisSecond = 0; // drawing health, reported in the diagnostics log
 
 function showBubble(text, mood, long = false) {
+  // «خبّي الفقاعة» from his phone: Khalfoun still acts and talks, without the box of words.
+  if (bubbleHidden) { els.bubble.hidden = true; return; }
   clearTimeout(bubbleTimer);
   clearInterval(typeTimer);
   els.bubble.hidden = false;
@@ -236,7 +242,7 @@ function handle(reply) {
 
 const voiceOut = new VoiceOut();
 // Playful effects on any piece of the screen (a question crumpled into a ball…).
-const screenFx = new ScreenFx(document.body, { celebrate: (kind, x, y) => { if (kind === 'pop') sounds.cue?.('pop'); void x; void y; } });
+const screenFx = new ScreenFx(document.body, { celebrate: (kind) => { if (kind === 'pop') sounds.now('pop'); } });
 // While he speaks, the always-on listener pauses so he does not hear himself.
 // While he speaks, his own voice must not come back as a command (also through the phone).
 voiceOut.onStart = () => { if (wake.active || wake.external) wake.pause(); };
@@ -309,6 +315,109 @@ const voiceTest = new VoiceTestPanel({
   onClose: () => {},
   note: (t) => bridge.note?.(t),
 });
+
+// ---------------------------------------------------------------- the phone's control buttons
+let bubbleHidden = false;
+let phoneMuted = false;
+let voiceBeforeMute = null;
+const stepsDeck = new StepsDeck({
+  ink,
+  say: (t) => { showBubble(stripTashkeel(t), 'focused'); if (voiceOut.enabled) voiceOut.speak(t); },
+  onChange: (st) => { pushPhoneState(); bridge.steps?.keys(st.active); },
+});
+const docView = new DocView(document.body);
+const graphPanel = new GraphPanel(document.body);
+function pushPhoneState() {
+  const st = stepsDeck?.state?.() || { step: 0, steps: 0 };
+  bridge.phone?.state?.({ muted: phoneMuted, bubbleHidden, step: st.step, steps: st.steps });
+}
+function setMuted(on) {
+  if (on === phoneMuted) return;
+  phoneMuted = on;
+  if (on) { voiceBeforeMute = voiceOut.enabled; voiceOut.stop(); voiceOut.setEnabled(false); }
+  else voiceOut.setEnabled(voiceBeforeMute ?? Boolean(brain.memory.data.speak));
+  els.stage?.classList.toggle('muted', on);
+  pushPhoneState();
+}
+function setBubbleHidden(on) {
+  bubbleHidden = on;
+  if (on) els.bubble.hidden = true;
+  pushPhoneState();
+}
+function onPhoneCommand(name) {
+  bridge.note?.(`phone button: ${name}`);
+  switch (name) {
+    case 'step_next': if (!stepsDeck.next()) showBubble('ما فيه خطوات الحين. قول لخلفون «حل المسألة خطوة خطوة».', 'calm'); break;
+    case 'step_back': stepsDeck.back(); break;
+    case 'mute': setMuted(!phoneMuted); break;
+    case 'bubble': setBubbleHidden(!bubbleHidden); break;
+    case 'random_student': handle(brain.hear('اختار طالب عشوائي')); break;
+    case 'timer_1': handle(brain.hear('مؤقت دقيقة')); break;
+    case 'timer_3': handle(brain.hear('مؤقت ٣ دقايق')); break;
+    case 'timer_5': handle(brain.hear('مؤقت ٥ دقايق')); break;
+    case 'celebrate': effects.play('confetti'); animator.play('celebrate'); break;
+    case 'fireworks': effects.play('fireworks'); animator.play('celebrate'); break;
+    case 'clear': ink.clear(); screenFx.clear(); docView.close(); graphPanel.close(); stepsDeck.end(); break;
+    case 'stop': mind?.busy && bridge.mind?.stop?.(); voiceOut.stop(); cameraPick.close(); break;
+    default: break;
+  }
+  pushPhoneState();
+}
+const blobToBase64 = (blob) => new Promise((resolve) => { const r = new FileReader(); r.onload = () => resolve(String(r.result).split(',')[1] || ''); r.onerror = () => resolve(''); r.readAsDataURL(blob); });
+async function onPhonePhoto(purpose, bytes) {
+  const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+  const mime = b[0] === 0x89 ? 'image/png' : 'image/jpeg';
+  const blob = new Blob([b], { type: mime });
+  if (purpose === 'pick') { pickWithCamera({ blob }); return; }
+  if (purpose === 'doc') { docView.show(blob); showBubble('هذا دفتر الطالب 📖 تقدر تكتب فوقه بالقلم، أو قول لي «علّق على الحل».', 'happy'); return; }
+  if (!mind?.on) { showBubble('التصحيح بالصور يحتاج مخ Claude شغال من الإعدادات.', 'sorry', true); return; }
+  const image = { data: await blobToBase64(blob), mime };
+  if (purpose === 'key') {
+    mind.ask('[صورة نموذج الإجابة من جوال المعلم] احفظ الإجابات الصحيحة اللي في هالصورة عشان تصحّح عليها أوراق الطلاب الجاية. رد بجملة قصيرة: كم سؤال حفظت.', { via: 'typed', silent: true, image });
+  } else {
+    mind.ask('[صورة ورقة طالب من جوال المعلم] صحّحها: إذا حفظت نموذج إجابة صحّح عليه، وإلا حل الأسئلة بنفسك بدقة. اكتب في ردك: اسم الطالب إذا مكتوب، والدرجة من المجموع، وكل خطأ في سطر قصير مع الجواب الصحيح. هذا للمعلم بس.', { via: 'typed', silent: true, image });
+  }
+}
+
+// «اختار طالب بالكاميرا»: faces found on this computer, a light lands on one student.
+let facesSession = null;
+let ortMod = null;
+const cameraPick = new CameraPick({
+  session: async () => {
+    ortMod = await loadOrt();
+    facesSession ??= await ortMod.InferenceSession.create(new Uint8Array(await (await fetch(new URL('../../assets/faces/yunet-2023mar.onnx', import.meta.url))).arrayBuffer()), { executionProviders: ['wasm'] });
+    return facesSession;
+  },
+  Tensor: () => ortMod.Tensor,
+  level: () => brain.memory.data.pickLevel || 'high',
+  cue: (n) => sounds.now(n === 'tick' ? 'tick' : 'yay'),
+  celebrate: () => effects.play('confetti'),
+  say: (t) => { if (voiceOut.enabled) voiceOut.speak(t); },
+  onOpen: () => { closeCommand(); setInteractive(true); },
+  onClose: () => { if (!panelsOpen()) setInteractive(false); },
+  note: (t) => bridge.note?.(t),
+});
+/** A photo from the computer's own camera (for the pick when there is no phone photo). */
+async function webcamPhoto() {
+  let stream = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    const v = document.createElement('video');
+    v.muted = true; v.playsInline = true; v.srcObject = stream;
+    await v.play();
+    await new Promise((r) => setTimeout(r, 900)); // let the camera settle its light
+    const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+    c.getContext('2d').drawImage(v, 0, 0);
+    return c.toDataURL('image/jpeg', 0.9);
+  } catch { return null; } finally { stream?.getTracks().forEach((t) => t.stop()); }
+}
+async function pickWithCamera(src) {
+  if (src?.blob) return cameraPick.pick(src);
+  const shot = await webcamPhoto();
+  if (shot) return cameraPick.pick({ image: shot });
+  showBubble('ما فيه كاميرا في الجهاز. صوّر الصف من الجوال بزر 🎯 في صفحة المايك.', 'sorry', true);
+  return null;
+}
 
 // «علّم خلفون صوتك»: recordings for Khalfoun's own ear (stay on this computer).
 const earTrainer = new EarTrainerPanel({
@@ -614,6 +723,9 @@ function hear(text, opts = {}) {
   const t = String(text || '').trim();
   if (!t) return;
   if (!opts.viaAgent) heardSeq += 1;
+  // «كمل» / «ارجع» while the steps of a solution are showing: at once, no thinking needed.
+  const sw = stepsDeck.active ? stepWord(normalize(t)) : null;
+  if (sw) { bridge.note?.(`heard «${t}» → step ${sw}`); if (sw === 'next') stepsDeck.next(); else stepsDeck.back(); return; }
   if (mind?.on && !opts.viaAgent && !opts.local) {
     const quick = recognize(t);
     if (!(quick && INSTANT.has(quick.intent) && quick.confidence >= 0.9) || mind.question) {
@@ -623,7 +735,7 @@ function hear(text, opts = {}) {
       // and the keyboard goes back to the program the teacher was in (Word, a PDF…).
       if (!els.command.hidden) closeCommand({ forceGiveBack: true });
       if (!ink.pen && !panelsOpen()) setInteractive(false);
-      mind.ask(t, { via: opts.typed ? 'typed' : 'voice', session: Boolean(opts.session) }).then((took) => { if (!took) hear(t, { ...opts, local: true }); });
+      mind.ask(t, { via: opts.typed ? 'typed' : 'voice', session: Boolean(opts.session), silent: Boolean(opts.silent) }).then((took) => { if (!took) hear(t, { ...opts, local: true }); });
       return;
     }
   }
@@ -974,13 +1086,21 @@ const fallbackHint = () => (remoteKey ? 'اضغط زر الريموت وأنا �
 let ear = null;
 let earError = null;
 const cloudHearsNow = () => Boolean((cloudInfo?.azure || cloudInfo?.gemini) && cloudInfo.use?.hear !== false);
+// The ONNX runtime (WebAssembly, one thread), shared by his ear and the faces finder.
+let ortP = null;
+function loadOrt() {
+  ortP ??= import('../../node_modules/onnxruntime-web/dist/ort.wasm.min.mjs').then((ort) => {
+    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.wasmPaths = new URL('../../node_modules/onnxruntime-web/dist/', import.meta.url).href;
+    return ort;
+  });
+  return ortP;
+}
 async function loadEar() {
   const m = await bridge.ear?.models?.().catch(() => null);
   if (!m?.cls) return;
   try {
-    const ort = await import('../../node_modules/onnxruntime-web/dist/ort.wasm.min.mjs');
-    ort.env.wasm.numThreads = 1;
-    ort.env.wasm.wasmPaths = new URL('../../node_modules/onnxruntime-web/dist/', import.meta.url).href;
+    const ort = await loadOrt();
     const stream = await EarStream.create(ort, m);
     ear = { stream, trigger: new EarTrigger(m.config), mode: m.config.mode, hitAt: 0, steps: 0, ms: 0, version: m.config.version };
     bridge.note?.(`ear ready: ${ear.mode}, threshold ${m.config.threshold}, ${m.config.version || 'no version'}`);
@@ -1198,7 +1318,7 @@ function setInteractive(on) {
   bridge.setInteractive(on);
 }
 
-const panelsOpen = () => !els.onboarding.hidden || !els.settings.hidden || !$('guide').hidden || cameraPanel.open || voiceTest.open || earTrainer.open;
+const panelsOpen = () => !els.onboarding.hidden || !els.settings.hidden || !$('guide').hidden || cameraPanel.open || voiceTest.open || earTrainer.open || cameraPick.open;
 
 let lastMouseX = null;
 document.addEventListener('mousemove', (e) => {
@@ -1263,6 +1383,7 @@ document.addEventListener('keydown', (e) => {
     else if (cameraPanel.open) cameraPanel.close();
     else if (voiceTest.open) voiceTest.close();
     else if (earTrainer.open) earTrainer.close();
+    else if (cameraPick.open) cameraPick.close();
     else if (!$('guide').hidden) hideGuide();
     else if (!els.settings.hidden) closeSettings();
     else closeCommand();
@@ -1892,7 +2013,7 @@ async function start() {
 
   voiceOut.setEnabled(!!brain.memory.data.speak);
   mind = new MindClient({
-    bridge, brain, ink, character, animator, sounds, voiceOut, showBubble, screenFx, effects,
+    bridge, brain, ink, character, animator, sounds, voiceOut, showBubble, screenFx, effects, pickWithCamera, stepsDeck, docView, graphPanel,
     recorderActive: () => recorder.active,
     localHear: (cmd, o = {}) => {
       // Claude's «classroom» tool is for the games and class tools only: opening a program or a
@@ -1945,6 +2066,10 @@ async function start() {
       case 'phone-status': onPhoneStatus(ev); break;
       case 'phone-audio': onPhoneAudio(ev.pcm); break;
       case 'phone-say': onPhoneSay(ev.wav); break;
+      case 'phone-cmd': onPhoneCommand(ev.name); break;
+      case 'phone-whisper': hear(String(ev.text || ''), { typed: true, silent: true }); break;
+      case 'phone-photo': onPhonePhoto(ev.purpose, ev.photo); break;
+      case 'steps-key': if (ev.dir === 'back') stepsDeck.back(); else stepsDeck.next(); break;
       case 'wake-limit':
         showBubble(`خلص وقت سماع «يا خلفون» لليوم. ${fallbackHint()}، وبكرة يرجع السماع.`, 'sorry', true);
         break;
@@ -1994,7 +2119,7 @@ async function start() {
   else handle(brain.start());
 
   // Hooks for automated UI tests and debugging.
-  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, ink, startSession, endSession, onWakeSentence, get inSession() { return inSession(); }, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut, get mind() { return mind; }, renderMind, screenFx, get ear() { return ear; }, get earError() { return earError; }, onPhoneStatus, onPhoneAudio, onPhoneSay, get phoneLive() { return phoneLive(); }, loadEar, onEarAudio, earTrainer, endFollow: () => { followUntil = 0; } };
+  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, ink, startSession, endSession, onWakeSentence, get inSession() { return inSession(); }, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut, get mind() { return mind; }, renderMind, screenFx, cameraPick, pickWithCamera, stepsDeck, docView, graphPanel, showBubble, voiceOut, onPhoneCommand, onPhonePhoto, get phoneMuted() { return phoneMuted; }, get bubbleHidden() { return bubbleHidden; }, get ear() { return ear; }, get earError() { return earError; }, onPhoneStatus, onPhoneAudio, onPhoneSay, get phoneLive() { return phoneLive(); }, loadEar, onEarAudio, earTrainer, endFollow: () => { followUntil = 0; } };
   document.documentElement.dataset.ready = '1';
 }
 

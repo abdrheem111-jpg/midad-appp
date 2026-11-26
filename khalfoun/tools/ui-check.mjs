@@ -1206,6 +1206,66 @@ await check('F: playful effects on a piece of the screen, «شو تعلّم خل
   await opage.evaluate(() => document.getElementById('st-close').click());
 });
 
+await check('C: phone buttons (steps, mute, hide the bubble), camera pick, notebook, live graph', async () => {
+  // steps moved from the phone; its buttons show where we are
+  await opage.evaluate(() => window.__khalfoun.stepsDeck.start({ title: 'حل', steps: [
+    { shapes: [{ type: 'text', x: 600, y: 200, text: '٢س = ٨', size: 36, digits: 'arabic' }], say: 'أول خطوة' },
+    { shapes: [{ type: 'text', x: 600, y: 260, text: 'س = ٤', size: 36, digits: 'arabic' }], say: 'ثاني خطوة' },
+  ] }));
+  assert(await opage.evaluate(() => window.__stepKeys === true), 'page keys not taken for the steps');
+  await opage.evaluate(() => window.__khalfoun.onPhoneCommand('step_next'));
+  assert((await opage.evaluate(() => window.__phoneState)).step === 2, 'phone does not see step 2');
+  await opage.evaluate(() => window.__khalfoun.onPhoneCommand('step_back'));
+  assert((await opage.evaluate(() => window.__phoneState)).step === 1, 'back did not work');
+  // «كمل» said aloud moves on without asking Claude
+  await opage.evaluate(() => window.__khalfoun.hear('كمل'));
+  assert((await opage.evaluate(() => window.__khalfoun.stepsDeck.state())).step === 2, '«كمل» did not move the steps');
+  await opage.evaluate(() => window.__khalfoun.onPhoneCommand('clear'));
+  assert(await opage.evaluate(() => window.__stepKeys === false), 'page keys not given back');
+  // mute and hide the bubble
+  await opage.evaluate(() => window.__khalfoun.onPhoneCommand('mute'));
+  assert(await opage.evaluate(() => window.__khalfoun.phoneMuted && !window.__khalfoun.voiceOut?.enabled !== false), 'not muted');
+  await opage.evaluate(() => window.__khalfoun.onPhoneCommand('bubble'));
+  await opage.evaluate(() => window.__khalfoun.showBubble?.('لازم ما تبين', 'calm'));
+  assert(await opage.locator('#bubble').isHidden(), 'bubble still shows');
+  await opage.evaluate(() => { window.__khalfoun.onPhoneCommand('bubble'); window.__khalfoun.onPhoneCommand('mute'); });
+  assert(!(await opage.evaluate(() => window.__khalfoun.phoneMuted)), 'not unmuted');
+  // camera pick with a found set of faces (the faces finder itself is tested in Node)
+  const chosen = await opage.evaluate(async () => {
+    const cp = window.__khalfoun.cameraPick;
+    const n = 400; const cell = (st) => (640 / st) ** 2;
+    const out = {};
+    for (const st of [8, 16, 32]) { out[`cls_${st}`] = { data: new Float32Array(cell(st)) }; out[`obj_${st}`] = { data: new Float32Array(cell(st)) }; out[`bbox_${st}`] = { data: new Float32Array(cell(st) * 4) }; out[`kps_${st}`] = { data: new Float32Array(cell(st) * 10) }; }
+    for (const i of [45, 49, 53, 57, 125, 129, 133]) { out.cls_32.data[i] = 0.95; out.obj_32.data[i] = 0.95; }
+    cp.d.session = async () => ({ run: async () => out });
+    cp.d.Tensor = () => function Tensor() {};
+    cp.d.level = () => 'normal';
+    const c = document.createElement('canvas'); c.width = 640; c.height = 400; const x = c.getContext('2d'); x.fillStyle = '#8a9'; x.fillRect(0, 0, 640, 400);
+    void n;
+    const f = await cp.pick({ image: c.toDataURL() });
+    return f ? { rings: document.querySelectorAll('.cp-ring').length, chosen: document.querySelectorAll('.cp-ring.chosen').length } : null;
+  });
+  assert(chosen && chosen.rings >= 3 && chosen.chosen === 1, JSON.stringify(chosen));
+  await opage.screenshot({ path: `${outDir}/c1-camera-pick.png` });
+  await opage.evaluate(() => window.__khalfoun.cameraPick.close());
+  // a notebook photo from the phone, shown big under the ink
+  await opage.evaluate(async () => {
+    const c = document.createElement('canvas'); c.width = 300; c.height = 200; c.getContext('2d').fillRect(10, 10, 100, 100);
+    const b = await new Promise((r) => c.toBlob(r, 'image/png'));
+    await window.__khalfoun.onPhonePhoto('doc', new Uint8Array(await b.arrayBuffer()));
+  });
+  assert(await opage.locator('.doc-view').count() === 1, 'notebook not shown');
+  await opage.evaluate(() => window.__khalfoun.onPhoneCommand('clear'));
+  assert(await opage.locator('.doc-view').count() === 0, 'notebook not cleared');
+  // a live graph
+  const g = await opage.evaluate(() => window.__khalfoun.graphPanel.show({ functions: [{ expr: 'ص = س² − ٤' }], roots: true, digits: 'arabic' }));
+  assert(g.ok, JSON.stringify(g));
+  assert(!(await opage.evaluate(() => window.__khalfoun.graphPanel.show({ functions: [{ expr: 'x+' }] }))).ok, 'a broken function was drawn');
+  await opage.waitForTimeout(1300);
+  await opage.screenshot({ path: `${outDir}/c2-graph.png` });
+  await opage.evaluate(() => window.__khalfoun.graphPanel.close());
+});
+
 await browser.close();
 server.close();
 if (problems.length) {

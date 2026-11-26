@@ -763,3 +763,26 @@ test('persona: playful effects and learning the teacher are part of how Khalfoun
   const p = personaPrompt({});
   for (const must of ['screen_fx', 'crumple', 'learn', 'تتعلّم المعلم']) assert.ok(p.includes(must), must);
 });
+
+test('graph, steps and camera_pick tools: checked here, drawn by the page', async () => {
+  const { tools, ui } = toolsWith();
+  const g = await tools.graph.handler({ functions: [{ expr: 'x^2 - 4', color: 'red' }], roots: true, animate: { param: 'a', from: 1, to: 3 } });
+  assert.match(g.content[0].text, /رسمت/);
+  const [k, p] = ui.at(-1);
+  assert.equal(k, 'graph');
+  assert.match(p.functions[0].color, /^#[0-9A-F]{6}$/i);
+  assert.equal(p.digits, 'arabic');
+  const bad = await tools.graph.handler({ functions: [{ expr: 'process.exit()' }] });
+  assert.equal(bad.isError, true);
+  assert.equal(ui.at(-1)[0], 'graph'); // nothing new was sent for the bad one
+  assert.equal(ui.length, 1);
+  const s = await tools.steps.handler({ title: 'حل', steps: [{ items: [{ type: 'text', x: 784, y: 441, text: '2x = 8' }], say: 'x = 4' }, { say: 'خلصنا' }] });
+  assert.match(s.content[0].text, /2|٢/);
+  const deck = ui.at(-1)[1];
+  assert.equal(deck.steps.length, 2);
+  assert.equal(deck.steps[0].shapes[0].text, '٢س = ٨');
+  assert.deepEqual({ x: deck.steps[0].shapes[0].x, y: deck.steps[0].shapes[0].y }, { x: 640, y: 360 });
+  assert.equal(deck.steps[0].say, 'س = ٤');
+  await tools.camera_pick.handler({});
+  assert.deepEqual(ui.at(-1), ['pick', {}]);
+});

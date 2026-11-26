@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld('khalfoun', {
     start: () => ipcRenderer.invoke('phone:start'),
     stop: () => ipcRenderer.invoke('phone:stop'),
     info: () => ipcRenderer.invoke('phone:info'),
+    state: (st) => ipcRenderer.send('phone:state', st && typeof st === 'object' ? st : {}),
+  },
+  steps: {
+    keys: (on) => ipcRenderer.send('steps:keys', on === true),
   },
   remote: {
     set: (accel) => ipcRenderer.invoke('remote:set', accel === null ? null : String(accel || '').slice(0, 40)),
@@ -42,7 +46,7 @@ contextBridge.exposeInMainWorld('khalfoun', {
     signIn: () => ipcRenderer.invoke('mind:signin'),
     code: (c) => ipcRenderer.invoke('mind:code', String(c || '').slice(0, 500)),
     signOut: () => ipcRenderer.invoke('mind:signout'),
-    ask: (text, context) => ipcRenderer.invoke('mind:ask', { text: String(text || '').slice(0, 3000), context: context && typeof context === 'object' ? context : {} }),
+    ask: (text, context, image) => ipcRenderer.invoke('mind:ask', { text: String(text || '').slice(0, 3000), context: context && typeof context === 'object' ? context : {}, image: image && typeof image === 'object' ? { data: String(image.data || ''), mime: String(image.mime || '') } : null }),
     stop: () => ipcRenderer.send('mind:stop'),
     prefetch: () => ipcRenderer.send('mind:prefetch'),
     learned: () => ipcRenderer.invoke('mind:learned'),

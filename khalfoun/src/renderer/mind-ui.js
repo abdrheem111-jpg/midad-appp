@@ -61,7 +61,7 @@ export class MindClient {
     // The bubble without tashkeel; the voice with it (Claude writes it for a correct reading).
     const shown = stripTashkeel(t);
     this.d.showBubble(shown, this.mood, long || shown.length > 140);
-    if (this.d.voiceOut.enabled) this.speech.push(t);
+    if (this.d.voiceOut.enabled && !this.silent) this.speech.push(t);
   }
 
   speakNext() {
@@ -102,10 +102,12 @@ export class MindClient {
     this.feel('thinking');
     const thinking = setTimeout(() => { if (this.busy && !this.spoken) this.d.showBubble('…', 'focused'); }, 900);
     const m = this.d.brain.memory.data;
+    // a whispered command (typed on his phone): the answer is shown, not spoken
+    this.silent = Boolean(opts.silent);
     const res = await this.d.bridge.mind.ask(text, {
-      via: opts.via || 'voice', session: Boolean(opts.session), voice: Boolean(this.d.voiceOut?.enabled), name: m.name || '', students: m.classroom?.students || [], notes: m.claudeNotes || [],
+      via: opts.via || 'voice', session: Boolean(opts.session), voice: Boolean(this.d.voiceOut?.enabled) && !this.silent, name: m.name || '', students: m.classroom?.students || [], notes: m.claudeNotes || [],
       period: this.d.periodNow?.() || '',
-    });
+    }, opts.image || null);
     clearTimeout(thinking);
     this.busy = false;
     this.lastAct = Date.now();
@@ -159,6 +161,9 @@ export class MindClient {
         case 'classroom': return reply(this.classroom(p.command));
         case 'remember': return reply(this.remember(p.fact));
         case 'fx': return reply(this.fx(p));
+        case 'pick': this.d.pickWithCamera?.(); return reply({ ok: true });
+        case 'steps': return reply({ ok: Boolean(this.d.stepsDeck?.start(p)) });
+        case 'graph': return reply(this.d.graphPanel ? this.d.graphPanel.show(p) : { ok: false });
         default: return reply({ ok: false });
       }
     } catch (err) {
@@ -181,7 +186,7 @@ export class MindClient {
   ink(p) {
     const { ink, character, animator } = this.d;
     const hexOf = (c) => (c && /^[a-z]+$/.test(c) ? c : 'blue');
-    if (p.op === 'clear') { ink.clear(); this.d.screenFx?.clear(); return { ok: true }; }
+    if (p.op === 'clear') { ink.clear(); this.d.screenFx?.clear(); this.d.graphPanel?.close(); this.d.docView?.close(); this.d.stepsDeck?.end(); return { ok: true }; }
     if (p.op === 'write') ink.write(p.text, { at: p.at, anchor: p.anchor || 'right', size: p.size || 0, color: hexOf(p.color) });
     else if (p.op === 'shape') ink.draw({ shape: p.shape, color: p.color, box: p.box, text: p.label || '' });
     else if (p.op === 'mark') ink.mark(p.boxes, { mark: p.mark, color: p.color });

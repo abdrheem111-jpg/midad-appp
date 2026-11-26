@@ -356,6 +356,7 @@ function registerShortcuts() {
 
 // The teacher's presenter remote: one learned button makes Khalfoun listen, from anywhere.
 let phoneMic = null;
+let phoneUiState = {};
 let remoteAccel = null;
 let remoteLast = 0;
 function registerRemote(accel) {
@@ -842,7 +843,16 @@ function setupIpc(stores, executor) {
     onAudio: (pcm) => send('phone-audio', { pcm }),
     onSay: (wav) => { if (win) win.showInactive(); send('phone-say', { wav }); },
     onStatus: (st) => { diag.write('phone mic', st); send('phone-status', st); },
+    onCommand: (name) => { if (win) win.showInactive(); send('phone-cmd', { name }); },
+    onWhisper: (text) => send('phone-whisper', { text }),
+    onPhoto: (purpose, photo) => { if (win) win.showInactive(); send('phone-photo', { purpose, photo }); },
+    getState: () => phoneUiState,
     log: (...a) => diag.write(...a),
+  });
+  // What the phone's buttons show (voice muted, bubble hidden, which step): told by the page.
+  ipcMain.on('phone:state', (event, st) => {
+    if (!fromApp(event) || !st || typeof st !== 'object') return;
+    phoneUiState = { muted: st.muted === true, bubbleHidden: st.bubbleHidden === true, step: Number.isFinite(st.step) ? st.step : 0, steps: Number.isFinite(st.steps) ? st.steps : 0 };
   });
   const phoneAnswer = async () => {
     const info = await phoneMic.info();
@@ -883,6 +893,19 @@ function setupIpc(stores, executor) {
     diag.write('remote button', accel, 'learned');
     return { ok: true, accel };
   });
+  // While the steps of a solution show, the remote's page buttons move the steps (and are given
+  // back to the PDF as soon as the steps end). The learned «listen» button is left alone.
+  let stepKeys = false;
+  ipcMain.on('steps:keys', (event, on) => {
+    if (!fromApp(event) || Boolean(on) === stepKeys) return;
+    stepKeys = Boolean(on);
+    for (const [key, dir] of [['PageDown', 'next'], ['PageUp', 'back']]) {
+      if (key === settings.remoteKey) continue;
+      if (stepKeys) { try { globalShortcut.register(key, () => send('steps-key', { dir })); } catch { /* taken */ } }
+      else { try { globalShortcut.unregister(key); } catch { /* not ours */ } }
+    }
+    diag.write('steps keys', stepKeys ? 'on (Page Down / Page Up move the steps)' : 'off');
+  });
   // While he presses the remote in settings, the learned button must not fire: paused, then back.
   ipcMain.handle('remote:pause', async (event, on) => {
     if (!fromApp(event)) return false;
@@ -909,13 +932,15 @@ function setupIpc(stores, executor) {
     if (!text.trim()) return { ok: false, error: 'empty' };
     const c = payload?.context && typeof payload.context === 'object' ? payload.context : {};
     const fg = await activeWindow().catch(() => null);
+    const im = payload?.image;
+    const image = im && typeof im.data === 'string' && im.data.length < 12e6 && ['image/jpeg', 'image/png'].includes(im.mime) ? { data: im.data, mime: im.mime } : null;
     return mind.ask(text, {
       name: String(c.name || '').slice(0, 60), via: c.via === 'typed' ? 'typed' : 'voice', session: c.session === true, voice: c.voice === true,
       students: Array.isArray(c.students) ? c.students.map((x) => String(x).slice(0, 40)).slice(0, 40) : [],
       notes: Array.isArray(c.notes) ? c.notes.map((x) => String(x).slice(0, 200)).slice(-12) : [],
       period: String(c.period || '').slice(0, 80),
       window: fg?.ok ? fg.data.title : '', app: fg?.ok ? fg.data.process : '',
-    });
+    }, image);
   });
   ipcMain.on('mind:stop', (event) => { if (fromApp(event)) mind?.stop(); });
   // «شو تعلّم خلفون عني»: the notes and habits, and forgetting one of them.

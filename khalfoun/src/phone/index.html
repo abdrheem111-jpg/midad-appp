@@ -24,6 +24,19 @@
   p.fine { font-size: 14px; color: #6b5a4c; text-align: center; margin: 4px 8px; line-height: 1.6; }
   #meter { width: min(80vw, 320px); height: 8px; border-radius: 4px; background: #e7dfcf; overflow: hidden; }
   #meter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .1s; }
+  .tabs { display: flex; gap: 6px; background: #e7dfcf; padding: 4px; border-radius: 14px; width: min(94vw, 460px); }
+  .tabs button { flex: 1; border: none; background: transparent; font: inherit; font-size: 16px; padding: 10px 4px; border-radius: 10px; color: var(--ink); }
+  .tabs button[aria-selected="true"] { background: #fff; font-weight: 700; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+  .pane { width: min(94vw, 460px); display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
+  .grid button, .wide { font: inherit; font-size: 17px; padding: 16px 8px; border-radius: 14px; border: none; background: #fff; color: var(--ink); box-shadow: 0 2px 8px rgba(0,0,0,.07); }
+  .grid button.on { background: #d5efe5; color: var(--accent); font-weight: 700; }
+  .grid button.big { font-size: 20px; padding: 22px 8px; background: var(--accent); color: #fff; }
+  .wide { width: 100%; }
+  .whisper { display: flex; gap: 8px; width: 100%; }
+  .whisper input { flex: 1; font: inherit; font-size: 17px; padding: 12px; border-radius: 12px; border: 1px solid #d9cfbd; }
+  .whisper button { font: inherit; padding: 0 16px; border-radius: 12px; border: none; background: var(--accent); color: #fff; }
+  #stepinfo { font-size: 15px; color: #6b5a4c; min-height: 20px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -38,11 +51,49 @@
     <button id="start" type="button">ابدأ</button>
   </div>
 
-  <div id="main" class="row" style="flex-direction:column" hidden>
-    <button id="talk" type="button" aria-label="اضغط وتكلم">اضغط<br>وتكلم</button>
-    <div id="meter"><i></i></div>
-    <label class="toggle"><input id="always" type="checkbox" checked> استماع دائم («يا خلفون»)</label>
-    <p class="fine" id="hint">خلّ الصفحة مفتوحة والشاشة شغالة. نادِ «يا خلفون» أو اضغط الزر وتكلم.</p>
+  <div id="main" class="pane" hidden>
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="mic" aria-selected="true">🎙️ المايك</button>
+      <button role="tab" data-tab="ctl" aria-selected="false">🎛️ التحكم</button>
+      <button role="tab" data-tab="cam" aria-selected="false">📷 الكاميرا</button>
+    </div>
+    <div class="pane" data-pane="mic">
+      <button id="talk" type="button" aria-label="اضغط وتكلم">اضغط<br>وتكلم</button>
+      <div id="meter"><i></i></div>
+      <label class="toggle"><input id="always" type="checkbox" checked> استماع دائم («يا خلفون»)</label>
+      <p class="fine" id="hint">خلّ الصفحة مفتوحة والشاشة شغالة. نادِ «يا خلفون» أو اضغط الزر وتكلم.</p>
+    </div>
+    <div class="pane" data-pane="ctl" hidden>
+      <div class="grid">
+        <button class="big" data-cmd="step_back">◀ الخطوة السابقة</button>
+        <button class="big" data-cmd="step_next">الخطوة الجاية ▶</button>
+      </div>
+      <p id="stepinfo"></p>
+      <div class="grid">
+        <button data-cmd="mute" id="b-mute">🔇 سكّت صوته</button>
+        <button data-cmd="bubble" id="b-bubble">💬 خبّي الفقاعة</button>
+        <button data-cmd="random_student">🎲 طالب عشوائي</button>
+        <button data-cmd="clear">🧽 امسح الشاشة</button>
+        <button data-cmd="timer_1">⏱️ مؤقت ١ د</button>
+        <button data-cmd="timer_3">⏱️ مؤقت ٣ د</button>
+        <button data-cmd="timer_5">⏱️ مؤقت ٥ د</button>
+        <button data-cmd="stop">✋ وقّف</button>
+        <button data-cmd="celebrate">🎉 احتفال</button>
+        <button data-cmd="fireworks">🎆 ألعاب نارية</button>
+      </div>
+      <form class="whisper" id="whisper">
+        <input id="wtext" maxlength="300" placeholder="✍️ همسة لخلفون (ما تنقرأ بصوت)" autocomplete="off">
+        <button type="submit">أرسل</button>
+      </form>
+    </div>
+    <div class="pane" data-pane="cam" hidden>
+      <button class="wide" data-photo="pick">🎯 اختار طالب بالكاميرا<br><small>صوّر الصف، وخلفون يختار واحد</small></button>
+      <button class="wide" data-photo="doc">📖 اعرض الدفتر على الشاشة<br><small>صوّر حل الطالب ويطلع كبير قدام الكل</small></button>
+      <button class="wide" data-photo="grade">📝 صحّح ورقة<br><small>صوّر الورقة وخلفون يصحّحها</small></button>
+      <button class="wide" data-photo="key">📋 نموذج الإجابة<br><small>صوّره مرة قبل التصحيح</small></button>
+      <p class="fine" id="camstate">الصور تروح لجهاز خلفون بس، واختيار الطالب يصير على الجهاز نفسه.</p>
+      <input id="shot" type="file" accept="image/*" capture="environment" hidden>
+    </div>
   </div>
 
   <p class="fine">الصوت يروح لجهاز خلفون في نفس الشبكة بس.</p>
@@ -58,13 +109,13 @@ let talking = false; let talkBuf = []; let talkLen = 0;
 let lock = null; let failures = 0; let lastOk = 0;
 
 function setState(text, cls) { const s = $('state'); s.textContent = text; s.className = cls || ''; }
-async function post(path, body, type) {
-  const r = await fetch(`${path}?k=${encodeURIComponent(KEY)}${path === '/audio' ? `&seq=${seq++}` : ''}`, { method: 'POST', body, headers: type ? { 'content-type': type } : {}, cache: 'no-store' });
+async function post(path, body, type, extra = '') {
+  const r = await fetch(`${path}?k=${encodeURIComponent(KEY)}${path === '/audio' ? `&seq=${seq++}` : ''}${extra}`, { method: 'POST', body, headers: type ? { 'content-type': type } : {}, cache: 'no-store' });
   if (!r.ok && r.status !== 204) throw new Error(`http ${r.status}`);
   return r;
 }
 async function hello() {
-  try { await post('/hello', ''); lastOk = Date.now(); failures = 0; setState(talking ? '🔴 أسمعك…' : ($('always').checked ? '✓ متصل بخلفون: أسمع ندائك' : '✓ متصل بخلفون'), 'ok'); }
+  try { const r = await post('/hello', ''); try { showState((await r.json()).state); } catch { /* old Khalfoun */ } lastOk = Date.now(); failures = 0; setState(talking ? '🔴 أسمعك…' : ($('always').checked ? '✓ متصل بخلفون: أسمع ندائك' : '✓ متصل بخلفون'), 'ok'); }
   catch { failures += 1; if (failures > 1) setState('✗ ما وصلت لخلفون. تأكد إن الجهازين على نفس الشبكة', 'bad'); }
 }
 
@@ -150,6 +201,56 @@ async function endTalk() {
   setState('… أرسلت لخلفون', 'ok');
   try { await post('/say', wav16(all), 'audio/wav'); } catch { setState('✗ ما وصل الأمر لخلفون', 'bad'); }
 }
+
+// ---------------------------------------------------------------- tabs, buttons, whisper, photos
+for (const t of document.querySelectorAll('[role="tab"]')) {
+  t.addEventListener('click', () => {
+    for (const x of document.querySelectorAll('[role="tab"]')) x.setAttribute('aria-selected', String(x === t));
+    for (const p of document.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== t.dataset.tab;
+  });
+}
+function showState(st) {
+  if (!st) return;
+  $('b-mute').classList.toggle('on', Boolean(st.muted));
+  $('b-mute').textContent = st.muted ? '🔈 رجّع صوته' : '🔇 سكّت صوته';
+  $('b-bubble').classList.toggle('on', Boolean(st.bubbleHidden));
+  $('b-bubble').textContent = st.bubbleHidden ? '💬 رجّع الفقاعة' : '💬 خبّي الفقاعة';
+  $('stepinfo').textContent = st.steps ? `الخطوة ${st.step.toLocaleString('ar-EG')} من ${st.steps.toLocaleString('ar-EG')}` : '';
+}
+for (const b of document.querySelectorAll('[data-cmd]')) {
+  b.addEventListener('click', async () => {
+    navigator.vibrate?.(15);
+    try { const r = await post(`/cmd`, '', null, `&name=${b.dataset.cmd}`); showState((await r.json()).state); } catch { setState('✗ ما وصل الأمر لخلفون', 'bad'); }
+  });
+}
+$('whisper').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const t = $('wtext').value.trim();
+  if (!t) return;
+  try { await post('/whisper', t, 'text/plain;charset=utf-8'); $('wtext').value = ''; setState('✓ وصلت الهمسة', 'ok'); } catch { setState('✗ ما وصلت الهمسة', 'bad'); }
+});
+let purpose = null;
+for (const b of document.querySelectorAll('[data-photo]')) b.addEventListener('click', () => { purpose = b.dataset.photo; $('shot').value = ''; $('shot').click(); });
+/** The photo made smaller on the phone (a class photo stays sharp enough for far faces). */
+async function shrink(file, max) {
+  const img = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => null);
+  if (!img) return file;
+  const s = Math.min(1, max / Math.max(img.width, img.height));
+  if (s === 1 && file.size < 4e6) return file;
+  const c = document.createElement('canvas'); c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return new Promise((r) => c.toBlob((b) => r(b || file), 'image/jpeg', 0.88));
+}
+$('shot').addEventListener('change', async () => {
+  const f = $('shot').files?.[0];
+  if (!f || !purpose) return;
+  $('camstate').textContent = '… أرسل الصورة لخلفون';
+  try {
+    const blob = await shrink(f, purpose === 'pick' ? 2600 : 2000);
+    await post('/photo', blob, blob.type || 'image/jpeg', `&purpose=${purpose}`);
+    $('camstate').textContent = { pick: '✓ خلفون يختار الحين', doc: '✓ طلعت على الشاشة', grade: '✓ خلفون يصحّح', key: '✓ حفظ نموذج الإجابة' }[purpose];
+  } catch { $('camstate').textContent = '✗ ما وصلت الصورة. جرّب مرة ثانية.'; }
+});
 
 $('start').addEventListener('click', start);
 const t = $('talk');

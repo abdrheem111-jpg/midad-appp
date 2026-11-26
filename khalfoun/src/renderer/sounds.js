@@ -20,6 +20,7 @@ export function soundPlan(name, emotion = 'calm') {
   const p = MOOD_PITCH[emotion] || MOOD_PITCH.calm;
   switch (name) {
     case 'pop': return [tone(0, 0.07, 700, { to: 1100, gain: 0.18 })];
+    case 'tick': return [tone(0, 0.035, 1250, { gain: 0.12 })];
     case 'giggle': return [0, 0.09, 0.18, 0.27, 0.36].map((t, i) => tone(t, 0.07, p * 1.4 + i * 40, { to: p * 1.9 + i * 50, type: 'triangle', gain: 0.2 }));
     case 'hmm': return [tone(0, 0.45, p * 0.55, { to: p * 0.5, type: 'triangle', gain: 0.16 })];
     case 'whistle': return [tone(0, 0.18, 1200, { to: 1600, gain: 0.12 }), tone(0.22, 0.25, 1500, { to: 1100, gain: 0.12 })];
@@ -133,4 +134,7 @@ export class SoundPlayer {
 
   /** The listening beeps: never skipped by the effect spacing, so start and stop are always heard. */
   cue(which) { return this.playPlan(soundPlan(which === 'stop' ? 'cue_stop' : 'cue_start')); }
+
+  /** A sound right away, with no pause between repeats (the camera pick's ticking). */
+  now(name) { return this.playPlan(soundPlan(name)); }
 }

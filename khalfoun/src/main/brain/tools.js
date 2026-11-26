@@ -12,6 +12,7 @@ import { SHAPES, COLORS, cleanPlan, KINDS } from '../../core/office-plan.js';
 import { OFFICE_FORMATS } from '../actions/index.js';
 import { APPS } from '../../core/intents.js';
 import { cleanSketch, mathText, SKETCH_TYPES } from '../../core/math-sketch.js';
+import { parse as parseExpr } from '../../core/math-expr.js';
 
 /** «hwnd\tprocess\tstate\tx,y,w,h\ttitle» lines from the hands process. */
 export function parseWindows(data) {
@@ -270,6 +271,48 @@ Over the whole screen (no x,y,w,h): confetti, fireworks, balloons, stars, hearts
         await ctx.ui('fx', { op: 'region', effect, rect: shot.rect, image: shot.image, text: label || '', hold, keep: Boolean(keep), color: color ? COLORS[color] || color : undefined });
         return text(keep ? 'سويتها، وبيبقى مخفي لين تمسح الشاشة.' : 'سويتها!');
       },
+    },
+    {
+      name: 'graph',
+      description: `Draw live graphs of functions on a board beside the lesson («ارسم ص = ٢س + ١»). functions: up to 5, each {expr} written like "2x+1", "x^2-4", "sin(x)", "a x^2" (x is س; parameters a b c k m; × ÷ √ ² allowed). x / y: the ranges [min, max] (y is found by itself if left out). roots: true marks where the graph crosses the س axis. points: [{x,y,label?}]. animate: {param:"a", from, to, seconds} moves a parameter so the class sees what it changes («غيّر الميل»). place: right (default), left, center.`,
+      schema: {
+        functions: z.array(z.object({ expr: z.string().min(1).max(80), color: z.enum(COLOR_IDS).optional(), label: z.string().max(60).optional() })).min(1).max(5),
+        x: z.array(z.number()).length(2).optional(), y: z.array(z.number()).length(2).optional(),
+        params: z.record(z.string().regex(/^[abcdkmn]$/), z.number()).optional(),
+        animate: z.object({ param: z.string().regex(/^[abcdkmn]$/), from: z.number(), to: z.number(), seconds: z.number().min(1).max(20).optional() }).optional(),
+        roots: z.boolean().optional(),
+        points: z.array(z.object({ x: z.number(), y: z.number(), label: z.string().max(30).optional() })).max(12).optional(),
+        place: z.enum(['right', 'left', 'center']).optional(),
+      },
+      handler: async (g) => {
+        for (const f of g.functions) { try { parseExpr(f.expr); } catch (err) { return fail(`ما فهمت الدالة «${f.expr}»: ${err.message}`); } }
+        const r = await ctx.ui('graph', { ...g, functions: g.functions.map((f) => ({ ...f, color: f.color ? `#${COLORS[f.color]?.hex || '1D70B8'}` : undefined })), digits: digitsNow() });
+        return r?.ok ? text(`رسمت ${g.functions.length === 1 ? 'الدالة' : `${g.functions.length} دوال`}${g.animate ? ' وأحرّك الرسم' : ''}.`) : fail(`ما قدرت أرسم: ${r?.error || ''}`);
+      },
+    },
+    {
+      name: 'steps',
+      description: 'Show a solution STEP BY STEP for the teacher to move through himself (remote Page Down / Page Up, his phone, or «كمل» / «ارجع»): give all the steps at once; only the first is shown now. Each step: items (the same drawing items as screen_draw, in picture pixels) and say (one short sentence for that step). Use it when he asks «بالخطوات / خطوة خطوة».',
+      schema: {
+        title: z.string().max(60).optional(),
+        steps: z.array(z.object({ items: z.array(z.object({ type: z.enum(SKETCH_TYPES) }).passthrough()).max(30).optional(), say: z.string().max(200).optional() })).min(1).max(20),
+        color: z.enum(COLOR_IDS).optional(),
+      },
+      handler: async ({ title, steps, color }) => {
+        const scale = ctx.screen.pictureScale();
+        const deck = steps.map((s) => ({
+          shapes: s.items?.length ? cleanSketch(s.items, { pt: (x, y) => ctx.screen.toOverlay(x, y), len: (v) => Math.round(v * scale), digits: digitsNow() }) : [],
+          say: s.say ? mathText(s.say, { digits: digitsNow() }).replace(/[\uE000-\uE003]/g, '') : '',
+        }));
+        const r = await ctx.ui('steps', { title: title || '', color: color || 'blue', steps: deck });
+        return r?.ok ? text(`جهزت ${deck.length} خطوات، والأولى طالعة. المعلم يكمل بالريموت أو الجوال أو «كمل».`) : fail('ما قدرت أعرض الخطوات.');
+      },
+    },
+    {
+      name: 'camera_pick',
+      description: 'Choose a student at random with the camera («اختار طالب بالكاميرا»): Khalfoun takes a photo of the class with the computer\'s camera, finds every face on this computer (the photo is never sent anywhere), and a light jumps between the faces and lands on one, fairly (no one twice while others are left). With the teacher\'s phone page, he can also take the photo with the 🎯 button.',
+      schema: {},
+      handler: async () => { await ctx.ui('pick', {}); return text('بدأت الاختيار بالكاميرا.'); },
     },
     {
       name: 'screen_clear',

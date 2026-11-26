@@ -109,7 +109,9 @@ function createPreviewBridge() {
         return { mel: await get(u.mel), emb: await get(u.emb), cls: await get(u.cls), config: window.__earConfig || { mode: 'shadow', threshold: 0.5, high: 0.85, version: 'test' } };
       },
     },
+    steps: { keys(on) { window.__stepKeys = Boolean(on); } },
     phone: {
+      state(st) { window.__phoneState = st; },
       async start() { window.__phoneOn = true; return this.info(); },
       async stop() { window.__phoneOn = false; return { ok: true }; },
       async info() {

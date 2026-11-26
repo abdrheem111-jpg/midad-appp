@@ -14,6 +14,11 @@ import { join } from 'node:path';
 export const PHONE_PORTS = [47823, 47824, 47825, 47826];
 const MAX_CHUNK = 64000; // 2 s of 16 kHz 16-bit sound
 const MAX_SAY = 1_300_000; // a 40 s push-to-talk recording
+const MAX_PHOTO = 9_000_000; // a phone photo, already made smaller on the phone
+/** The phone's control buttons (anything else is refused). */
+export const PHONE_COMMANDS = ['step_next', 'step_back', 'mute', 'bubble', 'random_student', 'timer_1', 'timer_3', 'timer_5', 'celebrate', 'fireworks', 'clear', 'stop'];
+export const PHOTO_PURPOSES = ['pick', 'doc', 'grade', 'key'];
+const isJpegOrPng = (b) => (b[0] === 0xff && b[1] === 0xd8) || (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47);
 
 /** Private IPv4 addresses (home/school network, a phone's hotspot) of this computer. */
 export function lanAddresses(ifaces = networkInterfaces()) {
@@ -111,7 +116,30 @@ export function createPhoneMic(deps) {
         });
         return res.end(html);
       }
-      if (req.method === 'POST' && url.pathname === '/hello') { tell(); return send(200, '{"ok":true,"name":"خلفون"}', 'application/json'); }
+      if (req.method === 'POST' && url.pathname === '/hello') { tell(); return send(200, JSON.stringify({ ok: true, name: 'خلفون', state: deps.getState?.() || {} }), 'application/json'); }
+      if (req.method === 'POST' && url.pathname === '/cmd') {
+        const name = url.searchParams.get('name');
+        if (!PHONE_COMMANDS.includes(name)) return send(400, 'bad command');
+        log('phone mic: button', name);
+        deps.onCommand?.(name);
+        return send(200, JSON.stringify({ ok: true, state: deps.getState?.() || {} }), 'application/json');
+      }
+      if (req.method === 'POST' && url.pathname === '/whisper') {
+        const text = Buffer.from(await body(req, 2000)).toString('utf8').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 300);
+        if (!text) return send(400, 'empty');
+        log('phone mic: a whispered command', `${text.length} chars`);
+        deps.onWhisper?.(text);
+        return send(204, '');
+      }
+      if (req.method === 'POST' && url.pathname === '/photo') {
+        const purpose = url.searchParams.get('purpose');
+        if (!PHOTO_PURPOSES.includes(purpose)) return send(400, 'bad purpose');
+        const photo = await body(req, MAX_PHOTO);
+        if (photo.length < 100 || !isJpegOrPng(photo)) return send(400, 'not a photo');
+        log('phone mic: a photo', purpose, `${Math.round(photo.length / 1024)} KB`);
+        deps.onPhoto?.(purpose, photo);
+        return send(204, '');
+      }
       if (req.method === 'POST' && url.pathname === '/audio') {
         const pcm = await body(req, MAX_CHUNK);
         if (pcm.length % 2) return send(400, 'bad audio');
