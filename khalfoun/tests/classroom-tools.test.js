@@ -151,3 +151,11 @@ test('phone: control buttons (only known ones), whisper, photos (only pictures),
     assert.ok(PHONE_COMMANDS.includes('step_next') && PHONE_COMMANDS.includes('bubble'));
   } finally { mic.stop(); }
 });
+
+test('the overlay page may show photos made on the spot (notebook from the phone, class photo)', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const html = await readFile(new URL('../src/renderer/index.html', import.meta.url), 'utf8');
+  const img = /img-src ([^;]+);/.exec(html)[1];
+  assert.match(img, /\bblob:/);
+  assert.doesNotMatch(img, /\*|https?:/); // still nothing from the internet
+});
