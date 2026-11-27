@@ -8,7 +8,7 @@ import selfsigned from 'selfsigned';
 import { decodeYunet, mergeFaces, tilesFor, chooseFace, sureFaces, SENSITIVITY, YUNET_SIZE } from '../src/core/faces.js';
 import { parse, evaluate, roots, paramsOf, autoRange, niceStep, prepare } from '../src/core/math-expr.js';
 import { stepWord } from '../src/renderer/steps.js';
-import { createPhoneMic, PHONE_COMMANDS } from '../src/main/phone-mic.js';
+import { createPhoneMic, PHONE_COMMANDS, signPhone } from '../src/main/phone-mic.js';
 import { normalize } from '../src/core/arabic.js';
 
 // ---------------------------------------------------------------- faces (camera pick)
@@ -108,7 +108,14 @@ test('steps: «كمل» / «ارجع» move the steps; «كمل وراي» is no
 
 function call(url, { method = 'GET', body, type } = {}) {
   return new Promise((resolve, reject) => {
-    const req = request(url, { method, rejectUnauthorized: false, headers: type ? { 'content-type': type } : {} }, (res) => {
+    const headers = type ? { 'content-type': type } : {};
+    const u = new URL(url); const k = u.searchParams.get('k');
+    if (k !== null && !(method === 'GET' && u.pathname === '/')) {
+      u.searchParams.delete('k'); const ts = Date.now();
+      headers['x-kh-ts'] = String(ts); headers['x-kh-sig'] = signPhone(k, method, u.pathname, u.searchParams, ts);
+      url = u.toString();
+    }
+    const req = request(url, { method, rejectUnauthorized: false, headers }, (res) => {
       const parts = []; res.on('data', (c) => parts.push(c)); res.on('end', () => resolve({ status: res.statusCode, text: Buffer.concat(parts).toString('utf8') }));
     });
     req.on('error', reject);

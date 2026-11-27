@@ -360,6 +360,51 @@ Over the whole screen (no x,y,w,h): confetti, fireworks, balloons, stars, hearts
       },
     },
     {
+      name: 'grade_result',
+      description: 'After grading a student\'s paper: send the result to the teacher\'s PHONE for his approval (never on the class screen). It is saved in the weekly report only when he approves.',
+      schema: { student: z.string().max(40).optional(), score: z.number().min(0), total: z.number().positive(), mistakes: z.array(z.string().max(160)).max(20).optional() },
+      handler: async (g) => {
+        if (g.score > g.total) return fail('الدرجة أكبر من المجموع.');
+        const r = await ctx.ui('grade', g);
+        return r?.ok ? text('طلع التصحيح على جوال المعلم، وينحفظ لما يعتمده.') : fail('جوال المعلم مو متصل؛ قل له النتيجة بهدوء بدل.');
+      },
+    },
+    {
+      name: 'quiz_make',
+      description: 'Make a quick multiple-choice quiz from the lesson (what is on the screen or what the teacher said). It goes to the teacher\'s phone first; he taps «اعرضها» to show it big to the class, one question at a time. 2–4 choices each; answer is the index of the right choice. Check any maths with the math tool first.',
+      schema: { title: z.string().max(60).optional(), questions: z.array(z.object({ q: z.string().min(1).max(300), choices: z.array(z.string().min(1).max(120)).min(2).max(4), answer: z.number().int().min(0).max(3) })).min(1).max(15) },
+      handler: async (quiz) => {
+        if (quiz.questions.some((q) => q.answer >= q.choices.length)) return fail('رقم الجواب أكبر من عدد الخيارات.');
+        const r = await ctx.ui('quiz', quiz);
+        return r?.ok ? text(`جهزت ${quiz.questions.length} أسئلة، وطلعت على جوال المعلم يعتمدها ويعرضها.`) : fail('ما قدرت أرسلها للجوال.');
+      },
+    },
+    {
+      name: 'lesson_prep',
+      description: 'Prepare a lesson from what the teacher shows (a PDF page on the screen — look at it first — or a photo of a page of the Omani student book): objectives, presentation steps, graded questions (easy → hard, with answers; check maths with the math tool) and an exit ticket. Saved as a Word file in Documents\\خلفون (opened for him) and remembered for the lesson.',
+      schema: {
+        title: z.string().min(2).max(80), grade: z.string().max(30).optional(),
+        objectives: z.array(z.string().max(160)).min(1).max(6),
+        steps: z.array(z.string().max(220)).min(1).max(12),
+        questions: z.array(z.object({ level: z.enum(['سهل', 'متوسط', 'صعب']), q: z.string().max(300), answer: z.string().max(200), choices: z.array(z.string().max(100)).max(4).optional() })).min(1).max(15),
+        exit_ticket: z.array(z.string().max(200)).min(1).max(4),
+      },
+      handler: async (lesson) => {
+        if (!ctx.saveLesson) return fail('حفظ التحضير مو متاح هني.');
+        const r = await ctx.saveLesson(lesson);
+        return r?.ok ? text(`حضّرت «${lesson.title}» وحفظته في ${r.file} (انفتح للمعلم).`) : fail(`ما قدرت أحفظ التحضير: ${r?.error || ''}`);
+      },
+    },
+    {
+      name: 'weekly_report',
+      description: 'Export the weekly participation report to Excel (attendance, how often each student took part, stars, approved grades) in Documents\\خلفون and open it. It never judges a student with too little data.',
+      schema: {},
+      handler: async () => {
+        const r = await ctx.ui('report', {});
+        return r?.ok ? text(`جهزت التقرير: ${r.summary}`) : fail(r?.error === 'no_students' ? 'ما فيه أسماء طلاب محفوظة.' : 'ما قدرت أجهز التقرير.');
+      },
+    },
+    {
       name: 'camera_pick',
       description: 'Choose a student at random with the camera («اختار طالب بالكاميرا»): Khalfoun takes a photo of the class with the computer\'s camera, finds every face on this computer (the photo is never sent anywhere), and a light jumps between the faces and lands on one, fairly (no one twice while others are left). With the teacher\'s phone page, he can also take the photo with the 🎯 button.',
       schema: {},

@@ -26,16 +26,47 @@ export function shuffle(list, rng = Math.random) {
   return a;
 }
 
+const LOG_MAX = 4000;
+
 export class Classroom {
   /** @param {{students?: string[], points?: Record<string, number>, picked?: string[]}} [data] */
   constructor(data = {}) {
     this.students = Array.isArray(data.students) ? [...data.students] : [];
     this.points = data.points && typeof data.points === 'object' ? { ...data.points } : {};
     this.picked = Array.isArray(data.picked) ? [...data.picked] : [];
+    // Khalfoun 3: what each student did and when (picked, a star, present…), for the fair pick and the weekly report
+    this.log = Array.isArray(data.log) ? data.log.filter((e) => e && typeof e.n === 'string' && Number.isFinite(e.at)).slice(-LOG_MAX) : [];
   }
 
   toJSON() {
-    return { students: this.students, points: this.points, picked: this.picked };
+    return { students: this.students, points: this.points, picked: this.picked, log: this.log };
+  }
+
+  /** Notes a moment of taking part. kind: pick | star | answer | present | absent | grade */
+  note(name, kind, at = Date.now(), extra = {}) {
+    const who = this.find(name) || name;
+    if (!who) return;
+    this.log.push({ n: who, k: kind, at, ...extra });
+    if (this.log.length > LOG_MAX) this.log.splice(0, this.log.length - LOG_MAX);
+  }
+
+  /** How many times each student took part (picked, a star, an answer) in the last `days`. */
+  participation(days = 14, now = Date.now()) {
+    const from = now - days * 86400000;
+    const out = Object.fromEntries(this.students.map((s) => [s, 0]));
+    for (const e of this.log) if (e.at >= from && ['pick', 'star', 'answer'].includes(e.k) && e.n in out) out[e.n] += 1;
+    return out;
+  }
+
+  /** Why this student was chosen, in a sentence the teacher can ask for («ليش هو؟»). */
+  why(name, now = Date.now()) {
+    const counts = this.participation(14, now);
+    const c = counts[name] ?? 0;
+    const last = [...this.log].reverse().find((e) => e.n === name && e.k !== 'pick-now');
+    const avg = Object.values(counts).reduce((a, b) => a + b, 0) / Math.max(1, Object.keys(counts).length);
+    if (!c) return `${name} ما شارك ولا مرة في الأسبوعين اللي فاتوا، فكان له الحظ الأكبر.`;
+    if (c < avg) return `${name} شارك ${c === 1 ? 'مرة وحدة' : `${c} مرات`} في الأسبوعين اللي فاتوا، أقل من متوسط الصف، فكان حظه أكبر.`;
+    return `${name} طلع بالقرعة العادية (كل الطلاب لهم فرصة، واللي شاركوا أقل حظهم أكبر شوي).${last ? '' : ''}`;
   }
 
   setStudents(names) {
@@ -68,14 +99,23 @@ export class Classroom {
     return near.length === 1 ? near[0] : null;
   }
 
-  /** A random student who has not been picked yet this round. */
-  pick(rng = Math.random) {
+  /**
+   * A random student who has not been picked yet this round — weighted so that those who took
+   * part less in the last two weeks are more likely (never certain: everyone keeps a chance).
+   */
+  pick(rng = Math.random, now = Date.now()) {
     if (!this.students.length) return null;
     let pool = this.students.filter((s) => !this.picked.includes(s));
     let newRound = false;
     if (!pool.length) { this.picked = []; pool = [...this.students]; newRound = true; }
-    const name = pool[Math.floor(rng() * pool.length) % pool.length];
+    const counts = this.participation(14, now);
+    const weights = pool.map((s) => 1 / (1 + (counts[s] || 0)));
+    const total = weights.reduce((a, b) => a + b, 0);
+    let r = rng() * total;
+    let name = pool[pool.length - 1];
+    for (let i = 0; i < pool.length; i += 1) { r -= weights[i]; if (r < 0) { name = pool[i]; break; } }
     this.picked.push(name);
+    this.note(name, 'pick', now);
     return { name, left: pool.length - 1, newRound };
   }
 
@@ -95,7 +135,11 @@ export class Classroom {
     if (!who) return null;
     if (!this.students.includes(who)) this.students.push(who);
     this.points[who] = Math.max(0, (this.points[who] || 0) + delta);
-    return { name: who, points: this.points[who] };
+    if (delta > 0) this.note(who, 'star', Date.now(), { d: delta });
+    // escalating celebrations: every 5th star is bigger, every 10th the biggest
+    const p = this.points[who];
+    const level = delta > 0 ? (p % 10 === 0 ? 3 : p % 5 === 0 ? 2 : 1) : 0;
+    return { name: who, points: p, level };
   }
 
   board(limit = 10) {

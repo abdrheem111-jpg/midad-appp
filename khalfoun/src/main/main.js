@@ -34,6 +34,10 @@ import { createClaudeMind } from './brain/index.js';
 import { LatencyMeter } from '../core/latency.js';
 import { createMathEngine } from './math/engine.js';
 import { createStreamSession } from './stream-stt.js';
+import { weeklyReport } from '../core/report.js';
+import { Inbox } from '../core/inbox.js';
+import { buildXlsx } from './office/xlsx.js';
+import { buildDocx } from './office/docx.js';
 import { describeAction } from '../core/permissions.js';
 import { migrateFromV2, sharedDirs, v2Dir } from './migrate.js';
 import { claudeExePath } from './brain/claude-setup.js';
@@ -383,6 +387,8 @@ function registerShortcuts() {
 let phoneMic = null;
 let phoneUiState = {};
 let meter = new LatencyMeter();
+const inbox = new Inbox();
+const actionLog = [];
 // SymPy on this PC (a worker thread), started in the background a few seconds after launch
 const mathEngine = createMathEngine({ log: (...a) => diag?.write(...a) });
 let metricsDirty = false;
@@ -854,6 +860,35 @@ function setupIpc(stores, executor) {
     return r;
   });
   ipcMain.on('stt:stream-cancel', (event) => { if (fromApp(event)) { stream?.cancel(); stream = null; } });
+  // ----- the weekly participation report (Excel, in Documents\خلفون)
+  ipcMain.handle('actions:recent', (event) => (fromApp(event) ? actionLog.slice(-100).reverse() : []));
+  ipcMain.handle('inbox:add', (event, it) => {
+    if (!fromApp(event)) return null;
+    const item = inbox.add(it);
+    if (item) diag.write('phone inbox: added', item.kind, `«${item.title}»`);
+    return item ? { id: item.id } : null;
+  });
+  ipcMain.handle('phone:unpair', async (event) => {
+    if (!fromApp(event)) return { ok: false };
+    phoneMic?.stop();
+    const r = await phoneMic?.start();
+    diag.write('phone: unpaired, new pairing key');
+    return r || { ok: false };
+  });
+  ipcMain.handle('report:weekly', async (event, data) => {
+    if (!fromApp(event) || !data || typeof data !== 'object') return { ok: false, error: 'forbidden' };
+    if (JSON.stringify(data).length > 3e6) return { ok: false, error: 'too_big' };
+    const rep = weeklyReport(data.room || {}, data.attendance || {}, { now: Date.now() });
+    if (!rep.rows.length) return { ok: false, error: 'no_students' };
+    const dir = join(SMOKE ? app.getPath('temp') : app.getPath('documents'), 'خلفون');
+    await mkdir(dir, { recursive: true });
+    const d = new Date();
+    const file = join(dir, `تقرير-المشاركة-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.xlsx`);
+    await writeFile(file, await buildXlsx({ title: rep.title, columns: rep.columns, rows: rep.rows }));
+    if (!SMOKE) shell.openPath(file).catch(() => {});
+    diag.write('weekly report', file, rep.summary);
+    return { ok: true, file, summary: rep.summary };
+  });
   ipcMain.handle('math:solve', async (event, q) => {
     if (!fromApp(event) || !q || typeof q !== 'object') return { ok: false, error: 'forbidden' };
     return mathEngine.solve(String(q.task || ''), String(q.expr || '').slice(0, 300));
@@ -973,6 +1008,14 @@ function setupIpc(stores, executor) {
     onWhisper: (text) => send('phone-whisper', { text }),
     onPhoto: (purpose, photo) => { if (win) win.showInactive(); send('phone-photo', { purpose, photo }); },
     getState: () => phoneUiState,
+    getInbox: () => inbox.list(),
+    onInbox: (id, action) => {
+      const it = inbox.act(id, action);
+      if (!it) return false;
+      diag.write('phone inbox:', it.kind, '→', action);
+      send('inbox-act', { id, action, kind: it.kind, data: it.data });
+      return true;
+    },
     log: (...a) => diag.write(...a),
   });
   // What the phone's buttons show (voice muted, bubble hidden, which step): told by the page.
@@ -1780,6 +1823,13 @@ async function start() {
   handsHost = new OfficeHost({ tempDir: join(app.getPath('temp'), 'khalfoun'), scriptPath: join(ROOT, 'src', 'main', 'brain', 'hands.ps1'), copyName: 'khalfoun-hands.ps1', sta: false, timeoutMs: 15000, log: (...a) => diag.write(...a) });
   const executor = createExecutor({
     isHalted: () => halted, softConfirm, beforeClick: showClickMarker,
+    // every action Khalfoun did, for the teacher to look through (settings → سجل اللي سواه خلفون)
+    onDone: (action, res) => {
+      const p = action.params || {};
+      const what = p.app || p.url || p.text || p.keys || p.name || p.op || p.query || '';
+      actionLog.push({ at: Date.now(), type: action.type, what: String(what).slice(0, 80), ok: Boolean(res?.ok), error: res?.ok ? '' : String(res?.error || '').slice(0, 60) });
+      if (actionLog.length > 200) actionLog.splice(0, actionLog.length - 200);
+    },
     platform, getSettings: () => settings, downloadsDir, journal: stores.journal, scheduleReminder, office, hands: handsHost,
     cancelReminders: () => reminderScheduler.cancelAll(),
     readScreen,
@@ -1843,6 +1893,30 @@ async function start() {
     getSettings: () => settings,
     getApiKey: () => secrets.claudeKey || null,
     math: mathEngine,
+    // a lesson prepared from a page: a Word file in Documents\خلفون, opened for the teacher
+    saveLesson: async (l) => {
+      try {
+        const dir = join(SMOKE ? app.getPath('temp') : app.getPath('documents'), 'خلفون');
+        await mkdir(dir, { recursive: true });
+        const safe = String(l.title).replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ').trim().slice(0, 60) || 'درس';
+        const file = join(dir, `تحضير - ${safe}.docx`);
+        const order = { سهل: 0, متوسط: 1, صعب: 2 };
+        const qs = [...l.questions].sort((a, b) => order[a.level] - order[b.level]);
+        const plan = {
+          kind: 'document', title: `تحضير درس: ${l.title}${l.grade ? ` — ${l.grade}` : ''}`,
+          blocks: [
+            { type: 'heading', text: 'الأهداف' }, { type: 'bullets', items: l.objectives },
+            { type: 'heading', text: 'خطوات العرض' }, { type: 'numbered', items: l.steps },
+            { type: 'heading', text: 'أسئلة متدرجة' }, { type: 'questions', items: qs.map((q) => ({ q: `(${q.level}) ${q.q}`, choices: q.choices || [], answer: q.answer })) },
+            { type: 'heading', text: 'بطاقة الخروج' }, { type: 'numbered', items: l.exit_ticket },
+          ],
+        };
+        await writeFile(file, await buildDocx(plan, { digits: settings.digits || 'arabic' }));
+        if (!SMOKE) shell.openPath(file).catch(() => {});
+        diag.write('lesson prepared', file);
+        return { ok: true, file };
+      } catch (err) { return { ok: false, error: String(err?.message || err).slice(0, 120) }; }
+    },
     fetchFn: (url, init) => net.fetch(url, init),
     ...(SMOKE && process.env.KHALFOUN_CLAUDE_EXE ? { exePath: process.env.KHALFOUN_CLAUDE_EXE } : (() => {
       // Claude's program already downloaded by Khalfoun 2 is used as it is (no second download)

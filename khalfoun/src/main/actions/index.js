@@ -134,6 +134,7 @@ export function createExecutor(deps) {
     }
     const res = await perform(action);
     if (res?.ok) { const u = undoFor(action); if (u) lastUndo = { action: u, from: action.type, at: Date.now() }; }
+    try { deps.onDone?.(action, res); } catch { /* the log never gets in the way */ }
     return res;
   }
 

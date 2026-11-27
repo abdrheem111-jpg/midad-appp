@@ -26,6 +26,9 @@ import { StepsDeck, stepWord } from './steps.js';
 import { DocView } from './doc-view.js';
 import { GraphPanel } from './graph-panel.js';
 import { SafetyUi } from './safety-ui.js';
+import { QuizBoard } from './quiz-board.js';
+import { MemoryPanel } from './memory-panel.js';
+import { Suggester, LessonWatch, momentFromWords, routineCommand, routinePattern, dictionaryCommand, applyDictionary } from '../core/proactive.js';
 import { fastPlan, isFast } from '../core/fast-layer.js';
 import { mathCommand } from '../core/spoken-math.js';
 import { mathDeck } from '../core/math-deck.js';
@@ -141,8 +144,12 @@ let mind = null; // the Claude mind (MindClient), when the teacher linked his Cl
 let lastReply = null; // for automated checks
 const recentSituations = []; // for automated checks
 
+let lastPickAt = 0;
+let conceptTimer = null;
 function handle(reply) {
   if (!reply) return;
+  if (['pick_result', 'pick_new_round', 'wheel_result'].includes(reply.situation)) lastPickAt = Date.now();
+  if (reply.situation === 'celebrate' || reply.effect === 'fireworks') setStatus('celebrating');
   // The wheel spins first; the name is said when it stops.
   if (reply.wheel) {
     const spinning = reply.wheel;
@@ -328,7 +335,11 @@ let voiceBeforeMute = null;
 const stepsDeck = new StepsDeck({
   ink,
   say: (t) => { showBubble(stripTashkeel(t), 'focused'); if (voiceOut.enabled) voiceOut.speak(t); },
-  onChange: (st) => { pushPhoneState(); bridge.steps?.keys(st.active); },
+  onChange: (st) => {
+    pushPhoneState(); bridge.steps?.keys(st.active);
+    // all the steps shown: a little later, a quiet idea (a check question)
+    if (st.active && st.steps > 1 && st.step >= st.steps && !conceptTimer) conceptTimer = setTimeout(() => { conceptTimer = null; offerSuggestion('concept_done'); }, 25000);
+  },
 });
 const docView = new DocView(document.body);
 
@@ -338,6 +349,98 @@ const safety = new SafetyUi(document.body, {
   onInteractive: (on) => { if (on) setInteractive(true); else if (!panelsOpen()) setInteractive(false); },
   note: (t) => bridge.note?.(t),
 });
+const quizBoard = new QuizBoard(document.body, {
+  celebrate: () => effects.play('confetti'),
+  say: (t) => { if (voiceOut.enabled) voiceOut.speak(t); showBubble(t, 'happy'); },
+  write: (t) => (brain.memory.data.digits === 'latin' ? t : mathText(t, { digits: 'arabic' }).replace(/[\uE000-\uE003]/g, '')),
+  onOpen: () => { closeCommand(); setInteractive(true); },
+  onClose: () => { if (!panelsOpen()) setInteractive(false); },
+});
+/** The teacher's private inbox on his phone (suggestions, gradings to approve, a quiz to show). */
+async function toInbox(it) { const r = await bridge.inbox?.add?.(it); return r?.id || null; }
+function onInboxAct(ev) {
+  bridge.note?.(`inbox: ${ev.kind} → ${ev.action}`);
+  if (ev.kind === 'quiz' && ev.action === 'show') quizBoard.show(ev.data);
+  else if (ev.kind === 'grade' && ev.action === 'approve' && ev.data) {
+    const room = brain.room();
+    if (ev.data.student) room.note(ev.data.student, 'grade', Date.now(), { score: ev.data.score, total: ev.data.total });
+    brain.saveRoom(room);
+    const m = lessonWatch.grade(Number(ev.data.score), Number(ev.data.total));
+    if (m) offerSuggestion(m);
+  } else if (ev.kind === 'suggest' && ev.action === 'do' && ev.data?.say) hear(ev.data.say, { typed: true });
+  else if (ev.kind === 'routine' && ev.action === 'save' && ev.data) saveRoutine(ev.data.name, ev.data.steps);
+}
+/** «صدّر تقرير المشاركة»: the week in Excel (Documents\خلفون). */
+async function exportWeeklyReport() {
+  const r = await bridge.report?.weekly?.({ room: brain.room().toJSON(), attendance: brain.memory.data.attendance || {} });
+  if (r?.ok) showBubble(`جهزت تقرير المشاركة في Excel 📊\n${r.summary}`, 'happy', true);
+  else showBubble(r?.error === 'no_students' ? 'ما عندي أسماء طلاب بعد. قول لي «أسماء الطلاب: …».' : 'ما قدرت أجهز التقرير.', 'sorry', true);
+  return r;
+}
+// ----- Khalfoun 3: quiet suggestions, routines, the dialect dictionary, the memory screen
+const memoryPanel = new MemoryPanel(document.body, {
+  getData: () => brain.memory.data, setData: (patch) => brain.memory.set(patch), bridge,
+  onOpen: () => { closeCommand(); setInteractive(true); },
+  onClose: () => { if (!panelsOpen()) setInteractive(false); },
+});
+const suggester = new Suggester({ enabled: () => brain.memory.data.suggestions !== false, everyMin: () => brain.memory.data.suggestEvery || 10 });
+const lessonWatch = new LessonWatch();
+let suggestIcon = null;
+/** A suggestion: on the teacher's phone, and a small silent 💡 on the screen (never spoken). */
+async function offerSuggestion(moment) {
+  const s = suggester.moment(moment);
+  if (!s) return;
+  bridge.note?.(`suggestion: ${moment}`);
+  await toInbox(s);
+  suggestIcon?.remove();
+  suggestIcon = document.createElement('button');
+  suggestIcon.className = 'suggest-icon fx-ui'; suggestIcon.type = 'button'; suggestIcon.textContent = '💡'; suggestIcon.title = s.title;
+  suggestIcon.addEventListener('click', () => {
+    document.querySelector('.suggest-card')?.remove();
+    const card = document.createElement('div'); card.className = 'suggest-card fx-ui';
+    const b = document.createElement('b'); b.textContent = s.title; const p = document.createElement('p'); p.textContent = s.body;
+    const row = document.createElement('div'); row.className = 'row';
+    const go = document.createElement('button'); go.className = 'go'; go.textContent = 'سوّه'; go.addEventListener('click', () => { card.remove(); suggestIcon?.remove(); suggestIcon = null; hear(s.data.say, { typed: true }); });
+    const no = document.createElement('button'); no.textContent = 'لا شكراً'; no.addEventListener('click', () => { card.remove(); suggestIcon?.remove(); suggestIcon = null; });
+    row.append(go, no); card.append(b, p, row); document.body.append(card);
+  });
+  document.body.append(suggestIcon);
+  setTimeout(() => { suggestIcon?.remove(); suggestIcon = null; }, 4 * 60000); // goes by itself
+}
+// routines
+let recording = null; // { name, steps }
+function saveRoutine(name, steps) {
+  const key = normalize(name);
+  brain.memory.set({ routines: { ...(brain.memory.data.routines || {}), [key]: { name, steps: steps.slice(0, 12), at: Date.now() } } });
+  return key;
+}
+let routineRunning = false;
+async function runRoutine(key) {
+  const r = (brain.memory.data.routines || {})[key];
+  if (!r || routineRunning) return;
+  routineRunning = true;
+  showBubble(`أبدأ «${r.name}» (${r.steps.length.toLocaleString('ar-EG')} خطوات)`, 'happy');
+  try {
+    for (const step of r.steps) {
+      hear(step, { typed: true, routineStep: true });
+      const t0 = Date.now();
+      await new Promise((res) => setTimeout(res, 700));
+      while (mind?.busy && Date.now() - t0 < 40000) await new Promise((res) => setTimeout(res, 300));
+    }
+  } finally { routineRunning = false; }
+}
+function rememberCommand(text) {
+  const hist = [...(brain.memory.data.cmdHistory || []), { text: String(text).slice(0, 120), at: Date.now() }].slice(-200);
+  brain.memory.set({ cmdHistory: hist });
+  const p = routinePattern(hist);
+  if (!p) return;
+  const key = p.steps.map(normalize).join(' | ');
+  const offered = brain.memory.data.routinesOffered || [];
+  if (offered.includes(key) || Object.values(brain.memory.data.routines || {}).some((r) => r.steps.map(normalize).join(' | ') === key)) return;
+  brain.memory.set({ routinesOffered: [...offered, key].slice(-50) });
+  const name = (brain.memory.data.routines || {})[normalize('ابدأ الحصة')] ? `روتين ${(Object.keys(brain.memory.data.routines || {}).length + 1).toLocaleString('ar-EG')}` : 'ابدأ الحصة';
+  toInbox({ kind: 'routine', title: '💡 لاحظت أوامر تسويها مع بعض', body: `${p.steps.join(' ← ')}\nأحفظها روتين باسم «${name}»؟ بعدها تقول «${name}» وتتنفذ كلها.`, actions: [{ id: 'save', label: 'احفظه', main: true }, { id: 'dismiss', label: 'لا' }], data: { name, steps: p.steps } });
+}
 let haltedUi = false;
 function setHalted(on) {
   haltedUi = on;
@@ -477,6 +580,11 @@ async function onPhonePhoto(purpose, bytes) {
   if (purpose === 'doc') { docView.show(blob); showBubble('هذا دفتر الطالب 📖 تقدر تكتب فوقه بالقلم، أو قول لي «علّق على الحل».', 'happy'); return; }
   if (!mind?.on) { showBubble('التصحيح بالصور يحتاج مخ Claude شغال من الإعدادات.', 'sorry', true); return; }
   const image = { data: await blobToBase64(blob), mime };
+  if (purpose === 'lesson') {
+    showBubble('شفت الصفحة 📘 أحضّر الدرس…', 'focused');
+    mind.ask('[صورة صفحة من كتاب الطالب (المنهج العُماني) من جوال المعلم] حضّر درس منها بأداة lesson_prep: أهداف، خطوات عرض، أسئلة متدرجة (سهل ← صعب، تحقق من الرياضيات بأداة math)، وبطاقة خروج. رد بجملة قصيرة.', { via: 'typed', silent: true, image });
+    return;
+  }
   if (purpose === 'problem') {
     showBubble('شفت المسألة 🧮 لحظة أحلها…', 'focused');
     mind.ask('[صورة مسألة من كتاب أو دفتر، من جوال المعلم] اقرأ المسألة بدقة، وحلها بأداة math مع show:"steps" عشان تنعرض خطوة خطوة قدام الصف. إذا فيها أكثر من مسألة خذ الأولى وقل كم باقي.', { via: 'typed', image });
@@ -485,7 +593,7 @@ async function onPhonePhoto(purpose, bytes) {
   if (purpose === 'key') {
     mind.ask('[صورة نموذج الإجابة من جوال المعلم] احفظ الإجابات الصحيحة اللي في هالصورة عشان تصحّح عليها أوراق الطلاب الجاية. رد بجملة قصيرة: كم سؤال حفظت.', { via: 'typed', silent: true, image });
   } else {
-    mind.ask('[صورة ورقة طالب من جوال المعلم] صحّحها: إذا حفظت نموذج إجابة صحّح عليه، وإلا حل الأسئلة بنفسك بدقة. اكتب في ردك: اسم الطالب إذا مكتوب، والدرجة من المجموع، وكل خطأ في سطر قصير مع الجواب الصحيح. هذا للمعلم بس.', { via: 'typed', silent: true, image });
+    mind.ask('[صورة ورقة طالب من جوال المعلم] صحّحها: إذا حفظت نموذج إجابة صحّح عليه، وإلا حل الأسئلة بأداة math (لا تحسب من راسك). بعدين استعمل أداة grade_result (اسم الطالب إذا مكتوب، الدرجة، المجموع، وكل خطأ في سطر قصير مع الجواب الصحيح) عشان تطلع على جوال المعلم ويعتمدها. لا تعرض شي على شاشة الصف.', { via: 'typed', silent: true, image });
   }
 }
 
@@ -836,6 +944,49 @@ function hear(text, opts = {}) {
   const nt = normalize(t);
   // the yellow countdown: «لا / الغ / وقف / لا تسوي» cancels it
   if (safety.counting && /^(لا|الغ|الغيه|الغي|كنسل|وقف|لا تسوي|لا تسويها|خلها|اتركها|لا لا)( يا خلفون)?$/.test(nt)) { safety.cancel(); return; }
+  // the dialect dictionary: «لما أقول الشنطة أقصد الملف»
+  const dc = dictionaryCommand(t);
+  if (dc) { brain.memory.set({ dictionary: { ...(brain.memory.data.dictionary || {}), [dc.from]: dc.to } }); showBubble(`تمام، «${dc.from}» يعني «${dc.to}» 👍`, 'happy'); return; }
+  const dict = brain.memory.data.dictionary;
+  if (dict && Object.keys(dict).length && !opts.dictDone) {
+    const fixed = applyDictionary(t, dict);
+    if (fixed !== t) { bridge.note?.(`dictionary: «${t}» → «${fixed}»`); hear(fixed, { ...opts, dictDone: true }); return; }
+  }
+  // routines: «سجل روتين ابدأ الحصة» … «خلاص الروتين», then «ابدأ الحصة»
+  const rc = routineCommand(t, brain.memory.data.routines || {});
+  if (rc?.op === 'start') { recording = { name: rc.name, steps: [] }; showBubble(`أسجّل روتين «${rc.name}». قل الخطوات وحدة وحدة (وأنفذها معك)، وقل «خلاص الروتين» لما تخلص.`, 'happy', true); return; }
+  if (rc?.op === 'end') {
+    if (!recording?.steps.length) { recording = null; showBubble('ما سجلت خطوات.', 'calm'); return; }
+    saveRoutine(recording.name, recording.steps);
+    showBubble(`حفظت روتين «${recording.name}» (${recording.steps.length.toLocaleString('ar-EG')} خطوات). قل «${recording.name}» وأسويها كلها.`, 'happy', true);
+    recording = null; return;
+  }
+  if (rc?.op === 'delete') {
+    const all = { ...(brain.memory.data.routines || {}) }; const k = normalize(rc.name);
+    if (all[k]) { delete all[k]; brain.memory.set({ routines: all }); showBubble(`حذفت روتين «${rc.name}».`, 'calm'); } else showBubble('ما لقيت روتين بهالاسم.', 'calm');
+    return;
+  }
+  if (rc?.op === 'list') { const r = Object.values(brain.memory.data.routines || {}); showBubble(r.length ? r.map((x) => `«${x.name}»: ${x.steps.join(' ← ')}`).join('\n') : 'ما فيه روتينات بعد.', 'calm', true); return; }
+  if (rc?.op === 'run' && !opts.routineStep) { runRoutine(rc.name); return; }
+  if (recording && !opts.routineStep) recording.steps.push(t);
+  // the lesson's moments (for quiet suggestions)
+  if (!opts.routineStep && !opts.viaAgent) {
+    const m = momentFromWords(t) || lessonWatch.command();
+    if (m) setTimeout(() => offerSuggestion(m), m === 'lesson_start' ? 20000 : 4000);
+    rememberCommand(t);
+  }
+  // a quiz on the screen: «كمل / ارجع / الجواب»
+  if (quizBoard.open) {
+    if (/^(الجواب|اظهر الجواب|وش الجواب|شو الجواب|ايش الجواب)( يا خلفون)?$/.test(nt)) { quizBoard.reveal(); return; }
+    const qw = stepWord(nt);
+    if (qw) { if (qw === 'next') quizBoard.next(); else quizBoard.back(); return; }
+  }
+  // «ليش هو؟» right after a pick: why that student (the fair pick favours those who took part less)
+  if (/^(ليش|ليه|لماذا|ليش اخترت) ?(هو|هي|اخترته|اخترتها|هذا|هذي|اخترتيه)?\??$/.test(nt) && Date.now() - lastPickAt < 3 * 60000) {
+    const room = brain.room(); const who = room.picked.at(-1);
+    if (who) { showBubble(room.why(who), 'calm', true); return; }
+  }
+  if (/^(صدر |جهز |سو |طلع )?(تقرير المشاركه|التقرير الاسبوعي|تقرير الاسبوع)( في اكسل)?$/.test(nt)) { exportWeeklyReport(); return; }
   // «حل ٢س + ٣ = ١١» / «حلل س تربيع ناقص تسعة»: SymPy on this PC solves it step by step, no Claude needed
   const mc = !opts.viaAgent && !opts.noMath ? mathCommand(t) : null;
   if (mc && bridge.math) { localMath(mc, t, opts); return; }
@@ -1159,6 +1310,13 @@ async function setK3(patch) {
 for (const [id, key] of [['k3-privacy', 'privacyMask'], ['k3-photos', 'maskPhotos'], ['k3-yellow', 'yellowCountdown'], ['k3-barge', 'bargeIn'], ['k3-fx', 'fxEnabled'], ['k3-suggest', 'suggestions']]) {
   $(id)?.addEventListener('change', () => setK3({ [key]: $(id).checked }));
 }
+$('k3-memory')?.addEventListener('click', () => { closeSettings(); memoryPanel.show('memory'); });
+$('k3-log')?.addEventListener('click', () => { closeSettings(); memoryPanel.show('log'); });
+$('phone-unpair')?.addEventListener('click', async () => {
+  const r = await bridge.phone?.unpair?.();
+  renderPhone(r || undefined);
+  showBubble('ألغيت ربط كل الجوالات. صوّر الرمز الجديد من جوالك.', 'calm', true);
+});
 $('k3-provider')?.addEventListener('change', () => setK3({ provider: $('k3-provider').value }));
 $('k3-every')?.addEventListener('change', () => setK3({ suggestEvery: Number($('k3-every').value) || 10 }));
 
@@ -1360,6 +1518,8 @@ async function onWakeSentence(wav, head = wav, ms = 0) {
     return;
   }
   if (recorder.active || panelsOpen() || haltedUi) return;
+  // the teacher explaining to the class (not to Khalfoun): after a long stretch, a quiet idea
+  if (!inSession() && !voiceOut.speaking) { const lt = lessonWatch.talk(ms || 0); if (lt) offerSuggestion(lt); }
   // Did the ear hear his name during this sentence (or just before it)?
   const meta = { earHit: Boolean(ear && ear.hitAt && ear.hitAt >= Date.now() - (ms || 3000) - 1500), t0: Date.now() };
   if (voiceOut.speaking) {
@@ -1510,7 +1670,7 @@ function setInteractive(on) {
   bridge.setInteractive(on);
 }
 
-const panelsOpen = () => !els.onboarding.hidden || !els.settings.hidden || !$('guide').hidden || cameraPanel.open || voiceTest.open || earTrainer.open || cameraPick.open;
+const panelsOpen = () => !els.onboarding.hidden || !els.settings.hidden || !$('guide').hidden || cameraPanel.open || voiceTest.open || earTrainer.open || cameraPick.open || quizBoard.open || memoryPanel.open || safety.counting;
 
 let lastMouseX = null;
 document.addEventListener('mousemove', (e) => {
@@ -1576,6 +1736,9 @@ document.addEventListener('keydown', (e) => {
     else if (voiceTest.open) voiceTest.close();
     else if (earTrainer.open) earTrainer.close();
     else if (cameraPick.open) cameraPick.close();
+    else if (safety.counting) safety.cancel();
+    else if (quizBoard.open) quizBoard.close();
+    else if (memoryPanel.open) memoryPanel.close();
     else if (!$('guide').hidden) hideGuide();
     else if (!els.settings.hidden) closeSettings();
     else closeCommand();
@@ -2037,6 +2200,7 @@ async function renderPhone(info) {
   const on = Boolean(info?.ok);
   $('phone-on').hidden = on;
   $('phone-off').hidden = !on;
+  $('phone-unpair').hidden = !on;
   $('phone-box').hidden = !on;
   if (!on) return;
   if (info.qr) $('phone-qr').src = info.qr;
@@ -2206,7 +2370,7 @@ async function start() {
 
   voiceOut.setEnabled(!!brain.memory.data.speak);
   mind = new MindClient({
-    bridge, brain, ink, character, animator, sounds, voiceOut, showBubble, screenFx, effects, pickWithCamera, stepsDeck, docView, graphPanel, setStatus: (st) => setStatus(st), metric: (k, ms) => noteMetric(k, ms),
+    bridge, brain, ink, character, animator, sounds, voiceOut, showBubble, screenFx, effects, pickWithCamera, stepsDeck, docView, graphPanel, setStatus: (st) => setStatus(st), metric: (k, ms) => noteMetric(k, ms), toInbox: (it) => toInbox(it), exportWeeklyReport: () => exportWeeklyReport(),
     recorderActive: () => recorder.active,
     localHear: (cmd, o = {}) => {
       // Claude's «classroom» tool is for the games and class tools only: opening a program or a
@@ -2264,6 +2428,7 @@ async function start() {
       case 'phone-photo': onPhonePhoto(ev.purpose, ev.photo); break;
       case 'steps-key': if (ev.dir === 'back') stepsDeck.back(); else stepsDeck.next(); break;
       case 'soft-confirm': safety.soft(ev); break;
+      case 'inbox-act': onInboxAct(ev); break;
       case 'stt-partial': if (streaming && ev.text) showHeard(String(ev.text)); break;
       case 'click-marker': safety.marker(ev.x, ev.y); break;
       case 'emergency': setHalted(Boolean(ev.on)); break;

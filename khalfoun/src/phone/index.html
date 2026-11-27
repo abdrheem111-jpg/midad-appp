@@ -31,6 +31,11 @@
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
   .grid button, .wide { font: inherit; font-size: 17px; padding: 16px 8px; border-radius: 14px; border: none; background: #fff; color: var(--ink); box-shadow: 0 2px 8px rgba(0,0,0,.07); }
   .grid button.on { background: #d5efe5; color: var(--accent); font-weight: 700; }
+  #inbox .card { background: #fffbe6; border-radius: 14px; padding: 12px; margin: 8px 0; text-align: start; }
+  #inbox .card p { white-space: pre-wrap; margin: 6px 0; font-size: 15px; }
+  #inbox .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  #inbox .row button { flex: 1; padding: 10px; border-radius: 10px; border: none; background: #eef3f8; font: inherit; }
+  #inbox .row button.go { background: var(--accent); color: #fff; }
   .grid button.danger { background: #b3261e; color: #fff; grid-column: 1 / -1; }
   .grid button.danger.on { background: #1e8449; }
   .grid button.big { font-size: 20px; padding: 22px 8px; background: var(--accent); color: #fff; }
@@ -66,6 +71,7 @@
       <p class="fine" id="hint">خلّ الصفحة مفتوحة والشاشة شغالة. نادِ «يا خلفون» أو اضغط الزر وتكلم.</p>
     </div>
     <div class="pane" data-pane="ctl" hidden>
+      <section id="inbox" hidden><h3>📥 لك أنت بس <small id="inbox-n"></small></h3><div id="inbox-list"></div></section>
       <div class="grid">
         <button class="big" data-cmd="step_back">◀ الخطوة السابقة</button>
         <button class="big" data-cmd="step_next">الخطوة الجاية ▶</button>
@@ -97,6 +103,7 @@
       <button class="wide" data-photo="doc">📖 اعرض الدفتر على الشاشة<br><small>صوّر حل الطالب ويطلع كبير قدام الكل</small></button>
       <button class="wide" data-photo="grade">📝 صحّح ورقة<br><small>صوّر الورقة وخلفون يصحّحها</small></button>
       <button class="wide" data-photo="key">📋 نموذج الإجابة<br><small>صوّره مرة قبل التصحيح</small></button>
+      <button class="wide" data-photo="lesson">📘 حضّر درس من هالصفحة<br><small>أهداف وخطوات وأسئلة متدرجة وبطاقة خروج (ملف Word)</small></button>
       <button class="wide" data-photo="problem">🧮 مسألة من الكتاب<br><small>خلفون يحلها خطوة خطوة قدام الصف</small></button>
       <p class="fine" id="camstate">الصور تروح لجهاز خلفون بس، واختيار الطالب يصير على الجهاز نفسه.</p>
       <input id="shot" type="file" accept="image/*" capture="environment" hidden>
@@ -107,7 +114,20 @@
 
 <script>
 'use strict';
-const KEY = new URLSearchParams(location.search).get('k') || '';
+// The pairing key comes once in the QR address; it is kept for this tab only and removed from
+// the address bar. Every request is signed with it (HMAC-SHA256) instead of carrying it.
+const KEY = (() => {
+  const k = new URLSearchParams(location.search).get('k');
+  if (k) { try { sessionStorage.setItem('kh-k', k); } catch { /* private mode */ } history.replaceState(null, '', location.pathname); return k; }
+  try { return sessionStorage.getItem('kh-k') || ''; } catch { return ''; }
+})();
+let hmacKey = null;
+async function sign(method, path, query, ts) {
+  hmacKey ??= await crypto.subtle.importKey('raw', new TextEncoder().encode(KEY), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const q = new URLSearchParams(query); q.delete('k'); q.sort();
+  const mac = await crypto.subtle.sign('HMAC', hmacKey, new TextEncoder().encode(`${method} ${path}?${q} ${ts}`));
+  return btoa(String.fromCharCode(...new Uint8Array(mac))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
 const $ = (id) => document.getElementById(id);
 const RATE = 16000;
 let ctx = null; let stream = null; let node = null; let src = null;
@@ -117,7 +137,11 @@ let lock = null; let failures = 0; let lastOk = 0;
 
 function setState(text, cls) { const s = $('state'); s.textContent = text; s.className = cls || ''; }
 async function post(path, body, type, extra = '') {
-  const r = await fetch(`${path}?k=${encodeURIComponent(KEY)}${path === '/audio' ? `&seq=${seq++}` : ''}${extra}`, { method: 'POST', body, headers: type ? { 'content-type': type } : {}, cache: 'no-store' });
+  const query = `${path === '/audio' ? `seq=${seq++}` : ''}${extra}`.replace(/^&/, '');
+  const ts = Date.now();
+  const headers = { 'x-kh-ts': String(ts), 'x-kh-sig': await sign('POST', path, query, ts) };
+  if (type) headers['content-type'] = type;
+  const r = await fetch(`${path}${query ? `?${query}` : ''}`, { method: 'POST', body, headers, cache: 'no-store' });
   if (!r.ok && r.status !== 204) throw new Error(`http ${r.status}`);
   return r;
 }
@@ -182,6 +206,41 @@ async function start() {
   keepAwake();
   hello();
   setInterval(hello, 2500);
+  setInterval(inbox, 4000); inbox();
+}
+
+// The teacher's inbox: Khalfoun's quiet suggestions, gradings to approve, a quiz to show
+let inboxSeen = '';
+async function inbox() {
+  if (document.hidden) return;
+  try {
+    const r = await post('/inbox', '');
+    const j = await r.json();
+    renderInbox(j.items || []);
+  } catch { /* next time */ }
+}
+function renderInbox(items) {
+  const key = JSON.stringify(items.map((i) => [i.id, i.status]));
+  if (key === inboxSeen) return;
+  const fresh = items.some((i) => !inboxSeen.includes(`"${i.id}"`) && i.status === 'new');
+  inboxSeen = key;
+  const list = $('inbox-list'); list.textContent = '';
+  const open = items.filter((i) => i.status === 'new');
+  $('inbox').hidden = !open.length;
+  $('inbox-n').textContent = open.length ? `(${open.length.toLocaleString('ar-EG')})` : '';
+  if (fresh) navigator.vibrate?.([30, 60, 30]);
+  for (const it of open) {
+    const card = document.createElement('div'); card.className = 'card';
+    const h = document.createElement('b'); h.textContent = it.title; card.append(h);
+    const p = document.createElement('p'); p.textContent = it.body || ''; card.append(p);
+    const row = document.createElement('div'); row.className = 'row';
+    for (const a of it.actions || []) {
+      const b = document.createElement('button'); b.textContent = a.label; if (a.main) b.className = 'go';
+      b.addEventListener('click', async () => { navigator.vibrate?.(15); try { const r = await post('/inbox/act', '', null, `&id=${encodeURIComponent(it.id)}&action=${encodeURIComponent(a.id)}`); renderInbox((await r.json()).items || []); } catch { setState('✗ ما وصل', 'bad'); } });
+      row.append(b);
+    }
+    card.append(row); list.append(card);
+  }
 }
 
 async function keepAwake() {
@@ -270,7 +329,7 @@ t.addEventListener('pointercancel', endTalk);
 t.addEventListener('pointerleave', endTalk);
 t.addEventListener('contextmenu', (e) => e.preventDefault());
 $('always').addEventListener('change', () => { hello(); if (!$('always').checked) { pending = []; pendingLen = 0; } });
-window.addEventListener('pagehide', () => { try { navigator.sendBeacon(`/bye?k=${encodeURIComponent(KEY)}`); } catch { /* closing */ } });
+window.addEventListener('pagehide', () => { post('/bye', '').catch(() => {}); }); // best effort: Khalfoun also notices when the phone goes quiet
 hello();
 </script>
 </body>

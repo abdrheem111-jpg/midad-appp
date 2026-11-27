@@ -5,11 +5,23 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import selfsigned from 'selfsigned';
-import { createPhoneMic, lanAddresses, isPrivate } from '../src/main/phone-mic.js';
+import { createPhoneMic, lanAddresses, isPrivate, signPhone } from '../src/main/phone-mic.js';
+
+// Khalfoun 3: requests after the page are signed with the pairing key (as the phone page does)
+function signed(url, method, headers) {
+  const u = new URL(url); const k = u.searchParams.get('k');
+  if (k === null || (method === 'GET' && u.pathname === '/')) return url;
+  u.searchParams.delete('k');
+  const ts = Date.now();
+  headers['x-kh-ts'] = String(ts); headers['x-kh-sig'] = signPhone(k, method, u.pathname, u.searchParams, ts);
+  return u.toString();
+}
 
 function call(url, { method = 'GET', body } = {}) {
   return new Promise((resolve, reject) => {
-    const req = request(url, { method, rejectUnauthorized: false }, (res) => {
+    const headers = {};
+    const target = signed(url, method, headers);
+    const req = request(target, { method, rejectUnauthorized: false, headers }, (res) => {
       const parts = [];
       res.on('data', (c) => parts.push(c));
       res.on('end', () => resolve({ status: res.statusCode, text: Buffer.concat(parts).toString('utf8'), headers: res.headers }));
@@ -88,4 +100,43 @@ test('phone mic: only private-network addresses, a phone hotspot first', () => {
     Public: [{ family: 'IPv4', address: '5.6.7.8', internal: false }],
   });
   assert.deepEqual(list.map((a) => a.address), ['172.20.10.3', '192.168.1.20']);
+});
+
+test('Khalfoun 3: a phone request must be signed, fresh, and never replayed; the inbox works through it', async () => {
+  const acts = [];
+  const items = [{ id: 'grade-1', kind: 'grade', title: 'تصحيح', status: 'new', actions: [{ id: 'approve', label: 'اعتمد' }] }];
+  const mic = createPhoneMic({
+    dir: await mkdtemp(join(tmpdir(), 'kh-phone3-')), pagePath: new URL('../src/phone/index.html', import.meta.url),
+    makeCert: (a, o) => selfsigned.generate(a, o), toQr: async (u) => u, onAudio() {}, onSay() {}, onStatus() {},
+    getInbox: () => items, onInbox: (id, action) => { acts.push([id, action]); return id === 'grade-1'; },
+    addresses: () => [{ address: '127.0.0.1' }], ports: [0],
+  });
+  const info = await mic.start();
+  const base = info.url.split('?')[0];
+  const key = new URL(info.url).searchParams.get('k');
+  const raw = (path, headers) => new Promise((resolve, reject) => {
+    const req = request(`${base}${path.slice(1)}`, { method: 'POST', rejectUnauthorized: false, headers }, (res) => { const p = []; res.on('data', (c) => p.push(c)); res.on('end', () => resolve({ status: res.statusCode, text: Buffer.concat(p).toString() })); });
+    req.on('error', reject); req.end();
+  });
+  try {
+    assert.equal((await raw(`/hello?k=${key}`, {})).status, 403); // the key alone is not enough any more
+    const ts = Date.now();
+    const sig = signPhone(key, 'POST', '/hello', new URLSearchParams(), ts);
+    assert.equal((await raw('/hello', { 'x-kh-ts': String(ts), 'x-kh-sig': sig })).status, 200);
+    assert.equal((await raw('/hello', { 'x-kh-ts': String(ts), 'x-kh-sig': sig })).status, 403); // replayed
+    const old = Date.now() - 120000;
+    assert.equal((await raw('/hello', { 'x-kh-ts': String(old), 'x-kh-sig': signPhone(key, 'POST', '/hello', new URLSearchParams(), old) })).status, 403); // stale
+    assert.equal((await raw('/hello', { 'x-kh-ts': String(ts + 1), 'x-kh-sig': signPhone('another-key', 'POST', '/hello', new URLSearchParams(), ts + 1) })).status, 403);
+    const inbox = JSON.parse((await call(`${base}inbox?k=${key}`, { method: 'POST' })).text);
+    assert.equal(inbox.items[0].id, 'grade-1');
+    assert.equal((await call(`${base}inbox/act?k=${key}&id=grade-1&action=approve`, { method: 'POST' })).status, 200);
+    assert.equal((await call(`${base}inbox/act?k=${key}&id=nope&action=approve`, { method: 'POST' })).status, 404);
+    assert.equal((await call(`${base}inbox/act?k=${key}&id=bad id!&action=approve`, { method: 'POST' })).status, 400);
+    assert.deepEqual(acts, [['grade-1', 'approve'], ['nope', 'approve']]);
+    // a new pairing key: the old one stops working
+    mic.stop();
+    const again = await mic.start();
+    const key2 = new URL(again.url).searchParams.get('k');
+    assert.notEqual(key2, key);
+  } finally { mic.stop(); }
 });

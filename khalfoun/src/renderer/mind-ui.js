@@ -175,6 +175,9 @@ export class MindClient {
         case 'remember': return reply(this.remember(p.fact));
         case 'fx': return reply(this.fx(p));
         case 'pick': this.d.pickWithCamera?.(); return reply({ ok: true });
+        case 'grade': return reply({ ok: Boolean(await this.d.toInbox?.({ kind: 'grade', title: `تصحيح${p.student ? `: ${p.student}` : ''} — ${p.score} من ${p.total}`, body: (p.mistakes || []).join('\n') || 'بدون أخطاء 👏', actions: [{ id: 'approve', label: 'اعتمد ✅', main: true }, { id: 'reject', label: 'لا' }], data: { student: p.student || '', score: p.score, total: p.total } })) });
+        case 'quiz': return reply({ ok: Boolean(await this.d.toInbox?.({ kind: 'quiz', title: `مسابقة جاهزة: ${p.title || 'من الدرس'} (${(p.questions || []).length} أسئلة)`, body: (p.questions || []).map((q, i) => `${i + 1}. ${q.q}`).join('\n'), actions: [{ id: 'show', label: 'اعرضها للصف', main: true }, { id: 'dismiss', label: 'لا' }], data: p })) });
+        case 'report': return reply(await this.d.exportWeeklyReport?.() || { ok: false });
         case 'steps': return reply({ ok: Boolean(this.d.stepsDeck?.start(p)) });
         case 'graph': return reply(this.d.graphPanel ? this.d.graphPanel.show(p) : { ok: false });
         default: return reply({ ok: false });

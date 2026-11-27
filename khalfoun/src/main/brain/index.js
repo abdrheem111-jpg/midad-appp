@@ -79,7 +79,7 @@ export function createClaudeMind(deps) {
   const notesReady = notes.load().catch(() => notes);
   let turnSteps = null; // the tools Claude used in the current turn, to learn habits from
   const tools = khalfounTools({
-    digits: () => deps.getSettings().digits || 'arabic', run: runAction, math: deps.math, look: eyes.look, find: eyes.find, screen: eyes.screen, snap: eyes.snap,
+    digits: () => deps.getSettings().digits || 'arabic', run: runAction, math: deps.math, saveLesson: deps.saveLesson, look: eyes.look, find: eyes.find, screen: eyes.screen, snap: eyes.snap,
     ui: (k, p, ms) => { if (k === 'ink') eyes.changed(); return ui(k, p, ms); }, log,
     learn: async (kind, note) => { await notesReady; const n = await notes.add(kind, note); if (n) log('learned', kind, `«${n.text.slice(0, 80)}»`); return n; },
   }).map((t) => ({ ...t, handler: async (a) => { const r = await t.handler(a); turnSteps?.push({ name: t.name, input: a, ok: !r?.isError }); return r; } }));

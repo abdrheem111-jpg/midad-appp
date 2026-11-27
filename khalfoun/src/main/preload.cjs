@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('khalfoun', {
     stop: () => ipcRenderer.invoke('phone:stop'),
     info: () => ipcRenderer.invoke('phone:info'),
     state: (st) => ipcRenderer.send('phone:state', st && typeof st === 'object' ? st : {}),
+    unpair: () => ipcRenderer.invoke('phone:unpair'),
   },
   steps: {
     keys: (on) => ipcRenderer.send('steps:keys', on === true),
@@ -41,6 +42,9 @@ contextBridge.exposeInMainWorld('khalfoun', {
     streamEnd: () => ipcRenderer.invoke('stt:stream-end'),
     streamCancel: () => ipcRenderer.send('stt:stream-cancel'),
   },
+  actions: { recent: () => ipcRenderer.invoke('actions:recent') },
+  inbox: { add: (it) => ipcRenderer.invoke('inbox:add', it && typeof it === 'object' ? it : {}) },
+  report: { weekly: (data) => ipcRenderer.invoke('report:weekly', data && typeof data === 'object' ? data : {}) },
   math: {
     solve: (task, expr, opts) => ipcRenderer.invoke('math:solve', { task: String(task || ''), expr: String(expr || '').slice(0, 300), opts: opts && typeof opts === 'object' ? opts : {} }),
   },

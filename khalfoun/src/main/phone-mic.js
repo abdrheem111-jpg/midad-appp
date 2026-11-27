@@ -8,7 +8,7 @@
 import { createServer } from 'node:https';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual, createHmac } from 'node:crypto';
 import { join } from 'node:path';
 
 export const PHONE_PORTS = [47823, 47824, 47825, 47826];
@@ -17,7 +17,7 @@ const MAX_SAY = 1_300_000; // a 40 s push-to-talk recording
 const MAX_PHOTO = 9_000_000; // a phone photo, already made smaller on the phone
 /** The phone's control buttons (anything else is refused). */
 export const PHONE_COMMANDS = ['step_next', 'step_back', 'mute', 'bubble', 'random_student', 'timer_1', 'timer_3', 'timer_5', 'celebrate', 'fireworks', 'clear', 'stop', 'emergency', 'undo', 'fx', 'hide', 'cancel'];
-export const PHOTO_PURPOSES = ['pick', 'doc', 'grade', 'key', 'problem'];
+export const PHOTO_PURPOSES = ['pick', 'doc', 'grade', 'key', 'problem', 'lesson'];
 const isJpegOrPng = (b) => (b[0] === 0xff && b[1] === 0xd8) || (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47);
 
 /** Private IPv4 addresses (home/school network, a phone's hotspot) of this computer. */
@@ -41,6 +41,17 @@ export function isPrivate(ip) {
   if (!m) return ip === '::1';
   const [a, b] = [Number(m[1]), Number(m[2])];
   return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+}
+
+/**
+ * Khalfoun 3: every request after the page itself is signed with the pairing key
+ * (HMAC-SHA256 of «METHOD /path?sorted-query timestamp»), within a minute, and never twice — so
+ * a request seen on the network can be neither forged nor replayed.
+ */
+export function signPhone(key, method, path, query, ts) {
+  const q = new URLSearchParams(query);
+  q.delete('k'); q.sort();
+  return createHmac('sha256', key).update(`${method} ${path}?${q} ${ts}`).digest('base64url');
 }
 
 function sameKey(given, key) {
@@ -98,6 +109,19 @@ export function createPhoneMic(deps) {
     return new Uint8Array(Buffer.concat(parts));
   }
 
+  const seenSigs = new Map();
+  function verified(req, url) {
+    if (!key) return false;
+    if (req.method === 'GET' && url.pathname === '/') return sameKey(url.searchParams.get('k'), key);
+    const ts = Number(req.headers['x-kh-ts']); const sig = String(req.headers['x-kh-sig'] || '');
+    if (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 60000 || !sig) return false;
+    if (!sameKey(sig, signPhone(key, req.method, url.pathname, url.searchParams, ts))) return false;
+    if (seenSigs.has(sig)) return false;
+    seenSigs.set(sig, Date.now());
+    if (seenSigs.size > 500) for (const [k2, at] of seenSigs) if (Date.now() - at > 90000) seenSigs.delete(k2);
+    return true;
+  }
+
   async function handle(req, res) {
     const send = (code, text, type = 'text/plain; charset=utf-8') => {
       res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
@@ -105,7 +129,7 @@ export function createPhoneMic(deps) {
     };
     if (!isPrivate(req.socket.remoteAddress)) return send(403, 'forbidden');
     const url = new URL(req.url, 'https://khalfoun');
-    if (!sameKey(url.searchParams.get('k'), key)) return send(403, 'forbidden');
+    if (!verified(req, url)) return send(403, 'forbidden');
     lastSeen = Date.now();
     try {
       if (req.method === 'GET' && url.pathname === '/') {
@@ -154,6 +178,14 @@ export function createPhoneMic(deps) {
         log('phone mic: a push-to-talk command', `${wav.length} bytes`);
         deps.onSay(wav);
         return send(204, '');
+      }
+      // the teacher's inbox: Khalfoun's suggestions, a grading to approve, a quiz to show (never on the class screen)
+      if (req.method === 'POST' && url.pathname === '/inbox') return send(200, JSON.stringify({ ok: true, items: deps.getInbox?.() || [], state: deps.getState?.() || {} }), 'application/json');
+      if (req.method === 'POST' && url.pathname === '/inbox/act') {
+        const id = url.searchParams.get('id'); const action = url.searchParams.get('action');
+        if (!/^[\w-]{1,40}$/.test(id || '') || !/^[a-z_]{1,20}$/.test(action || '')) return send(400, 'bad');
+        const ok = deps.onInbox?.(id, action);
+        return send(ok === false ? 404 : 200, JSON.stringify({ ok: ok !== false, items: deps.getInbox?.() || [] }), 'application/json');
       }
       if (req.method === 'POST' && url.pathname === '/bye') { lastSeen = 0; lastAudio = 0; tell(); return send(204, ''); }
       return send(404, 'not found');

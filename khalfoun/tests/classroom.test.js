@@ -53,10 +53,10 @@ test('groups are even and contain everyone once', () => {
 test('points: names matched loosely, never below zero, sorted board', () => {
   const room = new Classroom();
   room.setStudents(['أحمد', 'مريم']);
-  assert.deepEqual(room.award('احمد', 2), { name: 'أحمد', points: 2 });
-  assert.deepEqual(room.award('مريم', 1), { name: 'مريم', points: 1 });
-  assert.deepEqual(room.award('مريم', -5), { name: 'مريم', points: 0 });
-  assert.deepEqual(room.award('خالد', 1), { name: 'خالد', points: 1 }); // new name joins the class
+  assert.deepEqual(room.award('احمد', 2), { name: 'أحمد', points: 2, level: 1 });
+  assert.deepEqual(room.award('مريم', 1), { name: 'مريم', points: 1, level: 1 });
+  assert.deepEqual(room.award('مريم', -5), { name: 'مريم', points: 0, level: 0 });
+  assert.deepEqual(room.award('خالد', 1), { name: 'خالد', points: 1, level: 1 }); // new name joins the class
   assert.deepEqual(room.board(), [{ name: 'أحمد', points: 2 }, { name: 'خالد', points: 1 }]);
   assert.equal(room.find('احمد'), 'أحمد');
 });

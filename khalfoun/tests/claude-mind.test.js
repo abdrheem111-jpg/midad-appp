@@ -152,6 +152,7 @@ function toolsWith(over = {}) {
     sleep: async () => {},
     snap: async (r) => ({ ok: true, image: 'data:image/png;base64,AAAA', rect: { x: r.x / 2, y: r.y / 2, w: r.w / 2, h: r.h / 2 } }),
     math: over.math,
+    saveLesson: undefined,
   };
   const tools = Object.fromEntries(khalfounTools(ctx).map((t) => [t.name, t]));
   return { tools, ran, ui, ctx };
@@ -808,4 +809,19 @@ test('math and geometry tools: the engine computes, the steps are laid out for t
   assert.match(g.content[0].text, /area=6/);
   assert.equal(ui.at(-1)[1].op, 'sketch');
   assert.equal((await tools.geometry.handler({ shape: 'triangle', given: { a: 1, b: 2, c: 5 } })).isError, true);
+});
+
+test('grade_result, quiz_make, lesson_prep and weekly_report: to the phone, a file, a report', async () => {
+  const saved = [];
+  const { tools, ui, ctx } = toolsWith();
+  ctx.saveLesson = async (l) => { saved.push(l); return { ok: true, file: 'C:/x/تحضير - المعادلات.docx' }; };
+  assert.match((await tools.grade_result.handler({ student: 'أحمد', score: 8, total: 10, mistakes: ['س٣: الجواب ٤'] })).content[0].text, /جوال المعلم/);
+  assert.deepEqual(ui.at(-1), ['grade', { student: 'أحمد', score: 8, total: 10, mistakes: ['س٣: الجواب ٤'] }]);
+  assert.equal((await tools.grade_result.handler({ score: 12, total: 10 })).isError, true);
+  assert.equal((await tools.quiz_make.handler({ questions: [{ q: '٢+٢', choices: ['٣', '٤'], answer: 3 }] })).isError, true);
+  assert.match((await tools.quiz_make.handler({ title: 'المعادلات', questions: [{ q: 'حل ٢س=٨', choices: ['٢', '٤', '٦'], answer: 1 }] })).content[0].text, /جوال المعلم/);
+  assert.equal(ui.at(-1)[0], 'quiz');
+  const lesson = { title: 'المعادلات', objectives: ['يحل معادلة خطية'], steps: ['مثال'], questions: [{ level: 'سهل', q: 'حل س+١=٣', answer: 'س=٢' }], exit_ticket: ['حل ٢س=٦'] };
+  assert.match((await tools.lesson_prep.handler(lesson)).content[0].text, /تحضير - المعادلات/);
+  assert.equal(saved[0].title, 'المعادلات');
 });
