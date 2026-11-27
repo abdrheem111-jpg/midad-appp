@@ -1558,7 +1558,10 @@ async function onWakeSentence(wav, head = wav, ms = 0) {
     // His own voice coming back through the speakers is not a command — but the teacher
     // interrupting him is: his name heard by the ear, or any sentence from the phone's microphone
     // (close to the teacher's mouth, far from the speakers) stops him at once to listen.
-    if (brain.memory.data.bargeIn !== false && (meta.earHit || phoneLive())) { voiceOut.stop(); bridge.note?.('barge-in: stopped talking to listen'); } else return;
+    // (through the phone, his own voice from the speakers could reach it too: there the sentence
+    // must hold his name — «يا خلفون» — before he stops)
+    if (brain.memory.data.bargeIn === false) return;
+    if (meta.earHit) { voiceOut.stop(); bridge.note?.('barge-in: stopped talking to listen'); } else if (phoneLive()) meta.bargeCheck = true; else return;
   }
   if (wakeBusy) { if (wakeQueue.length < 2 && (inSession() || brain.dictation || meta.earHit)) wakeQueue.push([wav, head, meta]); return; }
   wakeBusy = true;
@@ -1629,6 +1632,10 @@ async function readWakeSentence(wav, head = wav, meta = {}) {
   }
   if (!res?.ok || !res.text) return;
   let hit = findWakeWord(res.text);
+  if (meta.bargeCheck) {
+    if (!hit.found) return; // his own voice, or the class: he carries on
+    voiceOut.stop(); bridge.note?.('barge-in: his name while talking');
+  }
   if (!session && hit.found && head !== wav) {
     // His name was there and he kept talking: read the whole sentence properly.
     if (mind?.on) bridge.mind?.prefetch?.();
