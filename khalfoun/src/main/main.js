@@ -32,6 +32,7 @@ import { TASK_MODES, LOOK_MODES, lookTask } from '../core/chat-prompt.js';
 import { findOnScreen, layoutHint } from '../core/screen-find.js';
 import { createClaudeMind } from './brain/index.js';
 import { LatencyMeter } from '../core/latency.js';
+import { createMathEngine } from './math/engine.js';
 import { describeAction } from '../core/permissions.js';
 import { migrateFromV2, sharedDirs, v2Dir } from './migrate.js';
 import { claudeExePath } from './brain/claude-setup.js';
@@ -380,6 +381,8 @@ function registerShortcuts() {
 let phoneMic = null;
 let phoneUiState = {};
 let meter = new LatencyMeter();
+// SymPy on this PC (a worker thread), started in the background a few seconds after launch
+const mathEngine = createMathEngine({ log: (...a) => diag?.write(...a) });
 let metricsDirty = false;
 // ----- Khalfoun 3: the emergency stop and the yellow countdown
 let halted = false;
@@ -821,6 +824,10 @@ function setupIpc(stores, executor) {
     if (meter.note(m.kind, m.ms)) { diag.write('latency', m.kind, `${Math.round(m.ms)} ms`); metricsDirty = true; }
   });
   ipcMain.handle('metrics:report', (event) => (fromApp(event) ? { report: meter.report(), lines: meter.lines() } : null));
+  ipcMain.handle('math:solve', async (event, q) => {
+    if (!fromApp(event) || !q || typeof q !== 'object') return { ok: false, error: 'forbidden' };
+    return mathEngine.solve(String(q.task || ''), String(q.expr || '').slice(0, 300));
+  });
   ipcMain.on('soft-confirm:answer', (event, a) => { if (fromApp(event) && a && typeof a.id === 'string') softWaits.get(a.id)?.(a.ok !== false); });
   ipcMain.handle('emergency:set', (event, on) => { if (!fromApp(event)) return { ok: false }; setHalted(!!on, 'page'); return { ok: true, on: halted }; });
   ipcMain.handle('actions:undo', async (event) => {
@@ -1641,6 +1648,9 @@ async function runSmokeTest(stores) {
         });
       }
       step('the phone microphone page is served with its pairing key (or no network on this machine)', (ph?.ok && /^data:image\/png/.test(ph.qr || '') && page?.status === 200 && page.ok) || ph?.error === 'no_network', { url: ph?.url, error: ph?.error, page });
+      // Khalfoun 3: SymPy runs inside the (packaged) app and solves step by step
+      const solved = await mathEngine.solve('solve', '٢س + ٣ = ١١');
+      step('the maths engine (SymPy on this PC) solves «٢س + ٣ = ١١» step by step', solved?.ok && solved.answer === 'x = 4' && solved.steps?.length >= 4, { answer: solved?.answer, error: solved?.error, detail: solved?.detail });
       await js('window.khalfoun.phone.stop()');
     }
     if (process.env.KHALFOUN_SMOKE_TOOLSHOTS) {
@@ -1802,6 +1812,7 @@ async function start() {
     log: (...a) => diag.write(...a),
     getSettings: () => settings,
     getApiKey: () => secrets.claudeKey || null,
+    math: mathEngine,
     fetchFn: (url, init) => net.fetch(url, init),
     ...(SMOKE && process.env.KHALFOUN_CLAUDE_EXE ? { exePath: process.env.KHALFOUN_CLAUDE_EXE } : (() => {
       // Claude's program already downloaded by Khalfoun 2 is used as it is (no second download)
@@ -1814,6 +1825,7 @@ async function start() {
   // The Claude mind starts in the background (its program, the screen reader) so the first
   // sentence does not wait for it.
   if (settings.mind === 'claude' && !SMOKE) setTimeout(() => mind.warm().catch(() => {}), 4000);
+  if (!SMOKE) setTimeout(() => mathEngine.warm(), 9000);
   // Look for a local language model now and every five minutes until one appears.
   lookForModel = async (preferred) => {
     if (SINGLE_BRAIN) return;
@@ -1865,6 +1877,7 @@ if (!app.requestSingleInstanceLock()) {
     app.exit(1);
   });
   app.on('will-quit', () => {
+    mathEngine.close();
     globalShortcut.unregisterAll();
     if (fgHelper) { try { fgHelper.child.kill(); } catch { /* gone */ } }
     officeHost?.stop();

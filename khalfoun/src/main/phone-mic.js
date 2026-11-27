@@ -17,7 +17,7 @@ const MAX_SAY = 1_300_000; // a 40 s push-to-talk recording
 const MAX_PHOTO = 9_000_000; // a phone photo, already made smaller on the phone
 /** The phone's control buttons (anything else is refused). */
 export const PHONE_COMMANDS = ['step_next', 'step_back', 'mute', 'bubble', 'random_student', 'timer_1', 'timer_3', 'timer_5', 'celebrate', 'fireworks', 'clear', 'stop', 'emergency', 'undo', 'fx', 'hide', 'cancel'];
-export const PHOTO_PURPOSES = ['pick', 'doc', 'grade', 'key'];
+export const PHOTO_PURPOSES = ['pick', 'doc', 'grade', 'key', 'problem'];
 const isJpegOrPng = (b) => (b[0] === 0xff && b[1] === 0xd8) || (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47);
 
 /** Private IPv4 addresses (home/school network, a phone's hotspot) of this computer. */

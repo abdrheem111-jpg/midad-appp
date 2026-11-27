@@ -27,6 +27,9 @@ import { DocView } from './doc-view.js';
 import { GraphPanel } from './graph-panel.js';
 import { SafetyUi } from './safety-ui.js';
 import { fastPlan, isFast } from '../core/fast-layer.js';
+import { mathCommand } from '../core/spoken-math.js';
+import { mathDeck } from '../core/math-deck.js';
+import { cleanSketch, mathText } from '../core/math-sketch.js';
 import { GUIDE } from '../core/guide.js';
 import { STAR_MILESTONES as STAR_STEPS } from '../core/classfun.js';
 import { InkLayer } from './ink.js';
@@ -362,6 +365,27 @@ async function smartUndo() {
   if (ink.hasInk) { ink.undo(); return; }
   showBubble('ما فيه شي أتراجع عنه الحين.', 'calm');
 }
+/** A maths command solved here: the verified steps go on the screen, the teacher moves through them. */
+async function localMath(mc, said, opts = {}) {
+  bridge.note?.(`heard «${said}» → maths engine (${mc.task}: ${mc.expr})`);
+  setStatus('thinking');
+  const r = await bridge.math.solve(mc.task, mc.expr);
+  setStatus('idle');
+  if (!r?.ok) {
+    // the engine could not read it: Claude (if on) gets the sentence as it was said
+    if (mind?.on) hear(said, { ...opts, viaAgent: false, local: false, typed: true, noMath: true });
+    else showBubble(`ما قدرت أحلها: ${r?.error || ''}`, 'sorry', true);
+    return;
+  }
+  const digits = brain.memory.data.digits === 'latin' ? 'latin' : 'arabic';
+  const deck = mathDeck(r, { show: 'steps', explain: mc.explain, size: { width: innerWidth, height: innerHeight } });
+  const steps = deck.map((st) => ({
+    shapes: cleanSketch(st.items, { pt: (x, y) => ({ x: Math.round(x), y: Math.round(y) }), len: (v) => Math.round(v), digits }),
+    say: st.say ? mathText(st.say, { digits }).replace(/[\uE000-\uE003]/g, '') : '',
+  }));
+  stepsDeck.start({ title: '', color: 'blue', steps });
+  noteLatency('local', opts);
+}
 /** The times the teacher's PC really takes (settings → القياسات). */
 function noteMetric(kind, ms) { if (Number.isFinite(ms) && ms >= 0) bridge.metrics?.note?.(kind, ms); }
 function noteLatency(kind, opts) { if (opts?.t0) noteMetric(kind, Date.now() - opts.t0); }
@@ -453,6 +477,11 @@ async function onPhonePhoto(purpose, bytes) {
   if (purpose === 'doc') { docView.show(blob); showBubble('هذا دفتر الطالب 📖 تقدر تكتب فوقه بالقلم، أو قول لي «علّق على الحل».', 'happy'); return; }
   if (!mind?.on) { showBubble('التصحيح بالصور يحتاج مخ Claude شغال من الإعدادات.', 'sorry', true); return; }
   const image = { data: await blobToBase64(blob), mime };
+  if (purpose === 'problem') {
+    showBubble('شفت المسألة 🧮 لحظة أحلها…', 'focused');
+    mind.ask('[صورة مسألة من كتاب أو دفتر، من جوال المعلم] اقرأ المسألة بدقة، وحلها بأداة math مع show:"steps" عشان تنعرض خطوة خطوة قدام الصف. إذا فيها أكثر من مسألة خذ الأولى وقل كم باقي.', { via: 'typed', image });
+    return;
+  }
   if (purpose === 'key') {
     mind.ask('[صورة نموذج الإجابة من جوال المعلم] احفظ الإجابات الصحيحة اللي في هالصورة عشان تصحّح عليها أوراق الطلاب الجاية. رد بجملة قصيرة: كم سؤال حفظت.', { via: 'typed', silent: true, image });
   } else {
@@ -807,6 +836,9 @@ function hear(text, opts = {}) {
   const nt = normalize(t);
   // the yellow countdown: «لا / الغ / وقف / لا تسوي» cancels it
   if (safety.counting && /^(لا|الغ|الغيه|الغي|كنسل|وقف|لا تسوي|لا تسويها|خلها|اتركها|لا لا)( يا خلفون)?$/.test(nt)) { safety.cancel(); return; }
+  // «حل ٢س + ٣ = ١١» / «حلل س تربيع ناقص تسعة»: SymPy on this PC solves it step by step, no Claude needed
+  const mc = !opts.viaAgent && !opts.noMath ? mathCommand(t) : null;
+  if (mc && bridge.math) { localMath(mc, t, opts); return; }
   // «تراجع»: the last thing Khalfoun did is taken back (else the drawing, else Ctrl+Z as before)
   if (/^(يا خلفون )?(تراجع|تراجع عن اخر شي|رجع اللي سويته|الغ اخر شي|كنسل اخر شي)$/.test(nt)) { smartUndo(); return; }
   if (!opts.viaAgent) heardSeq += 1;

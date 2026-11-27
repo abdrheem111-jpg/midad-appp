@@ -148,7 +148,9 @@ export function cleanSketch(items, map) {
         if (!a || !b || from === null || to === null || to <= from) continue;
         const step = num(it.step) > 0 ? num(it.step) : 1;
         if ((to - from) / step > 60) continue;
-        out.push({ ...base, x1: a.x, y: a.y, x2: b.x, from, to, step, marks: (Array.isArray(it.marks) ? it.marks : []).map(num).filter((m) => m !== null).slice(0, 10) });
+        // ray: the solution of an inequality — from «at» towards one end, a full dot when «at» is included
+        const ray = it.ray && num(it.ray.at) !== null && ['left', 'right'].includes(it.ray.dir) ? { at: num(it.ray.at), dir: it.ray.dir, closed: Boolean(it.ray.closed) } : null;
+        out.push({ ...base, x1: a.x, y: a.y, x2: b.x, from, to, step, marks: (Array.isArray(it.marks) ? it.marks : []).map(num).filter((m) => m !== null).slice(0, 10), ray });
         break;
       }
       default: break;

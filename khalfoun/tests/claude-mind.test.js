@@ -151,6 +151,7 @@ function toolsWith(over = {}) {
     ui: async (kind, payload) => { ui.push([kind, payload]); return over.ui ? over.ui(kind, payload) : { ok: true }; },
     sleep: async () => {},
     snap: async (r) => ({ ok: true, image: 'data:image/png;base64,AAAA', rect: { x: r.x / 2, y: r.y / 2, w: r.w / 2, h: r.h / 2 } }),
+    math: over.math,
   };
   const tools = Object.fromEntries(khalfounTools(ctx).map((t) => [t.name, t]));
   return { tools, ran, ui, ctx };
@@ -785,4 +786,26 @@ test('graph, steps and camera_pick tools: checked here, drawn by the page', asyn
   assert.equal(deck.steps[0].say, 'س = ٤');
   await tools.camera_pick.handler({});
   assert.deepEqual(ui.at(-1), ['pick', {}]);
+});
+
+test('math and geometry tools: the engine computes, the steps are laid out for the class', async () => {
+  const calls = [];
+  const math = { solve: async (task, expr) => { calls.push([task, expr]); return { ok: true, task: 'solve', answer: 'x = 4', steps: [{ expr: '2x + 3 = 11', why: 'المسألة' }, { expr: '2x = 8', why: 'نطرح 3 من الطرفين' }, { expr: 'x = 4', why: 'الحل' }] }; } };
+  const { tools, ui } = toolsWith({ math });
+  const r = await tools.math.handler({ task: 'solve', expr: '٢س + ٣ = ١١', explain: true });
+  assert.deepEqual(calls, [['solve', '٢س + ٣ = ١١']]);
+  assert.match(r.content[0].text, /الجواب: x = 4/);
+  const [k, deck] = ui.at(-1);
+  assert.equal(k, 'steps');
+  assert.equal(deck.steps.length, 3);
+  assert.equal(deck.steps[1].shapes[0].text, '٢س = ٨');
+  assert.equal(deck.steps[1].shapes.length, 2); // «اشرح لي»: the reason is written under it
+  assert.match(deck.steps[1].say, /نطرح ٣/);
+  const none = await tools.math.handler({ task: 'solve', expr: 'x=1', show: 'none' });
+  assert.equal(ui.length, 1);
+  assert.match(none.content[0].text, /الخطوات/);
+  const g = await tools.geometry.handler({ shape: 'triangle', given: { a: 3, b: 4, c: 5 } });
+  assert.match(g.content[0].text, /area=6/);
+  assert.equal(ui.at(-1)[1].op, 'sketch');
+  assert.equal((await tools.geometry.handler({ shape: 'triangle', given: { a: 1, b: 2, c: 5 } })).isError, true);
 });

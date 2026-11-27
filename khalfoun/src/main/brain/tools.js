@@ -13,6 +13,9 @@ import { OFFICE_FORMATS } from '../actions/index.js';
 import { APPS } from '../../core/intents.js';
 import { cleanSketch, mathText, SKETCH_TYPES } from '../../core/math-sketch.js';
 import { parse as parseExpr } from '../../core/math-expr.js';
+import { MATH_TASKS } from '../../core/math-input.js';
+import { mathDeck } from '../../core/math-deck.js';
+import { geometryFigure } from '../../core/geometry.js';
 
 /** «hwnd\tprocess\tstate\tx,y,w,h\ttitle» lines from the hands process. */
 export function parseWindows(data) {
@@ -306,6 +309,54 @@ Over the whole screen (no x,y,w,h): confetti, fireworks, balloons, stars, hearts
         }));
         const r = await ctx.ui('steps', { title: title || '', color: color || 'blue', steps: deck });
         return r?.ok ? text(`جهزت ${deck.length} خطوات، والأولى طالعة. المعلم يكمل بالريموت أو الجوال أو «كمل».`) : fail('ما قدرت أعرض الخطوات.');
+      },
+    },
+    {
+      name: 'math',
+      description: `Khalfoun's maths engine (SymPy on this PC). ALWAYS use it for any calculation, equation, inequality, factorising, simplifying, system, derivative or check — never compute in your head. task: solve (equations; also inequalities and systems «2x+y=7, x-y=2»), inequality, factor, simplify (algebraic fractions), system, check («x=4 | 2x+3=11»: is a student's answer right?), evaluate, derivative, integral. expr: the maths (x y for س ص, ^ powers, Arabic digits fine). show: "steps" draws the verified solution step by step for the class (the teacher moves through it with «كمل»/remote/phone), "answer" writes only the result, "none" just tells you. explain: true writes the reason under each step («اشرح لي»). The result tells you the answer and each step's reason: explain from it in your own words.`,
+      schema: {
+        task: z.enum(MATH_TASKS),
+        expr: z.string().min(1).max(300),
+        show: z.enum(['steps', 'answer', 'none']).optional(),
+        explain: z.boolean().optional(),
+        title: z.string().max(60).optional(),
+      },
+      handler: async ({ task, expr, show = 'steps', explain = false, title }) => {
+        if (!ctx.math) return fail('محرك الرياضيات مو موجود في هالنسخة.');
+        const r = await ctx.math.solve(task, expr);
+        if (!r?.ok) return fail(`ما قدرت أحلها: ${r?.error || ''}`);
+        const summary = `الجواب: ${r.answer}\nالخطوات:\n${(r.steps || []).map((st, i) => `${i + 1}. ${st.expr}${st.why ? `  (${st.why})` : ''}`).join('\n')}${r.check ? `\n${r.check}` : ''}`;
+        if (show === 'none') return text(summary);
+        const deck = mathDeck(r, { show, explain, size: ctx.screen.size(), digits: digitsNow() });
+        const scale = ctx.screen.pictureScale();
+        const steps = deck.map((st) => ({
+          shapes: cleanSketch(st.items, { pt: (x, y) => ctx.screen.toOverlay(x, y), len: (v) => Math.round(v * scale), digits: digitsNow() }),
+          say: st.say ? mathText(st.say, { digits: digitsNow() }).replace(/[\uE000-\uE003]/g, '') : '',
+        }));
+        const u = await ctx.ui('steps', { title: title || '', color: 'blue', steps });
+        if (!u?.ok) return fail('حليتها بس ما قدرت أعرضها.');
+        return text(`${summary}\n(${show === 'steps' ? `عرضت ${steps.length} خطوات، الأولى طالعة والمعلم يكمل` : 'كتبت الجواب على الشاشة'}.)`);
+      },
+    },
+    {
+      name: 'geometry',
+      description: 'Draw a geometry figure TO SCALE and get its exact measures (computed here, never guess): triangle from three sides (a,b,c), two sides and the angle between (e.g. b,c,A), or two angles and a side (sides a b c are opposite angles A B C, degrees); circle {r}; rectangle {w,h}. Returns the missing sides and angles, area, perimeter. place: right (default), left, center.',
+      schema: {
+        shape: z.enum(['triangle', 'circle', 'rectangle']),
+        given: z.object({ a: z.number().positive().optional(), b: z.number().positive().optional(), c: z.number().positive().optional(), A: z.number().positive().optional(), B: z.number().positive().optional(), C: z.number().positive().optional(), r: z.number().positive().optional(), w: z.number().positive().optional(), h: z.number().positive().optional() }),
+        place: z.enum(['right', 'left', 'center']).optional(),
+        labels: z.boolean().optional(),
+      },
+      handler: async ({ shape, given, place = 'right', labels }) => {
+        const { width: W, height: H } = ctx.screen.size();
+        const box = place === 'center' ? { x: W * 0.2, y: H * 0.08, w: W * 0.6, h: H * 0.84 } : place === 'left' ? { x: W * 0.04, y: H * 0.1, w: W * 0.44, h: H * 0.8 } : { x: W * 0.52, y: H * 0.1, w: W * 0.44, h: H * 0.8 };
+        const f = geometryFigure({ shape, given, labels }, box);
+        if (!f.ok) return fail(f.error);
+        const scale = ctx.screen.pictureScale();
+        const shapes = cleanSketch(f.items, { pt: (x, y) => ctx.screen.toOverlay(x, y), len: (v) => Math.round(v * scale), digits: digitsNow() });
+        const r = await ctx.ui('ink', { op: 'sketch', shapes, color: 'blue' });
+        const m = Object.entries(f.measures).filter(([k]) => k !== 'ok').map(([k, v]) => `${k}=${v}`).join('، ');
+        return r?.ok === false ? fail('حسبت القياسات بس ما قدرت أرسم.') : text(`رسمت الشكل بالقياس. القياسات (محسوبة بدقة): ${m}`);
       },
     },
     {

@@ -435,6 +435,16 @@ export class InkLayer {
             label(tickText(v, sh.digits), x, sh.y + 24, 17, color);
           }
           for (const m of sh.marks) { ctx.beginPath(); ctx.arc(px(m), sh.y, 7, 0, Math.PI * 2); ctx.fill(); }
+          if (sh.ray) {
+            const x0 = px(Math.max(sh.from, Math.min(sh.to, sh.ray.at)));
+            const xe = sh.ray.dir === 'right' ? sh.x2 - 6 : sh.x1 + 6;
+            ctx.save(); ctx.strokeStyle = '#C0392B'; ctx.fillStyle = '#C0392B'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+            ctx.beginPath(); ctx.moveTo(x0, sh.y - 14); ctx.lineTo(x0 + (xe - x0) * part, sh.y - 14); ctx.stroke();
+            ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.arc(x0, sh.y - 14, 9, 0, Math.PI * 2);
+            if (sh.ray.closed) ctx.fill(); else { ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); }
+            ctx.restore();
+          }
           break;
         }
         case 'check': {
