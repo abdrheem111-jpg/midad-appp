@@ -50,8 +50,11 @@ export class MemoryPanel {
 
   async renderMemory() {
     const data = this.d.getData();
-    const notes = (await this.d.bridge.mind?.learned?.().catch(() => [])) || [];
+    const l = (await this.d.bridge.mind?.learned?.().catch(() => null)) || {};
+    const notes = Array.isArray(l) ? l : l.notes || [];
+    const habits = Array.isArray(l) ? [] : l.habits || [];
     this.section('اللي تعلّمه عنك', notes.map((n) => this.row(`${KIND[n.kind] || n.kind}: ${n.text}`, () => this.d.bridge.mind.forget(n.id))), 'ما تعلّم شي بعد.');
+    this.section('عاداتك (يسويها على طول)', habits.map((h) => this.row(`«${h.phrase}» (${Number(h.count || 0).toLocaleString('ar-EG')} مرات)`, () => this.d.bridge.mind.forget(h.id))), 'ما فيه عادات بعد.');
     const routines = Object.entries(data.routines || {});
     this.section('الروتينات (قلها باسمها وتتنفذ)', routines.map(([k, r]) => this.row(`«${r.name || k}»: ${(r.steps || []).join(' ← ')}`, () => {
       const all = { ...(this.d.getData().routines || {}) }; delete all[k]; this.d.setData({ routines: all });

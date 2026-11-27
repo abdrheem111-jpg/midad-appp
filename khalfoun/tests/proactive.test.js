@@ -55,3 +55,17 @@ test('the dialect dictionary: «لما أقول X أقصد Y», whole words only
   assert.equal(applyDictionary('الشنطهات', { الشنطه: 'الملف' }), 'الشنطهات');
   assert.equal(applyDictionary('افتح الوورد', {}), 'افتح الوورد');
 });
+
+test('his states: one at a time, each with its look; the emergency stop wins; he dozes off after a long quiet', async () => {
+  const { PersonaState, STATES } = await import('../src/core/persona-state.js');
+  let t = 0;
+  const p = new PersonaState(() => t);
+  assert.deepEqual(p.set('thinking'), { changed: true, anim: 'think', name: 'يفكر' });
+  assert.equal(p.set('thinking').changed, false);
+  p.set('halted');
+  assert.equal(p.set('speaking').changed, false); // nothing leaves the stop but «idle»
+  assert.equal(p.set('idle').changed, true);
+  t += 21 * 60000;
+  assert.equal(p.tick().anim, 'sleep');
+  for (const s of ['listening', 'thinking', 'acting', 'speaking', 'celebrating', 'confused', 'sleeping']) assert.ok(STATES[s], s);
+});

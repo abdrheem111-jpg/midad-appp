@@ -1266,6 +1266,104 @@ await check('C: phone buttons (steps, mute, hide the bubble), camera pick, noteb
   await opage.evaluate(() => window.__khalfoun.graphPanel.close());
 });
 
+await check('K3: Khalfoun 3 — emergency stop, yellow countdown, undo, click ring, effects switch, lesson comes back', async () => {
+  const K = (f) => opage.evaluate(f);
+  // emergency stop: nothing heard until let go
+  await K(() => window.__khalfoun.setHalted(true));
+  assert(await opage.locator('.halt-banner').count() === 1, 'no stop banner');
+  await K(() => window.__khalfoun.hear('اختار طالب عشوائي'));
+  assert(!(await K(() => /طالب|اختار/.test(document.getElementById('bubble')?.textContent || '') && !document.getElementById('bubble').hidden && window.__khalfoun.statusNow !== 'halted')), 'heard while stopped');
+  assert(await K(() => window.__khalfoun.statusNow) === 'halted', 'status not halted');
+  await K(() => window.__khalfoun.setHalted(false));
+  assert(await opage.locator('.halt-banner').count() === 0, 'banner stayed');
+  // yellow: shown 3 s, cancelled by voice
+  await K(() => window.__khalfoun.safety.soft({ id: 's1', text: 'بسكّر وورد', seconds: 3 }));
+  assert(await opage.locator('.soft-chip').count() === 1, 'no countdown');
+  await K(() => window.__khalfoun.hear('لا'));
+  assert((await K(() => window.__softAnswers)).at(-1).ok === false, 'not cancelled');
+  // and one that goes ahead by itself
+  await K(() => window.__khalfoun.safety.soft({ id: 's2', text: 'بحفظ نسخة PDF', seconds: 1 }));
+  await opage.waitForTimeout(1300);
+  assert((await K(() => window.__softAnswers)).at(-1).ok === true, 'did not go ahead');
+  // the click ring
+  await K(() => window.__khalfoun.safety.marker(400, 300));
+  assert(await opage.locator('.click-marker').count() === 1, 'no click ring');
+  // «تراجع»: the main process takes back the last action; else the drawing
+  await K(() => { window.__undoResult = { ok: true, data: { from: 'type_text' } }; });
+  await K(() => window.__khalfoun.hear('تراجع'));
+  await opage.waitForTimeout(200);
+  assert(/رجّعتها/.test(await opage.locator('#bubble').textContent()), 'undo not told');
+  // effects switch
+  await K(() => window.__khalfoun.setFx(false));
+  assert(!(await K(() => window.__khalfoun.screenFx.play({ effect: 'crumple', rect: { x: 0, y: 0, w: 50, h: 50 }, image: null }))), 'effect played while off');
+  await K(() => window.__khalfoun.setFx(true));
+  // the lesson's state is saved and comes back
+  await K(() => window.__khalfoun.ink.write('درس اليوم', { at: { x: 600, y: 200 } }));
+  await K(() => window.__khalfoun.stepsDeck.start({ steps: [{ shapes: [{ type: 'text', x: 600, y: 300, text: 'خطوة ١', size: 30 }] }, { shapes: [{ type: 'text', x: 600, y: 360, text: 'خطوة ٢', size: 30 }] }] }));
+  await K(() => window.__khalfoun.stepsDeck.next());
+  await opage.waitForTimeout(3400);
+  const saved = await K(() => window.__lessonSaved);
+  assert(saved?.steps?.index === 2 && saved.ink.length >= 1, JSON.stringify(saved).slice(0, 200));
+  await K(() => { window.__khalfoun.ink.clear(); window.__khalfoun.stepsDeck.end(false); });
+  assert(await K(() => window.__khalfoun.restoreLesson()), 'not restored');
+  assert(await K(() => window.__khalfoun.stepsDeck.state().step) === 2, 'steps not back');
+  await K(() => window.__khalfoun.onPhoneCommand('clear'));
+});
+
+await check('K3: maths solved on the PC (steps on screen), quiz board, memory screen, routines, dictionary, a quiet suggestion', async () => {
+  const K = (f) => opage.evaluate(f);
+  // the engine's answer (the engine itself runs in Node tests and the packaged app) laid out as steps
+  await K(() => { window.__khalfoun.bridge.math.solve = async () => ({ ok: true, task: 'solve', answer: 'x = 4', steps: [{ expr: '2x + 3 = 11', why: 'المسألة' }, { expr: '2x = 8', why: 'نطرح 3 من الطرفين' }, { expr: 'x = 4', why: 'الحل' }] }); });
+  await K(() => window.__khalfoun.hear('اشرح لي حل ٢س + ٣ = ١١'));
+  await opage.waitForTimeout(500);
+  const st = await K(() => window.__khalfoun.stepsDeck.state());
+  assert(st.steps === 3 && st.step === 1, JSON.stringify(st));
+  await K(() => window.__khalfoun.hear('كمل'));
+  await K(() => window.__khalfoun.hear('كمل'));
+  await opage.waitForTimeout(900);
+  await opage.screenshot({ path: `${outDir}/k3-math-steps.png` });
+  await K(() => window.__khalfoun.onPhoneCommand('clear'));
+  // a quiz from the phone's inbox, shown big
+  await K(() => window.__khalfoun.bridge._emit({ type: 'inbox-act', id: 'q1', action: 'show', kind: 'quiz', data: { title: 'المعادلات', questions: [{ q: 'حل ٢س = ٨', choices: ['٢', '٤', '٦', '٨'], answer: 1 }, { q: 'س + ١ = ٣', choices: ['١', '٢'], answer: 1 }] } }));
+  await opage.waitForTimeout(300);
+  assert(await opage.locator('.quiz-board').count() === 1, 'no quiz board');
+  await K(() => window.__khalfoun.hear('الجواب'));
+  assert(await opage.locator('.qb-choice.right').count() === 1, 'answer not shown');
+  await opage.screenshot({ path: `${outDir}/k3-quiz.png` });
+  await K(() => window.__khalfoun.hear('كمل'));
+  assert(/٢ من ٢/.test(await opage.locator('.qb-count').textContent()), 'not the next question');
+  await opage.keyboard.press('Escape');
+  assert(await opage.locator('.quiz-board').count() === 0, 'quiz did not close');
+  // the dialect dictionary, then a routine recorded by voice and run by its name
+  await K(() => window.__khalfoun.hear('لما أقول الشنطة أقصد الملف'));
+  assert((await K(() => window.__khalfoun.brain.memory.data.dictionary))['الشنطه'] === 'الملف', 'dictionary not saved');
+  await K(() => window.__khalfoun.hear('سجل روتين ابدأ الحصة'));
+  await K(() => window.__khalfoun.hear('مؤقت دقيقة'));
+  await K(() => window.__khalfoun.hear('امسح الشاشة'));
+  await K(() => window.__khalfoun.hear('خلاص الروتين'));
+  const r = (await K(() => window.__khalfoun.brain.memory.data.routines))['ابدا الحصه'];
+  assert(r && r.steps.length === 2, JSON.stringify(r));
+  await K(() => { window.__notesK3 = []; const o = window.__khalfoun.bridge.note; window.__khalfoun.bridge.note = (t) => { window.__notesK3.push(t); return o?.(t); }; });
+  await K(() => window.__khalfoun.hear('ابدأ الحصة'));
+  await opage.waitForTimeout(1500);
+  const notes = await K(() => window.__notesK3.join('\n'));
+  assert(/routine «ابدأ الحصة»: 2 steps/.test(notes) && /heard «مؤقت دقيقة»/.test(notes), notes.slice(0, 300));
+  await opage.waitForTimeout(1800);
+  // the memory screen shows the routine and the dictionary
+  await K(() => window.__khalfoun.bridge._emit({ type: 'open-settings' }));
+  await opage.waitForTimeout(300);
+  await opage.click('#k3-memory');
+  await opage.waitForTimeout(400);
+  const mem = await opage.locator('.memory-panel').textContent();
+  assert(/ابدأ الحصة/.test(mem) && /الشنطه/.test(mem), mem.slice(0, 200));
+  await opage.screenshot({ path: `${outDir}/k3-memory.png` });
+  await opage.keyboard.press('Escape');
+  // the status dot follows his state
+  await K(() => window.__khalfoun.setStatus('thinking'));
+  assert(await K(() => document.querySelector('.status-dot')?.dataset.s) === 'thinking', 'status dot');
+  await K(() => window.__khalfoun.setStatus('idle'));
+});
+
 await browser.close();
 server.close();
 if (problems.length) {

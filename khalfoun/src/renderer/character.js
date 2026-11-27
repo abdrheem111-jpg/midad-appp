@@ -480,6 +480,7 @@ export function createCharacter(container) {
   /** Horizontal speed in px/s, drives the tassel swing. */
   function setVelocity(vx) { velocity = Number.isFinite(vx) ? vx : 0; }
 
+  let talk = 0;
   function setMouth(name) {
     if (name === currentMouth) return;
     currentMouth = name;
@@ -571,7 +572,8 @@ export function createCharacter(container) {
 
     P.browL.setAttribute('transform', `translate(0 ${f2(face.lift)}) rotate(${f2(face.browL)} -19 -180)`);
     P.browR.setAttribute('transform', `translate(0 ${f2(face.lift)}) rotate(${f2(face.browR)} 19 -180)`);
-    setMouth(pose.mouth || mouthName);
+    // talking: the mouth follows the loudness of his real voice (lip sync)
+    setMouth(talk > 0.42 ? 'grin' : talk > 0.12 ? 'o' : (pose.mouth || mouthName));
     P.blush.setAttribute('opacity', f2(face.blush));
     P.hatch.setAttribute('opacity', f.hatch && face.blush > 0.7 ? 0.9 : 0);
     P.pale.setAttribute('opacity', f2(face.pale));
@@ -646,7 +648,7 @@ export function createCharacter(container) {
     P.kumma.setAttribute('transform', `translate(0 ${f2(pose.kummaY || 0)}) rotate(${f2((pose.kummaRot || 0) + spring.kumma)} 0 -205)`);
   }
 
-  return { el: svg, setEmotion, lookAt, setFacing, setVelocity, setCostume, setPenColor, render, get emotion() { return emotion; }, get costume() { return costume; } };
+  return { el: svg, setTalk: (v) => { const nv = Math.max(0, Math.min(1, Number(v) || 0)); if (Math.abs(nv - talk) > 0.05) { talk = nv; render(); } }, setEmotion, lookAt, setFacing, setVelocity, setCostume, setPenColor, render, get emotion() { return emotion; }, get costume() { return costume; } };
 }
 
 export const MOUTH_SHAPES = Object.keys(MOUTHS);

@@ -110,6 +110,7 @@ export class VoiceOut {
       const url = URL.createObjectURL(new Blob([res.audio], { type: 'audio/mpeg' }));
       const a = new this.AudioCtor(url);
       this.audio = a;
+      this.lipSync?.(a); // the mouth follows this sound
       const next = () => { URL.revokeObjectURL(url); if (token === this.seq) this.playNext(token); };
       a.onended = next;
       a.onerror = next;
@@ -133,6 +134,8 @@ export class VoiceOut {
     u.rate = 1.02;
     u.pitch = 1.3; // a little higher: a cartoon voice
     u.onstart = () => { this.speaking = true; this.onStart?.(); };
+    // the PC's own voice gives no sound to measure: the mouth moves with each word instead
+    u.onboundary = () => { this.onWord?.(); };
     u.onend = () => { this.speaking = false; this.onEnd?.(); after?.(); };
     u.onerror = () => { this.speaking = false; this.onEnd?.(); after?.(); };
     this.synth.speak(u);

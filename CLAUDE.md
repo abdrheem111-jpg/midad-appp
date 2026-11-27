@@ -14,6 +14,8 @@
 - **مخ Claude (النسخة 2، من اشتراك المعلم):** `src/main/brain/` — `claude-brain.js` (جلسة Claude Agent SDK طويلة، بدون أدوات ملفات أو أوامر، فقط أدوات خلفون والبحث)، `tools.js` (أدوات Claude: look_screen، find_text، click/drag/scroll، type_text، press_keys، open_app، screen_write/draw/mark، office_*، classroom، remember، feel، ask_user)، `eyes.js` (الصورة ↔ الشاشة ↔ النافذة)، `hands.ps1` (الماوس والكيبورد في ويندوز)، `claude-setup.js` (تنزيل برنامج Claude الرسمي من npm بالبصمة)، `index.js` (الربط بـ `claude auth login`). الشخصية في `core/claude-persona.js`، وجهة الصفحة في `renderer/mind-ui.js`. أي أداة تنفّذ شي تمر على `executor.run` (الفحص المزدوج). المخ العادي يبقى احتياطاً.
 - **الريموت والأذن:** `core/remote-keys.js` (زر ريموت العرض)، `core/ear-plan.js` + `renderer/ear-ui.js` (تسجيلات تدريب الأذن)، `renderer/ear-model.js` (أذن «يا خلفون» على الجهاز، onnxruntime-web)، `tools/ear/train.py` (التدريب). الأذن المدرّبة في `%APPDATA%\Khalfoun\ear\`.
 - **السحابة (اختيارية، بمفاتيح المستخدم):** `src/main/cloud.js` (Azure للسماع `ar-OM` والصوت، Claude للعقل عبر أداة `respond` تعطي أوامر خلفون النصية فقط)، `src/main/secrets.js` (المفاتيح مشفّرة بـ safeStorage، لا تصل للصفحة). المحلي يبقى احتياطاً.
+- **خلفون ٣ (3.0):** تطبيق مستقل جنب خلفون ٢ (`app.setName('Khalfoun3')`، appId `om.khalfoun.desktop3`، النسخ من خلفون ٢ في `main/migrate.js`). عقل واحد عبر `main/brain/provider.js`. الطبقة السريعة `core/fast-layer.js`. الرياضيات: `main/math/` (SymPy في Pyodide، worker) + `core/math-input.js` (الفحص الأول) + `core/math-deck.js` + `core/spoken-math.js` + `core/geometry.js`. الأمان: `core/privacy.js`، `core/permissions.js` (`colorOf`, `undoFor`)، `renderer/safety-ui.js`، الطوارئ Ctrl+Alt+End. السماع المتدفق `main/stream-stt.js`. الصف: `core/report.js`، `core/inbox.js` (صندوق الجوال)، `renderer/quiz-board.js`. الذكاء الاستباقي والروتينات والقاموس: `core/proactive.js`، `renderer/memory-panel.js`. الحالات: `core/persona-state.js`. القياسات: `core/latency.js`. الخطة: `khalfoun/docs/ROADMAP.md`.
+- خلفون ٢ محفوظ عند commit `dc8bf50` (علامة `khalfoun-v2.0.13` محلية).
 - التفاصيل والأوامر كلها في `khalfoun/README.md`.
 
 ## التشغيل والفحص (من داخل `khalfoun/`)
@@ -30,7 +32,7 @@ npm run dist:win       # يبني ملف التثبيت في khalfoun\dist (يع
 - لا تغلق نسخة خلفون المثبتة عند المستخدم دون أن تخبره؛ لتشغيل نسخة الكود أغلق المثبتة أولاً من أيقونتها (خروج)، لأن التطبيق يسمح بنسخة واحدة فقط.
 
 ## أين تجد الأخطاء
-- **سجل التشخيص:** `%APPDATA%\Khalfoun\khalfoun-log.txt` (والجزء الأقدم `.old`). فيه: حالة البدء، كل جملة سمعها وما قرره (`page: heard «...» → situation`)، كل أمر ونتيجته (`action ... → ok / failed: ...`)، نتائج الاستماع، أخطاء الصفحة، وصحة كل فقاعة كلام (كم حرفاً ظهر، سرعة الرسم).
+- **سجل التشخيص:** `%APPDATA%\Khalfoun3\khalfoun-log.txt` (خلفون ٢: `%APPDATA%\Khalfoun\`) (والجزء الأقدم `.old`). فيه: حالة البدء، كل جملة سمعها وما قرره (`page: heard «...» → situation`)، كل أمر ونتيجته (`action ... → ok / failed: ...`)، نتائج الاستماع، أخطاء الصفحة، وصحة كل فقاعة كلام (كم حرفاً ظهر، سرعة الرسم).
 - **الذاكرة والإعدادات:** `%APPDATA%\Khalfoun\memory.json` و `settings.json` (لا تحذفها دون إذن؛ فيها اسم المستخدم وجدوله وطلابه).
 - **الاستماع:** برنامج whisper ونماذجه في `%APPDATA%\Khalfoun\voice\`.
 - لرؤية ما يحدث أثناء التشغيل من الكود: `npm start` ثم راقب السجل، وأدوات المطور متاحة لأن النسخة غير مغلّفة.

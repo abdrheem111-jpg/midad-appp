@@ -28,6 +28,7 @@ import { GraphPanel } from './graph-panel.js';
 import { SafetyUi } from './safety-ui.js';
 import { QuizBoard } from './quiz-board.js';
 import { MemoryPanel } from './memory-panel.js';
+import { PersonaState } from '../core/persona-state.js';
 import { Suggester, LessonWatch, momentFromWords, routineCommand, routinePattern, dictionaryCommand, applyDictionary } from '../core/proactive.js';
 import { fastPlan, isFast } from '../core/fast-layer.js';
 import { mathCommand } from '../core/spoken-math.js';
@@ -257,8 +258,32 @@ const voiceOut = new VoiceOut();
 const screenFx = new ScreenFx(document.body, { celebrate: (kind) => { if (kind === 'pop') sounds.now('pop'); }, enabled: () => brain?.memory?.data?.fxEnabled !== false });
 // While he speaks, the always-on listener pauses so he does not hear himself.
 // While he speaks, his own voice must not come back as a command (also through the phone).
-voiceOut.onStart = () => { if (wake.active || wake.external) wake.pause(); };
-voiceOut.onEnd = () => { if (wake.active || wake.external) wake.resume(); };
+// Khalfoun 3: when he can tell the teacher apart from his own voice (the phone's microphone near
+// the teacher, or his own ear trained on the teacher's call), he keeps listening so the teacher
+// can interrupt him (barge-in); otherwise listening pauses as before.
+const canBargeIn = () => brain?.memory?.data?.bargeIn !== false && (phoneLive() || ear?.mode === 'on');
+voiceOut.onStart = () => { setStatus('speaking'); if ((wake.active || wake.external) && !canBargeIn()) wake.pause(); };
+voiceOut.onEnd = () => { character.setTalk?.(0); if (statusNow === 'speaking') setStatus('idle'); if ((wake.active || wake.external) && wake.paused) wake.resume(); };
+// lip sync: the mouth follows the loudness of his real voice
+let lipCtx = null;
+voiceOut.lipSync = (audio) => {
+  try {
+    lipCtx ??= new AudioContext();
+    const src = lipCtx.createMediaElementSource(audio);
+    const an = lipCtx.createAnalyser(); an.fftSize = 512;
+    src.connect(an); an.connect(lipCtx.destination);
+    const buf = new Uint8Array(an.fftSize);
+    const step = () => {
+      if (audio.ended || audio.paused && audio.currentTime > 0) { character.setTalk?.(0); return; }
+      an.getByteTimeDomainData(buf);
+      let sum = 0; for (const v of buf) { const x = (v - 128) / 128; sum += x * x; }
+      character.setTalk?.(Math.min(1, Math.sqrt(sum / buf.length) * 5));
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  } catch { /* the sound plays without lip sync */ }
+};
+voiceOut.onWord = () => { character.setTalk?.(0.6); setTimeout(() => character.setTalk?.(0.15), 110); setTimeout(() => character.setTalk?.(0), 220); };
 
 // -------------------------------------------------------- classroom joy
 
@@ -419,6 +444,7 @@ async function runRoutine(key) {
   const r = (brain.memory.data.routines || {})[key];
   if (!r || routineRunning) return;
   routineRunning = true;
+  bridge.note?.(`routine «${r.name}»: ${r.steps.length} steps`);
   showBubble(`أبدأ «${r.name}» (${r.steps.length.toLocaleString('ar-EG')} خطوات)`, 'happy');
   try {
     for (const step of r.steps) {
@@ -493,12 +519,17 @@ async function localMath(mc, said, opts = {}) {
 function noteMetric(kind, ms) { if (Number.isFinite(ms) && ms >= 0) bridge.metrics?.note?.(kind, ms); }
 function noteLatency(kind, opts) { if (opts?.t0) noteMetric(kind, Date.now() - opts.t0); }
 /** Khalfoun's state, shown as a small dot on him (يسمع، يفكر، ينفذ، يتكلم، يحتفل، محتار، نايم). */
+const persona = new PersonaState();
 let statusNow = 'idle';
 function setStatus(st) {
-  statusNow = st;
+  const r = persona.set(st);
+  statusNow = persona.state;
   const dot = document.querySelector('.status-dot');
-  if (dot) dot.dataset.s = st;
+  if (dot) { dot.dataset.s = statusNow; dot.title = r.name; }
+  // the state's look (not over a celebration or a walk already playing)
+  if (r.changed && r.anim && !['speaking', 'idle'].includes(statusNow)) { try { animator.play(r.anim); } catch { /* unknown move */ } }
 }
+setInterval(() => { const r = persona.tick(); if (r.changed) setStatus('sleeping'); }, 60000);
 // The lesson's state is saved every few seconds; after a crash (or a restart) it comes back.
 function lessonSnapshot() {
   const own = stepsDeck.ownItems();
@@ -941,6 +972,7 @@ function hear(text, opts = {}) {
   const t = String(text || '').trim();
   if (!t) return;
   if (haltedUi && !opts.typed) return; // the emergency stop: he hears nothing until it is let go
+  if (statusNow === 'sleeping') setStatus('idle');
   const nt = normalize(t);
   // the yellow countdown: «لا / الغ / وقف / لا تسوي» cancels it
   if (safety.counting && /^(لا|الغ|الغيه|الغي|كنسل|وقف|لا تسوي|لا تسويها|خلها|اتركها|لا لا)( يا خلفون)?$/.test(nt)) { safety.cancel(); return; }
@@ -954,7 +986,7 @@ function hear(text, opts = {}) {
   }
   // routines: «سجل روتين ابدأ الحصة» … «خلاص الروتين», then «ابدأ الحصة»
   const rc = routineCommand(t, brain.memory.data.routines || {});
-  if (rc?.op === 'start') { recording = { name: rc.name, steps: [] }; showBubble(`أسجّل روتين «${rc.name}». قل الخطوات وحدة وحدة (وأنفذها معك)، وقل «خلاص الروتين» لما تخلص.`, 'happy', true); return; }
+  if (rc?.op === 'start') { const shown = t.replace(/^.*?روتين\s+/, '').trim() || rc.name; recording = { name: shown, steps: [] }; showBubble(`أسجّل روتين «${shown}». قل الخطوات وحدة وحدة (وأنفذها معك)، وقل «خلاص الروتين» لما تخلص.`, 'happy', true); return; }
   if (rc?.op === 'end') {
     if (!recording?.steps.length) { recording = null; showBubble('ما سجلت خطوات.', 'calm'); return; }
     saveRoutine(recording.name, recording.steps);
