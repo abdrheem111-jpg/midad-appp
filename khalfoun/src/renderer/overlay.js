@@ -25,6 +25,8 @@ import { CameraPick } from './camera-pick.js';
 import { StepsDeck, stepWord } from './steps.js';
 import { DocView } from './doc-view.js';
 import { GraphPanel } from './graph-panel.js';
+import { SafetyUi } from './safety-ui.js';
+import { fastPlan, isFast } from '../core/fast-layer.js';
 import { GUIDE } from '../core/guide.js';
 import { STAR_MILESTONES as STAR_STEPS } from '../core/classfun.js';
 import { InkLayer } from './ink.js';
@@ -242,7 +244,7 @@ function handle(reply) {
 
 const voiceOut = new VoiceOut();
 // Playful effects on any piece of the screen (a question crumpled into a ball…).
-const screenFx = new ScreenFx(document.body, { celebrate: (kind) => { if (kind === 'pop') sounds.now('pop'); } });
+const screenFx = new ScreenFx(document.body, { celebrate: (kind) => { if (kind === 'pop') sounds.now('pop'); }, enabled: () => brain?.memory?.data?.fxEnabled !== false });
 // While he speaks, the always-on listener pauses so he does not hear himself.
 // While he speaks, his own voice must not come back as a command (also through the phone).
 voiceOut.onStart = () => { if (wake.active || wake.external) wake.pause(); };
@@ -326,10 +328,85 @@ const stepsDeck = new StepsDeck({
   onChange: (st) => { pushPhoneState(); bridge.steps?.keys(st.active); },
 });
 const docView = new DocView(document.body);
+
+// ---------------------------------------------------------------- Khalfoun 3: safety, speed, recovery
+const safety = new SafetyUi(document.body, {
+  answer: (id, ok) => bridge.safety?.answer?.(id, ok),
+  onInteractive: (on) => { if (on) setInteractive(true); else if (!panelsOpen()) setInteractive(false); },
+  note: (t) => bridge.note?.(t),
+});
+let haltedUi = false;
+function setHalted(on) {
+  haltedUi = on;
+  safety.halt(on);
+  setStatus(on ? 'halted' : 'idle');
+  if (on) {
+    voiceOut.stop(); safety.cancel(); cameraPick.close();
+    if (recorder.active) recorder.stop();
+    if (wake.active) wake.stop();
+    endSession?.('emergency');
+  } else updateWake();
+  pushPhoneState();
+}
+function setFx(on) {
+  brain.memory.set({ fxEnabled: on });
+  if (!on) screenFx.clear();
+  showBubble(on ? 'رجعت المؤثرات ✨' : 'وقّفت المؤثرات لين تقول لي «رجّع المؤثرات».', 'calm');
+  pushPhoneState();
+}
+/** «تراجع»: Khalfoun's last action (typing, closing a window, tidying files), else the last drawing. */
+async function smartUndo() {
+  const r = await bridge.safety?.undo?.();
+  if (r?.ok) { showBubble('رجّعتها مثل ما كانت ↶', 'calm'); return; }
+  if (graphPanel.open) { graphPanel.close(); return; }
+  if (ink.hasInk) { ink.undo(); return; }
+  showBubble('ما فيه شي أتراجع عنه الحين.', 'calm');
+}
+/** The times the teacher's PC really takes (settings → القياسات). */
+function noteMetric(kind, ms) { if (Number.isFinite(ms) && ms >= 0) bridge.metrics?.note?.(kind, ms); }
+function noteLatency(kind, opts) { if (opts?.t0) noteMetric(kind, Date.now() - opts.t0); }
+/** Khalfoun's state, shown as a small dot on him (يسمع، يفكر، ينفذ، يتكلم، يحتفل، محتار، نايم). */
+let statusNow = 'idle';
+function setStatus(st) {
+  statusNow = st;
+  const dot = document.querySelector('.status-dot');
+  if (dot) dot.dataset.s = st;
+}
+// The lesson's state is saved every few seconds; after a crash (or a restart) it comes back.
+function lessonSnapshot() {
+  const own = stepsDeck.ownItems();
+  return {
+    ink: ink.items.filter((it) => !own.has(it)).slice(-300),
+    steps: stepsDeck.snapshot(),
+    graph: graphPanel.spec || null,
+    muted: phoneMuted, bubbleHidden,
+  };
+}
+let lessonSaved = '';
+setInterval(() => {
+  try {
+    const st = lessonSnapshot();
+    const j = JSON.stringify(st);
+    if (j !== lessonSaved) { lessonSaved = j; bridge.lesson?.save?.(st); }
+  } catch { /* never in the way */ }
+}, 3000);
+async function restoreLesson() {
+  const saved = await bridge.lesson?.load?.();
+  const st = saved?.state;
+  if (!st) return false;
+  let any = false;
+  if (Array.isArray(st.ink) && st.ink.length) { ink.items.push(...st.ink); ink.redraw(); any = true; }
+  if (st.steps && stepsDeck.restore(st.steps)) any = true;
+  if (st.graph && graphPanel.show(st.graph).ok) any = true;
+  if (st.muted) setMuted(true);
+  if (st.bubbleHidden) setBubbleHidden(true);
+  if (any) { bridge.note?.('lesson state restored'); showBubble('رجعت لوين كنا في الحصة 👍', 'calm'); }
+  return any;
+}
 const graphPanel = new GraphPanel(document.body);
 function pushPhoneState() {
   const st = stepsDeck?.state?.() || { step: 0, steps: 0 };
-  bridge.phone?.state?.({ muted: phoneMuted, bubbleHidden, step: st.step, steps: st.steps });
+  bridge.phone?.state?.({ muted: phoneMuted, bubbleHidden, step: st.step, steps: st.steps, fxOff: brain?.memory?.data?.fxEnabled === false });
 }
 function setMuted(on) {
   if (on === phoneMuted) return;
@@ -347,6 +424,10 @@ function setBubbleHidden(on) {
 function onPhoneCommand(name) {
   bridge.note?.(`phone button: ${name}`);
   switch (name) {
+    case 'undo': smartUndo(); break;
+    case 'fx': setFx(brain.memory.data.fxEnabled === false); break;
+    case 'hide': handle(brain.hear('اختفي')); break;
+    case 'cancel': safety.cancel(); break;
     case 'step_next': if (!stepsDeck.next()) showBubble('ما فيه خطوات الحين. قول لخلفون «حل المسألة خطوة خطوة».', 'calm'); break;
     case 'step_back': stepsDeck.back(); break;
     case 'mute': setMuted(!phoneMuted); break;
@@ -358,7 +439,7 @@ function onPhoneCommand(name) {
     case 'celebrate': effects.play('confetti'); animator.play('celebrate'); break;
     case 'fireworks': effects.play('fireworks'); animator.play('celebrate'); break;
     case 'clear': ink.clear(); screenFx.clear(); docView.close(); graphPanel.close(); stepsDeck.end(); break;
-    case 'stop': mind?.busy && bridge.mind?.stop?.(); voiceOut.stop(); cameraPick.close(); break;
+    case 'stop': safety.cancel(); mind?.busy && bridge.mind?.stop?.(); voiceOut.stop(); cameraPick.close(); break;
     default: break;
   }
   pushPhoneState();
@@ -714,7 +795,7 @@ const chatOn = () => !claudeOnly() && chatInfo.available && brain.memory.data.ch
 let heardSeq = 0;
 
 // With the Claude mind on, these stay instant and local (no need to think about them).
-const INSTANT = new Set(['screen_pen', 'screen_clear', 'volume', 'stop', 'open_settings']);
+// the fast local layer (core/fast-layer.js): known commands are done here at once, never sent to Claude
 // Not classroom features: Claude does these with its own tools.
 const GENERIC_INTENTS = new Set(['open_app', 'open_installed', 'close_app', 'open_url', 'open_folder', 'search', 'key', 'type_text', 'open_download', 'office_write', 'office_format', 'office_draw', 'office_equation', 'office_pdf', 'screen_write', 'screen_draw']);
 const GENERIC_ACTIONS = new Set(['open_app', 'open_installed', 'close_app', 'open_url', 'open_folder', 'search', 'press_key', 'type_text', 'open_download', 'office_put', 'office_format', 'office_draw', 'office_equation', 'office_pdf', 'open_web', 'key_combo']);
@@ -722,13 +803,28 @@ const GENERIC_ACTIONS = new Set(['open_app', 'open_installed', 'close_app', 'ope
 function hear(text, opts = {}) {
   const t = String(text || '').trim();
   if (!t) return;
+  if (haltedUi && !opts.typed) return; // the emergency stop: he hears nothing until it is let go
+  const nt = normalize(t);
+  // the yellow countdown: «لا / الغ / وقف / لا تسوي» cancels it
+  if (safety.counting && /^(لا|الغ|الغيه|الغي|كنسل|وقف|لا تسوي|لا تسويها|خلها|اتركها|لا لا)( يا خلفون)?$/.test(nt)) { safety.cancel(); return; }
+  // «تراجع»: the last thing Khalfoun did is taken back (else the drawing, else Ctrl+Z as before)
+  if (/^(يا خلفون )?(تراجع|تراجع عن اخر شي|رجع اللي سويته|الغ اخر شي|كنسل اخر شي)$/.test(nt)) { smartUndo(); return; }
   if (!opts.viaAgent) heardSeq += 1;
   // «كمل» / «ارجع» while the steps of a solution are showing: at once, no thinking needed.
   const sw = stepsDeck.active ? stepWord(normalize(t)) : null;
   if (sw) { bridge.note?.(`heard «${t}» → step ${sw}`); if (sw === 'next') stepsDeck.next(); else stepsDeck.back(); return; }
   if (mind?.on && !opts.viaAgent && !opts.local) {
     const quick = recognize(t);
-    if (!(quick && INSTANT.has(quick.intent) && quick.confidence >= 0.9) || mind.question) {
+    // «شغل مؤقت ٥ دقايق واختار طالب»: every part known → done here, one after the other
+    const plan = !mind.question && !isFast(quick) ? fastPlan(t, recognize) : null;
+    if (plan) {
+      bridge.note?.(`heard «${t}» → local plan: ${plan.join(' | ')}`);
+      plan.forEach((part, i) => setTimeout(() => { const r = brain.hear(part); handle(r); }, i * 500));
+      noteLatency('local', opts);
+      return;
+    }
+    if (isFast(quick) && !mind.question) noteLatency('local', opts);
+    if (!isFast(quick) || mind.question) {
       followUntil = Date.now() + 9000;
       bridge.note?.(`heard «${t}» → claude`);
       // Claude will click and type on the screen: Khalfoun's window must let the mouse through,
@@ -1006,6 +1102,34 @@ function renderMind(e) {
   }
 }
 
+// ----- Khalfoun 3 settings: the provider, privacy, the yellow countdown, barge-in, effects, suggestions
+function renderK3() {
+  const d = brain.memory.data;
+  $('k3-provider').value = d.provider === 'apikey' ? 'apikey' : 'subscription';
+  $('k3-privacy').checked = d.privacyMask !== false;
+  $('k3-photos').checked = !!d.maskPhotos;
+  $('k3-yellow').checked = d.yellowCountdown !== false;
+  $('k3-barge').checked = d.bargeIn !== false;
+  $('k3-fx').checked = d.fxEnabled !== false;
+  $('k3-suggest').checked = d.suggestions !== false;
+  $('k3-every').value = String(d.suggestEvery || 10);
+  bridge.metrics?.report?.().then((r) => {
+    const ul = $('k3-metrics'); ul.textContent = '';
+    for (const line of r?.lines || []) { const li = document.createElement('li'); li.textContent = line; ul.append(li); }
+  }).catch(() => {});
+}
+async function setK3(patch) {
+  const res = await bridge.updateSettings(patch);
+  brain.memory.set(res?.settings ? Object.fromEntries(Object.keys(patch).map((k) => [k, res.settings[k]])) : patch);
+  if ('provider' in patch) { await mind?.refresh(); renderMind(); }
+  pushPhoneState();
+}
+for (const [id, key] of [['k3-privacy', 'privacyMask'], ['k3-photos', 'maskPhotos'], ['k3-yellow', 'yellowCountdown'], ['k3-barge', 'bargeIn'], ['k3-fx', 'fxEnabled'], ['k3-suggest', 'suggestions']]) {
+  $(id)?.addEventListener('change', () => setK3({ [key]: $(id).checked }));
+}
+$('k3-provider')?.addEventListener('change', () => setK3({ provider: $('k3-provider').value }));
+$('k3-every')?.addEventListener('change', () => setK3({ suggestEvery: Number($('k3-every').value) || 10 }));
+
 async function setMindSetting(patch) {
   const res = await bridge.updateSettings(patch);
   if (res?.settings) brain.memory.set({ mind: res.settings.mind, mindModel: res.settings.mindModel });
@@ -1182,10 +1306,15 @@ async function onWakeSentence(wav, head = wav, ms = 0) {
     useCommandWav(wav);
     return;
   }
-  // His own voice coming back through the speakers is not a command.
-  if (recorder.active || panelsOpen() || voiceOut.speaking) return;
+  if (recorder.active || panelsOpen() || haltedUi) return;
   // Did the ear hear his name during this sentence (or just before it)?
-  const meta = { earHit: Boolean(ear && ear.hitAt && ear.hitAt >= Date.now() - (ms || 3000) - 1500) };
+  const meta = { earHit: Boolean(ear && ear.hitAt && ear.hitAt >= Date.now() - (ms || 3000) - 1500), t0: Date.now() };
+  if (voiceOut.speaking) {
+    // His own voice coming back through the speakers is not a command — but the teacher
+    // interrupting him is: his name heard by the ear, or any sentence from the phone's microphone
+    // (close to the teacher's mouth, far from the speakers) stops him at once to listen.
+    if (brain.memory.data.bargeIn !== false && (meta.earHit || phoneLive())) { voiceOut.stop(); bridge.note?.('barge-in: stopped talking to listen'); } else return;
+  }
   if (wakeBusy) { if (wakeQueue.length < 2 && (inSession() || brain.dictation || meta.earHit)) wakeQueue.push([wav, head, meta]); return; }
   wakeBusy = true;
   try {
@@ -1220,6 +1349,7 @@ async function readWakeSentence(wav, head = wav, meta = {}) {
     if (ear.mode === 'on' && meta.earHit && !cloudHearsNow()) {
       // No cloud to read it: the ear alone opens the session, the next sentence is the command.
       bridge.note?.(`ear: opened the session (peak ${peak.toFixed(2)})`);
+      if (meta.t0) noteMetric('wake', Date.now() - meta.t0);
       handle(brain.event('session_start'));
       startSession();
       return;
@@ -1227,6 +1357,7 @@ async function readWakeSentence(wav, head = wav, meta = {}) {
   }
   // Outside a session only the first seconds are checked for «يا خلفون» (a fraction of the cost).
   let res = await bridge.transcribe(session ? wav : head, session ? 'command' : 'wake');
+  if (res?.ok && meta.t0) noteMetric(session ? 'stt' : 'wake', Date.now() - meta.t0);
   // The call is the first way; when hearing keeps failing (no internet, the service slow), he
   // is reminded of the fallback: the remote's button (or the keyboard shortcut), once an hour.
   if (!res?.ok) {
@@ -1258,7 +1389,7 @@ async function readWakeSentence(wav, head = wav, meta = {}) {
     if (SESSION_END.has(normalize(said))) { endSession('words'); return; }
     sessionUntil = Date.now() + SESSION_MS(); // each command keeps the session open
     // He may be talking to the class, not to Khalfoun: Claude is told so, and stays quiet then.
-    hear(said, { quietIfUnknown: true, session: !hit.found });
+    hear(said, { quietIfUnknown: true, session: !hit.found, t0: meta.t0 });
     return;
   }
   if (!hit.found) {
@@ -1495,6 +1626,7 @@ function openSettings(focus = null) {
   renderRemote();
   refreshMics();
   renderPhone();
+  renderK3();
   refreshSetup().then(() => { if (focus === 'setup') $('su-title').scrollIntoView({ block: 'start', behavior: 'smooth' }); });
   renderLog();
   renderAliases();
@@ -2013,7 +2145,7 @@ async function start() {
 
   voiceOut.setEnabled(!!brain.memory.data.speak);
   mind = new MindClient({
-    bridge, brain, ink, character, animator, sounds, voiceOut, showBubble, screenFx, effects, pickWithCamera, stepsDeck, docView, graphPanel,
+    bridge, brain, ink, character, animator, sounds, voiceOut, showBubble, screenFx, effects, pickWithCamera, stepsDeck, docView, graphPanel, setStatus: (st) => setStatus(st), metric: (k, ms) => noteMetric(k, ms),
     recorderActive: () => recorder.active,
     localHear: (cmd, o = {}) => {
       // Claude's «classroom» tool is for the games and class tools only: opening a program or a
@@ -2070,6 +2202,9 @@ async function start() {
       case 'phone-whisper': hear(String(ev.text || ''), { typed: true, silent: true }); break;
       case 'phone-photo': onPhonePhoto(ev.purpose, ev.photo); break;
       case 'steps-key': if (ev.dir === 'back') stepsDeck.back(); else stepsDeck.next(); break;
+      case 'soft-confirm': safety.soft(ev); break;
+      case 'click-marker': safety.marker(ev.x, ev.y); break;
+      case 'emergency': setHalted(Boolean(ev.on)); break;
       case 'wake-limit':
         showBubble(`خلص وقت سماع «يا خلفون» لليوم. ${fallbackHint()}، وبكرة يرجع السماع.`, 'sorry', true);
         break;
@@ -2117,9 +2252,12 @@ async function start() {
   updateWindowWatch();
   if (!brain.memory.data.onboarded) startOnboarding();
   else handle(brain.start());
+  // Khalfoun 3: the status dot on him, and the lesson brought back after a crash or a restart
+  if (els.stage && !els.stage.querySelector('.status-dot')) { const dot = document.createElement('i'); dot.className = 'status-dot'; dot.dataset.s = 'idle'; els.stage.append(dot); }
+  restoreLesson().catch(() => {});
 
   // Hooks for automated UI tests and debugging.
-  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, ink, startSession, endSession, onWakeSentence, get inSession() { return inSession(); }, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut, get mind() { return mind; }, renderMind, screenFx, cameraPick, pickWithCamera, stepsDeck, docView, graphPanel, showBubble, voiceOut, onPhoneCommand, onPhonePhoto, get phoneMuted() { return phoneMuted; }, get bubbleHidden() { return bubbleHidden; }, get ear() { return ear; }, get earError() { return earError; }, onPhoneStatus, onPhoneAudio, onPhoneSay, get phoneLive() { return phoneLive(); }, loadEar, onEarAudio, earTrainer, endFollow: () => { followUntil = 0; } };
+  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, ink, startSession, endSession, onWakeSentence, get inSession() { return inSession(); }, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut, get mind() { return mind; }, renderMind, screenFx, cameraPick, pickWithCamera, stepsDeck, docView, graphPanel, showBubble, voiceOut, onPhoneCommand, onPhonePhoto, get phoneMuted() { return phoneMuted; }, get bubbleHidden() { return bubbleHidden; }, get ear() { return ear; }, get earError() { return earError; }, onPhoneStatus, onPhoneAudio, onPhoneSay, get phoneLive() { return phoneLive(); }, loadEar, onEarAudio, earTrainer, endFollow: () => { followUntil = 0; }, safety, setHalted, get haltedUi() { return haltedUi; }, setFx, smartUndo, lessonSnapshot, restoreLesson, setStatus, get statusNow() { return statusNow; } };
   document.documentElement.dataset.ready = '1';
 }
 

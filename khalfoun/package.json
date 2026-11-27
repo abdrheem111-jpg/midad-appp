@@ -1,8 +1,8 @@
 {
-  "name": "khalfoun",
-  "productName": "خلفون",
-  "version": "2.0.13",
-  "description": "خلفون: مساعد كرتوني عُماني يعيش على سطح المكتب، يسمع الأوامر الصوتية وينفذها ويتفاعل بالمشاعر.",
+  "name": "khalfoun3",
+  "productName": "خلفون ٣",
+  "version": "3.0.0",
+  "description": "خلفون ٣: مساعد كرتوني عُماني يعيش على سطح المكتب، يسمع الأوامر الصوتية وينفذها ويتفاعل بالمشاعر.",
   "type": "module",
   "main": "src/main/main.js",
   "private": true,
@@ -27,9 +27,9 @@
   },
   "author": "Khalfoun",
   "build": {
-    "appId": "om.khalfoun.desktop",
-    "productName": "Khalfoun",
-    "executableName": "Khalfoun",
+    "appId": "om.khalfoun.desktop3",
+    "productName": "Khalfoun3",
+    "executableName": "Khalfoun3",
     "directories": {
       "output": "dist"
     },
@@ -65,8 +65,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "خلفون",
-      "artifactName": "Khalfoun-Setup-${version}.exe",
+      "shortcutName": "خلفون ٣",
+      "artifactName": "Khalfoun3-Setup-${version}.exe",
       "installerLanguages": [
         "ar_SA",
         "en_US"

@@ -10,7 +10,7 @@ import {
   nativeImage, globalShortcut, dialog, Notification, session, net, powerMonitor, safeStorage,
 } from 'electron';
 import { readFile, readdir, mkdtemp, writeFile, mkdir, stat, rm } from 'node:fs/promises';
-import { watch as watchFolder } from 'node:fs';
+import { watch as watchFolder, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join, extname, normalize, relative, sep, basename } from 'node:path';
 import { tmpdir, cpus } from 'node:os';
@@ -31,6 +31,12 @@ import { ocrImage } from './ocr.js';
 import { TASK_MODES, LOOK_MODES, lookTask } from '../core/chat-prompt.js';
 import { findOnScreen, layoutHint } from '../core/screen-find.js';
 import { createClaudeMind } from './brain/index.js';
+import { LatencyMeter } from '../core/latency.js';
+import { describeAction } from '../core/permissions.js';
+import { migrateFromV2, sharedDirs, v2Dir } from './migrate.js';
+import { claudeExePath } from './brain/claude-setup.js';
+import { parseWindows } from './brain/tools.js';
+import { sensitiveRects } from '../core/privacy.js';
 import { FG_SCRIPT } from './foreground-script.js';
 import { REMOTE_ACCEL } from '../core/remote-keys.js';
 import { EAR_KINDS, EAR_VOICES, earTtsPlan } from '../core/ear-plan.js';
@@ -82,11 +88,14 @@ app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion,IntensiveWakeUpThrottling');
 
-// A plain folder name keeps paths simple: %APPDATA%\Khalfoun on Windows.
-app.setName('Khalfoun');
+// Khalfoun 3 has its own folder (%APPDATA%\Khalfoun3) so Khalfoun 2 stays installed and untouched.
+app.setName('Khalfoun3');
 if (process.env.KHALFOUN_USER_DATA) app.setPath('userData', process.env.KHALFOUN_USER_DATA);
+// First run: copy the teacher's data from Khalfoun 2 (before Chromium reads "Local State").
+const migration = process.env.KHALFOUN_USER_DATA && !process.env.KHALFOUN_MIGRATE_TEST ? { done: false, reason: 'test_folder' } : (() => { try { return migrateFromV2(app.getPath('userData')); } catch (err) { return { done: false, reason: String(err?.message || err) }; } })();
 
 let win = null;
+let pageCrashes = [];
 let tray = null;
 let settings = { ...DEFAULT_SETTINGS };
 let whisper = { available: false, bin: null, model: null, wakeModel: null };
@@ -165,7 +174,11 @@ function cloudTranscribe(bytes, isWake) {
   return geminiEars.transcribe(bytes, { timeoutMs: isWake ? 7000 : 9000 }).then((r) => ({ ...r, service: 'gemini' }));
 }
 // With the Claude mind on (the teacher's subscription), no other cloud mind is used.
-const cloudThinks = () => settings?.mind !== 'claude' && Boolean(secrets.data.use?.brain && secrets.brain);
+// Khalfoun 3 has one mind only: Claude (subscription or API key, provider.js). The old second
+// minds (a Claude/Gemini key answering in text, a local Ollama model) are out of the flow; the
+// local layer that answers known commands instantly is ordinary code, not a mind.
+const SINGLE_BRAIN = true;
+const cloudThinks = () => !SINGLE_BRAIN && settings?.mind !== 'claude' && Boolean(secrets.data.use?.brain && secrets.brain);
 /**
  * The cloud brain: Claude when its key is set, Gemini otherwise — and Gemini also steps in when
  * Claude has no credit, a bad key or is busy (seen: a Claude key without credit blocked Gemini).
@@ -312,7 +325,14 @@ function createWindow() {
     const message = typeof e === 'object' && e !== null && 'message' in e ? e.message : args[2];
     if (level === 'error' || level === 'warning' || level === 2 || level === 3) diag.write(`page ${level === 'error' || level === 3 ? 'error' : 'warning'}:`, String(message));
   });
-  win.webContents.on('render-process-gone', (_e, details) => diag.write('page crashed:', details));
+  // A crashed page comes back by itself (the lesson's state is reloaded from lesson-state.json).
+  win.webContents.on('render-process-gone', (_e, details) => {
+    diag.write('page crashed:', details);
+    const now = Date.now();
+    pageCrashes = pageCrashes.filter((t) => now - t < 120000);
+    pageCrashes.push(now);
+    if (pageCrashes.length <= 3 && !SMOKE) setTimeout(() => { if (win && !win.isDestroyed()) { diag.write('page reloaded after the crash'); win.webContents.reload(); } }, 1000);
+  });
   win.webContents.on('unresponsive', () => diag.write('page not responding'));
   win.webContents.on('did-fail-load', (_e, code, desc, url) => diag.write('page failed to load:', code, desc, url));
   win.webContents.on('preload-error', (_e, path, err) => diag.write('preload error:', path, String(err)));
@@ -349,14 +369,45 @@ function buildTray() {
 function registerShortcuts() {
   const ok1 = globalShortcut.register('CommandOrControl+Shift+Space', () => { if (win) { win.showInactive(); send('ptt'); } });
   const ok2 = globalShortcut.register('CommandOrControl+Shift+K', () => { if (win) { focusOverlay(); send('open-command'); } });
-  if (!ok1 || !ok2) console.warn('Some keyboard shortcuts are taken by another program.');
-  diag.write('shortcuts', { 'Ctrl+Shift+Space': ok1, 'Ctrl+Shift+K': ok2 });
+  // the emergency stop: listening and control off at once; the same keys let go of it
+  const ok3 = globalShortcut.register('Control+Alt+End', () => setHalted(!halted, 'keys'));
+  if (!ok1 || !ok2 || !ok3) console.warn('Some keyboard shortcuts are taken by another program.');
+  diag.write('shortcuts', { 'Ctrl+Shift+Space': ok1, 'Ctrl+Shift+K': ok2, 'Ctrl+Alt+End (emergency)': ok3 });
   if (settings.remoteKey) diag.write('remote button', settings.remoteKey, registerRemote(settings.remoteKey) ? 'ready' : 'taken by another program');
 }
 
 // The teacher's presenter remote: one learned button makes Khalfoun listen, from anywhere.
 let phoneMic = null;
 let phoneUiState = {};
+let meter = new LatencyMeter();
+let metricsDirty = false;
+// ----- Khalfoun 3: the emergency stop and the yellow countdown
+let halted = false;
+function setHalted(on, source) {
+  halted = !!on;
+  if (halted) mind?.stop?.();
+  diag.write('emergency stop', halted ? 'ON' : 'off', `(${source})`);
+  phoneUiState = { ...phoneUiState, halted };
+  send('emergency', { on: halted, source });
+}
+const softWaits = new Map();
+let softSeq = 0;
+function softConfirm(action) {
+  if (!win || win.isDestroyed() || SMOKE) return Promise.resolve(true);
+  softSeq += 1;
+  const id = `s${softSeq}`;
+  send('soft-confirm', { id, text: describeAction(action), seconds: 3 });
+  return new Promise((resolve) => {
+    const t = setTimeout(() => { softWaits.delete(id); resolve(true); }, 3600);
+    softWaits.set(id, (ok) => { clearTimeout(t); softWaits.delete(id); diag.write('yellow', action.type, ok ? 'went ahead' : 'cancelled by the teacher'); resolve(ok); });
+  });
+}
+async function showClickMarker(p) {
+  if (!win || win.isDestroyed() || SMOKE) return;
+  const sf = screen.getPrimaryDisplay().scaleFactor || 1;
+  send('click-marker', { x: Math.round(p.x / sf), y: Math.round(p.y / sf) });
+  await new Promise((r) => setTimeout(r, 220));
+}
 let remoteAccel = null;
 let remoteLast = 0;
 function registerRemote(accel) {
@@ -641,6 +692,9 @@ function sanitizeSettingsPatch(patch) {
   if ('mindModel' in patch && ['fast', 'smart', 'best'].includes(patch.mindModel)) out.mindModel = patch.mindModel;
   if ('digits' in patch && ['arabic', 'latin'].includes(patch.digits)) out.digits = patch.digits;
   if ('voiceName' in patch && VOICE_IDS.includes(patch.voiceName)) out.voiceName = patch.voiceName;
+  if ('provider' in patch) out.provider = patch.provider === 'apikey' ? 'apikey' : 'subscription';
+  for (const k of ['privacyMask', 'maskPhotos', 'fxEnabled', 'suggestions', 'bargeIn', 'yellowCountdown']) if (k in patch) out[k] = !!patch[k];
+  if ('suggestEvery' in patch) out.suggestEvery = Math.min(60, Math.max(5, Math.round(Number(patch.suggestEvery)) || 10));
   return out; // remoteKey is set through remote:set (checked and registered there)
 }
 
@@ -745,6 +799,36 @@ function setupIpc(stores, executor) {
     return true;
   });
 
+  // ----- Khalfoun 3: the lesson's state survives a crash, and every answer's time is measured
+  const lessonFile = join(app.getPath('userData'), 'lesson-state.json');
+  let lessonTimer = null; let lessonPending = null;
+  ipcMain.on('lesson:save', (event, st) => {
+    if (!fromApp(event) || !st || typeof st !== 'object') return;
+    const json = JSON.stringify({ at: Date.now(), state: st });
+    if (json.length > 2e6) return;
+    lessonPending = json;
+    if (!lessonTimer) lessonTimer = setTimeout(() => { lessonTimer = null; writeFile(lessonFile, lessonPending).catch(() => {}); }, 1500);
+  });
+  ipcMain.handle('lesson:load', async (event) => {
+    if (!fromApp(event)) return null;
+    try {
+      const j = JSON.parse(await readFile(lessonFile, 'utf8'));
+      return j && Date.now() - j.at < 45 * 60 * 1000 ? j : null; // a lesson from long ago is not brought back
+    } catch { return null; }
+  });
+  ipcMain.on('metrics:note', (event, m) => {
+    if (!fromApp(event) || !m) return;
+    if (meter.note(m.kind, m.ms)) { diag.write('latency', m.kind, `${Math.round(m.ms)} ms`); metricsDirty = true; }
+  });
+  ipcMain.handle('metrics:report', (event) => (fromApp(event) ? { report: meter.report(), lines: meter.lines() } : null));
+  ipcMain.on('soft-confirm:answer', (event, a) => { if (fromApp(event) && a && typeof a.id === 'string') softWaits.get(a.id)?.(a.ok !== false); });
+  ipcMain.handle('emergency:set', (event, on) => { if (!fromApp(event)) return { ok: false }; setHalted(!!on, 'page'); return { ok: true, on: halted }; });
+  ipcMain.handle('actions:undo', async (event) => {
+    if (!fromApp(event)) return { ok: false, error: 'forbidden' };
+    const r = await executor.undo();
+    diag.write('undo (last action) →', r.ok ? `ok (${r.data?.from})` : r.error);
+    return r;
+  });
   ipcMain.handle('settings:update', async (event, patch) => {
     if (!fromApp(event)) return { ok: false, settings };
     const next = { ...settings, ...sanitizeSettingsPatch(patch) };
@@ -760,8 +844,10 @@ function setupIpc(stores, executor) {
     } else if (next.onboarded && !next.level) {
       next.level = 1;
     }
+    const providerChanged = (next.provider || 'subscription') !== (settings.provider || 'subscription');
     settings = next;
     await stores.settings.write(settings);
+    if (providerChanged) { mind?.close(); diag.write('provider →', settings.provider); }
     diag.write('settings', { level: settings.level, kidsMode: settings.kidsMode, onboarded: settings.onboarded, chatEnabled: settings.chatEnabled });
     return { ok: true, settings };
   });
@@ -843,7 +929,10 @@ function setupIpc(stores, executor) {
     onAudio: (pcm) => send('phone-audio', { pcm }),
     onSay: (wav) => { if (win) win.showInactive(); send('phone-say', { wav }); },
     onStatus: (st) => { diag.write('phone mic', st); send('phone-status', st); },
-    onCommand: (name) => { if (win) win.showInactive(); send('phone-cmd', { name }); },
+    onCommand: (name) => {
+      if (name === 'emergency') { setHalted(!halted, 'phone'); return; }
+      if (win) win.showInactive(); send('phone-cmd', { name });
+    },
     onWhisper: (text) => send('phone-whisper', { text }),
     onPhoto: (purpose, photo) => { if (win) win.showInactive(); send('phone-photo', { purpose, photo }); },
     getState: () => phoneUiState,
@@ -852,7 +941,7 @@ function setupIpc(stores, executor) {
   // What the phone's buttons show (voice muted, bubble hidden, which step): told by the page.
   ipcMain.on('phone:state', (event, st) => {
     if (!fromApp(event) || !st || typeof st !== 'object') return;
-    phoneUiState = { muted: st.muted === true, bubbleHidden: st.bubbleHidden === true, step: Number.isFinite(st.step) ? st.step : 0, steps: Number.isFinite(st.steps) ? st.steps : 0 };
+    phoneUiState = { muted: st.muted === true, bubbleHidden: st.bubbleHidden === true, step: Number.isFinite(st.step) ? st.step : 0, steps: Number.isFinite(st.steps) ? st.steps : 0, halted, fxOff: st.fxOff === true };
   });
   const phoneAnswer = async () => {
     const info = await phoneMic.info();
@@ -1592,7 +1681,23 @@ async function start() {
   };
   secrets = await new CloudSecrets(stores.cloud, safeStorage).load();
   settings = { ...DEFAULT_SETTINGS, ...(await stores.settings.read()) };
-  voiceDirs = [join(userData, 'voice'), join(ROOT, 'voice')];
+  voiceDirs = [...sharedDirs(userData, 'voice'), join(ROOT, 'voice')]; // Khalfoun 2's whisper is used, not copied
+  diag.write('khalfoun 3 first-run copy from khalfoun 2:', migration);
+  const metricsFile = join(userData, 'metrics.json');
+  try { meter = new LatencyMeter(JSON.parse(await readFile(metricsFile, 'utf8'))); } catch { /* first run */ }
+  setInterval(() => { if (metricsDirty) { metricsDirty = false; writeFile(metricsFile, JSON.stringify(meter)).catch(() => {}); } }, 60000).unref?.();
+  // The app itself comes back after a crash (once every two minutes at most, never in a loop).
+  process.on('uncaughtException', (err) => {
+    diag.write('main crashed:', String(err?.stack || err).slice(0, 800));
+    if (SMOKE) return;
+    const mark = join(userData, 'crash-at.json');
+    let last = 0;
+    try { last = JSON.parse(readFileSync(mark, 'utf8')).at || 0; } catch { /* none */ }
+    if (Date.now() - last < 120000) return;
+    try { writeFileSync(mark, JSON.stringify({ at: Date.now() })); } catch { /* best effort */ }
+    app.relaunch();
+    app.exit(1);
+  });
   whisper = await findWhisper({ dirs: voiceDirs });
   diag.write('start', { version: app.getVersion(), platform: process.platform, arch: process.arch, packaged: app.isPackaged, level: settings.level, kidsMode: settings.kidsMode, onboarded: settings.onboarded, voice: whisper.available ? { bin: whisper.bin, model: whisper.model } : 'not installed' });
 
@@ -1634,6 +1739,7 @@ async function start() {
   });
   handsHost = new OfficeHost({ tempDir: join(app.getPath('temp'), 'khalfoun'), scriptPath: join(ROOT, 'src', 'main', 'brain', 'hands.ps1'), copyName: 'khalfoun-hands.ps1', sta: false, timeoutMs: 15000, log: (...a) => diag.write(...a) });
   const executor = createExecutor({
+    isHalted: () => halted, softConfirm, beforeClick: showClickMarker,
     platform, getSettings: () => settings, downloadsDir, journal: stores.journal, scheduleReminder, office, hands: handsHost,
     cancelReminders: () => reminderScheduler.cancelAll(),
     readScreen,
@@ -1661,7 +1767,13 @@ async function start() {
   });
   mind = createClaudeMind({
     userData: app.getPath('userData'),
-    electron: { screen, desktopCapturer },
+    electron: { screen, desktopCapturer, nativeImage },
+    // students' faces never leave the PC: camera and video-call windows are covered first
+    sensitiveRects: async () => {
+      if (process.platform !== 'win32' || settings.privacyMask === false) return [];
+      const r = await handsHost.call('win_list', {}, 4000).catch(() => null);
+      return r?.ok ? sensitiveRects(parseWindows(r.data), { photos: !!settings.maskPhotos }) : [];
+    },
     run: async (action) => {
       // Keys and typing must reach the teacher's program, never Khalfoun's own window.
       if (['type_text', 'key_combo'].includes(action?.type) && win && !win.isDestroyed() && win.isFocused()) {
@@ -1689,8 +1801,13 @@ async function start() {
     send: (channel, data) => send(channel === 'mind:event' ? 'mind' : 'mind_ui', { data }),
     log: (...a) => diag.write(...a),
     getSettings: () => settings,
+    getApiKey: () => secrets.claudeKey || null,
     fetchFn: (url, init) => net.fetch(url, init),
-    ...(SMOKE && process.env.KHALFOUN_CLAUDE_EXE ? { exePath: process.env.KHALFOUN_CLAUDE_EXE } : {}),
+    ...(SMOKE && process.env.KHALFOUN_CLAUDE_EXE ? { exePath: process.env.KHALFOUN_CLAUDE_EXE } : (() => {
+      // Claude's program already downloaded by Khalfoun 2 is used as it is (no second download)
+      const own = claudeExePath(app.getPath('userData')); const old = claudeExePath(v2Dir(app.getPath('userData')));
+      return !SMOKE && own && old && !existsSync(own) && existsSync(old) ? { exePath: old } : {};
+    })()),
   });
   setupIpc(stores, executor);
   createWindow();
@@ -1699,6 +1816,7 @@ async function start() {
   if (settings.mind === 'claude' && !SMOKE) setTimeout(() => mind.warm().catch(() => {}), 4000);
   // Look for a local language model now and every five minutes until one appears.
   lookForModel = async (preferred) => {
+    if (SINGLE_BRAIN) return;
     if (chat && visionModel) return;
     // With the Claude mind on, the local model is never used: loading it only took the PC's
     // memory and processor while Claude worked (seen: gemma3 4b warmed up during a lesson).

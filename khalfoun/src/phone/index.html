@@ -31,6 +31,8 @@
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; }
   .grid button, .wide { font: inherit; font-size: 17px; padding: 16px 8px; border-radius: 14px; border: none; background: #fff; color: var(--ink); box-shadow: 0 2px 8px rgba(0,0,0,.07); }
   .grid button.on { background: #d5efe5; color: var(--accent); font-weight: 700; }
+  .grid button.danger { background: #b3261e; color: #fff; grid-column: 1 / -1; }
+  .grid button.danger.on { background: #1e8449; }
   .grid button.big { font-size: 20px; padding: 22px 8px; background: var(--accent); color: #fff; }
   .wide { width: 100%; }
   .whisper { display: flex; gap: 8px; width: 100%; }
@@ -80,6 +82,10 @@
         <button data-cmd="stop">✋ وقّف</button>
         <button data-cmd="celebrate">🎉 احتفال</button>
         <button data-cmd="fireworks">🎆 ألعاب نارية</button>
+        <button data-cmd="undo">↶ تراجع عن آخر شي</button>
+        <button data-cmd="fx" id="b-fx">✨ وقّف المؤثرات</button>
+        <button data-cmd="hide">🙈 خبّي خلفون</button>
+        <button data-cmd="emergency" id="b-emergency" class="danger">⛔ طوارئ: وقّف كل شي</button>
       </div>
       <form class="whisper" id="whisper">
         <input id="wtext" maxlength="300" placeholder="✍️ همسة لخلفون (ما تنقرأ بصوت)" autocomplete="off">
@@ -215,6 +221,9 @@ function showState(st) {
   $('b-mute').textContent = st.muted ? '🔈 رجّع صوته' : '🔇 سكّت صوته';
   $('b-bubble').classList.toggle('on', Boolean(st.bubbleHidden));
   $('b-bubble').textContent = st.bubbleHidden ? '💬 رجّع الفقاعة' : '💬 خبّي الفقاعة';
+  $('b-fx').textContent = st.fxOff ? '✨ رجّع المؤثرات' : '✨ وقّف المؤثرات';
+  $('b-emergency').classList.toggle('on', Boolean(st.halted));
+  $('b-emergency').textContent = st.halted ? '▶️ رجّع خلفون يشتغل' : '⛔ طوارئ: وقّف كل شي';
   $('stepinfo').textContent = st.steps ? `الخطوة ${st.step.toLocaleString('ar-EG')} من ${st.steps.toLocaleString('ar-EG')}` : '';
 }
 for (const b of document.querySelectorAll('[data-cmd]')) {

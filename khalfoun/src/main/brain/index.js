@@ -8,6 +8,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as realSdk from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeBrain, MODELS } from './claude-brain.js';
+import { providerEnv, providerKind } from './provider.js';
 import { khalfounTools, khalfounServer } from './tools.js';
 import { createEyes } from './eyes.js';
 import { installClaude, claudeExePath, claudeInstalled, CLAUDE_PROGRAM } from './claude-setup.js';
@@ -15,14 +16,9 @@ import { personaPrompt, userTurn, speakable, needsScreen } from '../../core/clau
 import { TeacherNotes } from './teacher-notes.js';
 import { normalize } from '../../core/arabic.js';
 
-/** The environment Claude's program runs in: the person's own, minus API keys (the subscription pays). */
-export function childEnv(base = process.env) {
-  const env = { ...base };
-  delete env.ANTHROPIC_API_KEY;
-  delete env.ANTHROPIC_AUTH_TOKEN;
-  delete env.ANTHROPIC_BASE_URL;
-  env.DISABLE_AUTOUPDATER = '1';
-  return env;
+/** The environment Claude's program runs in, decided by the provider layer (subscription by default). */
+export function childEnv(base = process.env, kind = 'subscription', creds = {}) {
+  return providerEnv(kind, creds, base).env;
 }
 
 /** Reads `claude auth status --json`. */
@@ -72,7 +68,7 @@ export function createClaudeMind(deps) {
     if (done) { pending.delete(id); done(result); }
   }
 
-  const eyes = deps.eyes || createEyes({ electron: deps.electron, ocrImage: deps.ocrImage, hands: deps.hands, hideWhile: deps.hideWhile, activeWindow: async () => {
+  const eyes = deps.eyes || createEyes({ electron: deps.electron, ocrImage: deps.ocrImage, hands: deps.hands, hideWhile: deps.hideWhile, sensitiveRects: deps.sensitiveRects, log: deps.log, activeWindow: async () => {
     const r = await deps.activeWindow?.();
     return r?.ok ? r.data : null;
   }, platform, log });
@@ -103,7 +99,8 @@ export function createClaudeMind(deps) {
       model: MODELS[s.mindModel] || MODELS.smart,
       effort: 'low',
       cwd: join(deps.userData, 'claude-work'),
-      env: childEnv(),
+      env: childEnv(process.env, providerKind(s), { apiKey: deps.getApiKey?.() || null }),
+      apiKeyChosen: providerKind(s) === 'apikey',
       log,
       onEvent: (e) => {
         if (e.type === 'tool') log('claude tool', e.name, JSON.stringify(e.input || {}).slice(0, 160));

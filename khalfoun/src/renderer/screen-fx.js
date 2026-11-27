@@ -60,7 +60,8 @@ function loadImage(src) {
 }
 
 export class ScreenFx {
-  constructor(parent = document.body, { celebrate } = {}) {
+  constructor(parent = document.body, { celebrate, enabled } = {}) {
+    this.o = { enabled };
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'screen-fx';
     Object.assign(this.canvas.style, { position: 'fixed', inset: '0', width: '100vw', height: '100vh', pointerEvents: 'none', zIndex: '40' });
@@ -112,6 +113,7 @@ export class ScreenFx {
    * @returns {Promise<boolean>} resolves when the animation is over
    */
   async play(p) {
+    if (this.o?.enabled && !this.o.enabled()) return false; // the teacher switched effects off for now
     const rect = { x: Math.round(p.rect.x), y: Math.round(p.rect.y), w: Math.max(8, Math.round(p.rect.w)), h: Math.max(8, Math.round(p.rect.h)) };
     const img = p.image ? await loadImage(p.image).catch(() => null) : null;
     if (!img && p.effect !== 'spotlight') return false;

@@ -141,12 +141,32 @@
       <p class="fine">أذن خلفون الخاصة: تسمع اسمه على جهازك بدون إنترنت. سجّل صوتك وأنت تناديه، وأنا أدرّبها عليه.</p>
       <div class="setup-controls"><button id="ear-open" type="button" class="ghost">👂 علّم خلفون صوتك وهو تناديه</button></div>
     </section>
-    <label class="check"><input id="st-chat" type="checkbox"> عقل خلفون: يسولف بحرية عبر نموذج على جهازك</label>
+    <label class="check" hidden><input id="st-chat" type="checkbox"> عقل خلفون: يسولف بحرية عبر نموذج على جهازك</label>
+    <section class="setup k3" aria-labelledby="k3-title">
+      <h3 id="k3-title">خلفون ٣: العقل والأمان والسرعة</h3>
+      <label class="field"><span>طريقة ربط Claude</span>
+        <select id="k3-provider">
+          <option value="subscription">اشتراكي في Claude (Pro) — لاستخدامي الشخصي</option>
+          <option value="apikey">مفتاح Claude API — للتوزيع على معلمين ثانيين</option>
+        </select>
+      </label>
+      <p class="fine">خلفون له عقل واحد بس: Claude. الأوامر المعروفة (المؤقت، الطالب العشوائي، النجوم، القلم، الصفحة الجاية…) تتنفذ فوراً على جهازك بدون Claude.</p>
+      <label class="check"><input id="k3-privacy" type="checkbox"> غطِّ نوافذ الكاميرا والمكالمات قبل ما يشوف Claude الشاشة (وجوه الطلاب ما تطلع)</label>
+      <label class="check"><input id="k3-photos" type="checkbox"> غطِّ تطبيق الصور بعد</label>
+      <label class="check"><input id="k3-yellow" type="checkbox"> قبل إغلاق نافذة أو حفظ نسخة: اعرض ٣ ثواني وأقدر ألغي</label>
+      <label class="check"><input id="k3-barge" type="checkbox"> إذا ناديته وهو يتكلم يسكت ويسمع</label>
+      <label class="check"><input id="k3-fx" type="checkbox"> المؤثرات (تكريفس، حرق، طيارة…)</label>
+      <label class="check"><input id="k3-suggest" type="checkbox"> اقتراحات خلفون أثناء الحصة (بدون صوت، على الجوال أو أيقونة صغيرة)</label>
+      <label class="field"><span>اقتراح واحد كل (دقيقة)</span><input id="k3-every" type="number" min="5" max="60" step="5" dir="ltr"></label>
+      <p class="fine">⛔ زر الطوارئ: <b dir="ltr">Ctrl+Alt+End</b> يوقف السماع والتحكم فوراً، ونفس الزر يرجّعه (وفيه زر في الجوال).</p>
+      <details><summary>القياسات (سرعة خلفون على جهازك)</summary><ul id="k3-metrics" class="fine"></ul></details>
+      <div class="setup-controls"><button id="k3-memory" type="button" class="ghost">🧠 ذاكرة خلفون وروتيناته</button><button id="k3-log" type="button" class="ghost">📜 سجل اللي سواه خلفون</button></div>
+    </section>
     <section class="setup cloud" aria-labelledby="cl-title">
       <h3 id="cl-title">السرعة والذكاء (السحابة)</h3>
-      <p class="fine">بمفاتيحك أنت: Claude (أو Gemini المجاني) يفهم أي كلام ويرد في ثانية، و Azure يسمع لهجتك ويتكلم بصوت عُماني. بدونها يشتغل خلفون على جهازك مثل قبل. المفاتيح تنحفظ مشفّرة على جهازك.</p>
-      <label class="field"><span>مفتاح Claude <small id="cl-claude-state" class="pill"></small></span><input id="cl-claude" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-..." dir="ltr"></label>
-      <label class="field"><span>أو مفتاح Gemini (مجاني) <small id="cl-gemini-state" class="pill"></small></span><input id="cl-gemini" type="password" autocomplete="off" spellcheck="false" placeholder="AQ.Ab... أو AIza..." dir="ltr"></label>
+      <p class="fine">بمفاتيحك أنت: Azure يسمع لهجتك ويتكلم بصوت عربي. المفاتيح تنحفظ مشفّرة على جهازك، وما تطلع للصفحة.</p>
+      <label class="field"><span>مفتاح Claude API (فقط إذا اخترت «مفتاح API» فوق) <small id="cl-claude-state" class="pill"></small></span><input id="cl-claude" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-..." dir="ltr"></label>
+      <label class="field" hidden><span>أو مفتاح Gemini (مجاني) <small id="cl-gemini-state" class="pill"></small></span><input id="cl-gemini" type="password" autocomplete="off" spellcheck="false" placeholder="AQ.Ab... أو AIza..." dir="ltr"></label>
       <label class="field"><span>مفتاح Azure Speech <small id="cl-azure-state" class="pill"></small></span><input id="cl-azure" type="password" autocomplete="off" spellcheck="false" placeholder="مفتاح الخدمة (Key 1)" dir="ltr"></label>
       <label class="field"><span>منطقة Azure</span><input id="cl-region" type="text" autocomplete="off" spellcheck="false" placeholder="uaenorth" dir="ltr" maxlength="26"></label>
       <div class="setup-controls">
@@ -156,7 +176,7 @@
       </div>
       <p id="cl-result" class="fine" role="status" aria-live="polite"></p>
       <label class="check"><input id="cl-use-hear" type="checkbox"> يسمعني بالسحابة (Azure، أو Gemini إذا ما فيه Azure)</label>
-      <label class="check"><input id="cl-use-brain" type="checkbox"> يفهم ويرد بالسحابة (Claude أو Gemini)</label>
+      <label class="check" hidden><input id="cl-use-brain" type="checkbox"> يفهم ويرد بالسحابة (Claude أو Gemini)</label>
       <label class="check"><input id="cl-use-voice" type="checkbox"> صوته من السحابة (Azure)</label>
       <label class="check"><input id="st-session" type="checkbox"> جلسة صوتية: بعد «يا خلفون» أسمع أوامرك ورا بعض بدون ما تعيد اسمي، لين تقول «خلاص»</label>
     </section>

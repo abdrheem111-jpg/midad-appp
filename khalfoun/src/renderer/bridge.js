@@ -110,6 +110,20 @@ function createPreviewBridge() {
       },
     },
     steps: { keys(on) { window.__stepKeys = Boolean(on); } },
+    safety: {
+      answer(id, ok) { (window.__softAnswers ||= []).push({ id, ok }); },
+      async emergency(on) { return { ok: true, on }; },
+      async undo() { return window.__undoResult || { ok: false, error: 'nothing' }; },
+    },
+    lesson: {
+      save(st) { window.__lessonSaved = st; try { sessionStorage.setItem('kh-lesson', JSON.stringify({ at: Date.now(), state: st })); } catch { /* preview */ } },
+      async load() { try { return JSON.parse(sessionStorage.getItem('kh-lesson') || 'null'); } catch { return null; } },
+    },
+    metrics: {
+      note(kind, ms) { (window.__metrics ||= []).push({ kind, ms }); },
+      async report() { return { report: [], lines: ['• ما انقاس بعد'] }; },
+    },
+    math: { async solve() { return { ok: false, error: 'preview' }; } },
     phone: {
       state(st) { window.__phoneState = st; },
       async start() { window.__phoneOn = true; return this.info(); },

@@ -104,3 +104,41 @@ export function isKidsSafeUrl(url) {
     return false;
   }
 }
+
+/**
+ * The three colours the teacher sees:
+ *   green  — done at once;
+ *   yellow — shown for 3 seconds first, and he can cancel it (closing a window, saving a copy, tidying files);
+ *   red    — needs a clear «نعم» by voice or phone (deleting, and whatever decide() asks about).
+ */
+export const YELLOW = new Set(['close_app', 'office_pdf', 'save_sheet', 'organize_downloads', 'undo_organize', 'pdf_write']);
+export function colorOf(action, settings) {
+  const v = decide(action, settings);
+  if (ACTION_RISK[action?.type] === 'destructive' || v.confirm) return 'red';
+  if (YELLOW.has(action?.type) || (action?.type === 'window_op' && action.params?.op === 'close')) return 'yellow';
+  return 'green';
+}
+
+/** What «تراجع» can take back for an action that went through, or null. */
+export function undoFor(action) {
+  const p = action?.params || {};
+  if (['type_text', 'office_put', 'office_draw', 'office_format', 'office_equation', 'office_circle', 'office_slide'].includes(action?.type)) return { type: 'key_combo', params: { keys: 'ctrl+z' } };
+  if (action?.type === 'window_op' && ['minimize', 'maximize'].includes(p.op)) return { type: 'window_op', params: { hwnd: p.hwnd, op: 'restore' } };
+  if (action?.type === 'organize_downloads') return { type: 'undo_organize', params: {} };
+  return null;
+}
+
+/** The action in a few Arabic words, for the yellow countdown («بسكّر وورد…»). */
+export function describeAction(action) {
+  const p = action?.params || {};
+  switch (action?.type) {
+    case 'close_app': return `بسكّر ${p.app || p.name || 'البرنامج'}`;
+    case 'window_op': return 'بسكّر النافذة';
+    case 'office_pdf': return 'بحفظ نسخة PDF من الملف';
+    case 'save_sheet': return 'بحفظ جدول جديد';
+    case 'organize_downloads': return 'برتّب مجلد التنزيلات';
+    case 'undo_organize': return 'برجّع ترتيب التنزيلات مثل قبل';
+    case 'pdf_write': return 'بكتب في ملف الـ PDF';
+    default: return 'بنفّذ الأمر';
+  }
+}

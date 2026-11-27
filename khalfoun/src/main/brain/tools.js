@@ -18,7 +18,7 @@ import { parse as parseExpr } from '../../core/math-expr.js';
 export function parseWindows(data) {
   return String(data || '').split('\n').map((l) => l.split('\t')).filter((f) => f.length >= 5 && /^\d+$/.test(f[0]))
     .map(([hwnd, proc, state, rect, ...t]) => ({ id: hwnd, program: proc, state, rect, title: t.join(' ') }))
-    .filter((w) => !/^khalfoun$/i.test(w.program));
+    .filter((w) => !/^khalfoun3?$/i.test(w.program));
 }
 
 const text = (t) => ({ content: [{ type: 'text', text: String(t) }] });

@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { findOnScreen, layoutHint } from '../../core/screen-find.js';
 import { parseOcrOutput } from '../ocr.js';
+import { maskBitmap } from '../../core/privacy.js';
 
 export const PICTURE_MAX = 1568;
 
@@ -49,6 +50,7 @@ export function screenMap(display, max = PICTURE_MAX) {
  * @param {{electron: {screen: any, desktopCapturer: any}, ocrImage?: Function, hideWhile: (fn: () => Promise<any>) => Promise<any>,
  *   activeWindow?: () => Promise<{title?: string, process?: string}|null>, platform?: string, log?: Function}} deps
  */
+
 export function createEyes(deps) {
   const { screen, desktopCapturer } = deps.electron;
   const platform = deps.platform || process.platform;
@@ -63,7 +65,21 @@ export function createEyes(deps) {
       return source?.thumbnail || null;
     });
     if (!shot || shot.isEmpty?.()) return null;
-    return { shot, map, display };
+    return { shot: await masked(shot), map, display };
+  }
+
+  /** Covers camera and video-call windows (students' faces) before the picture is used at all. */
+  async function masked(shot) {
+    if (!deps.sensitiveRects || !deps.electron.nativeImage) return shot;
+    let rects = [];
+    try { rects = await deps.sensitiveRects(); } catch { return shot; }
+    if (!rects.length) return shot;
+    const size = shot.getSize();
+    const buf = Buffer.from(shot.toBitmap());
+    const n = maskBitmap(buf, size.width, size.height, rects);
+    if (!n) return shot;
+    deps.log?.('privacy: covered', n, 'window(s) before the screen was used', rects.map((r) => r.why).join(','));
+    return deps.electron.nativeImage.createFromBitmap(buf, { width: size.width, height: size.height });
   }
 
   /**

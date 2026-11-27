@@ -5,6 +5,7 @@
 //
 // The SDK is passed in (`sdk`) so tests run with a fake one.
 
+import { providerEnv } from './provider.js';
 const DEFAULT_MODEL = 'sonnet';
 export const MODELS = { fast: 'haiku', smart: 'sonnet', best: 'opus' };
 
@@ -46,7 +47,7 @@ class Inbox {
 
 export class ClaudeBrain {
   /**
-   * @param {{sdk: {query: Function}, exePath?: string, getToken?: () => string|null,
+   * @param {{sdk: {query: Function}, exePath?: string, 
    *   makeServer: () => object, toolNames: string[], persona: () => string, model?: string,
    *   effort?: string, cwd: string, log?: (...a: any[]) => void, onEvent?: (e: object) => void,
    *   env?: object, idleResetMs?: number, turnTimeoutMs?: number, now?: () => number}} o
@@ -71,13 +72,10 @@ export class ClaudeBrain {
   }
 
   options() {
-    const env = { ...(this.o.env || process.env) };
-    delete env.ANTHROPIC_API_KEY; // the teacher's subscription, never an API account by accident
-    delete env.ANTHROPIC_AUTH_TOKEN;
-    const token = this.o.getToken?.();
-    if (token) env.CLAUDE_CODE_OAUTH_TOKEN = token;
-    env.CLAUDE_AGENT_SDK_CLIENT_APP = 'khalfoun/2';
-    env.DISABLE_AUTOUPDATER = '1';
+    // the provider layer (provider.js) decides subscription or API key; nothing else touches keys
+    const env = this.o.env ? { ...this.o.env } : providerEnv('subscription').env;
+    // a key reaches Claude's program only when the teacher chose «مفتاح API» (never by accident)
+    if (!this.o.apiKeyChosen) { delete env.ANTHROPIC_API_KEY; delete env.ANTHROPIC_AUTH_TOKEN; delete env.CLAUDE_CODE_OAUTH_TOKEN; }
     const allowed = [...this.o.toolNames.map((n) => `mcp__khalfoun__${n}`), 'WebSearch', 'WebFetch'];
     return {
       model: this.model,

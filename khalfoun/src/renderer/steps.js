@@ -72,6 +72,33 @@ export class StepsDeck {
 
   state() { return { active: this.active, step: this.index, steps: this.steps.length }; }
 
+  /** For the lesson's saved state (a crash brings the steps back where they were). */
+  snapshot() {
+    return this.active ? { title: this.title, color: this.color, steps: this.steps, index: this.index } : null;
+  }
+
+  /** Puts saved steps back, drawn up to where they were, without speaking. */
+  restore(snap) {
+    if (!snap || !Array.isArray(snap.steps) || !snap.steps.length) return false;
+    this.end(false);
+    this.steps = snap.steps.slice(0, 30);
+    this.color = snap.color || 'blue';
+    this.title = String(snap.title || '');
+    this.items = [];
+    this.index = 0;
+    const upto = Math.max(1, Math.min(this.steps.length, Number(snap.index) || 1));
+    while (this.index < upto) {
+      const step = this.steps[this.index];
+      this.items[this.index] = step.shapes?.length ? this.d.ink.sketch(step.shapes, { color: step.color || this.color }) : null;
+      this.index += 1;
+    }
+    this.render();
+    return true;
+  }
+
+  /** The ink items that belong to the steps (left out of the saved drawing, they come back with the steps). */
+  ownItems() { return new Set(this.items.filter(Boolean)); }
+
   render() {
     this.chip.hidden = !this.active;
     if (this.active) {

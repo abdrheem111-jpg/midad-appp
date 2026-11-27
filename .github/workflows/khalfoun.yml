@@ -87,27 +87,27 @@ jobs:
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: Khalfoun-Windows-Installer
+          name: Khalfoun3-Windows-Installer
           path: khalfoun/dist/*.exe
           if-no-files-found: error
       - name: Self-test the packaged app
         env:
-          KHALFOUN_APP_EXE: ${{ github.workspace }}\khalfoun\dist\win-unpacked\Khalfoun.exe
+          KHALFOUN_APP_EXE: ${{ github.workspace }}\khalfoun\dist\win-unpacked\Khalfoun3.exe
         run: npm run smoke
       - name: Install silently, then self-test the installed app
         shell: pwsh
         run: |
           $setup = Get-ChildItem dist\*.exe | Select-Object -First 1
           $candidates = @(
-            (Join-Path $env:LOCALAPPDATA 'Programs\Khalfoun\Khalfoun.exe'),
-            (Join-Path $env:LOCALAPPDATA 'Programs\khalfoun\Khalfoun.exe'),
-            (Join-Path $env:ProgramFiles 'Khalfoun\Khalfoun.exe')
+            (Join-Path $env:LOCALAPPDATA 'Programs\Khalfoun3\Khalfoun3.exe'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\khalfoun3\Khalfoun3.exe'),
+            (Join-Path $env:ProgramFiles 'Khalfoun3\Khalfoun3.exe')
           )
           $installed = $null
           # Up to three attempts: a copy of the app left over from the previous self-test makes
           # the installer stop silently, so close any running copy before each attempt.
           for ($attempt = 1; $attempt -le 3 -and -not $installed; $attempt++) {
-            Get-Process -Name 'Khalfoun' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-Process -Name 'Khalfoun3' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 2
             $timer = [Diagnostics.Stopwatch]::StartNew()
             $proc = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait -PassThru
@@ -120,7 +120,7 @@ jobs:
           if (-not $installed) {
             Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "found folder: $($_.FullName)" }
             Get-Process | Where-Object { $_.ProcessName -match 'khalfoun' } | ForEach-Object { Write-Host "running: $($_.ProcessName) $($_.Id)" }
-            Write-Error 'Khalfoun.exe was not installed'; exit 1
+            Write-Error 'Khalfoun3.exe was not installed'; exit 1
           }
           Write-Host "Installed at $installed"
           $env:KHALFOUN_APP_EXE = $installed

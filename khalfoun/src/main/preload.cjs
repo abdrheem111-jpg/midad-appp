@@ -22,6 +22,22 @@ contextBridge.exposeInMainWorld('khalfoun', {
   steps: {
     keys: (on) => ipcRenderer.send('steps:keys', on === true),
   },
+  safety: {
+    answer: (id, ok) => ipcRenderer.send('soft-confirm:answer', { id: String(id || ''), ok: ok !== false }),
+    emergency: (on) => ipcRenderer.invoke('emergency:set', on === true),
+    undo: () => ipcRenderer.invoke('actions:undo'),
+  },
+  lesson: {
+    save: (st) => ipcRenderer.send('lesson:save', st && typeof st === 'object' ? st : {}),
+    load: () => ipcRenderer.invoke('lesson:load'),
+  },
+  metrics: {
+    note: (kind, ms) => ipcRenderer.send('metrics:note', { kind: String(kind || ''), ms: Number(ms) }),
+    report: () => ipcRenderer.invoke('metrics:report'),
+  },
+  math: {
+    solve: (task, expr, opts) => ipcRenderer.invoke('math:solve', { task: String(task || ''), expr: String(expr || '').slice(0, 300), opts: opts && typeof opts === 'object' ? opts : {} }),
+  },
   remote: {
     set: (accel) => ipcRenderer.invoke('remote:set', accel === null ? null : String(accel || '').slice(0, 40)),
     pause: (on) => ipcRenderer.invoke('remote:pause', on === true),

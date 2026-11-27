@@ -2,7 +2,7 @@
 // action must be well formed, its values must come from the allowed lists,
 // and the permission level stored in the main process must allow it.
 
-import { decide } from '../../core/permissions.js';
+import { decide, colorOf, undoFor } from '../../core/permissions.js';
 import { APPS } from '../../core/intents.js';
 import { access, mkdir, writeFile } from 'node:fs/promises';
 import { OFFICE_APPS, KINDS, SHAPES, COLORS, cleanPlan } from '../../core/office-plan.js';
@@ -119,11 +119,38 @@ export function createExecutor(deps) {
   const { platform } = deps;
   const hands = (op, args) => (deps.hands ? deps.hands.call(op, args) : Promise.resolve({ ok: false, error: 'unsupported' }));
 
+  let lastUndo = null; // { action, at } — what «تراجع» takes back
+
   async function run(action) {
     const invalid = validateAction(action);
     if (invalid) return { ok: false, error: invalid };
+    // the emergency stop: nothing is done until the teacher lets go of it
+    if (deps.isHalted?.() && !['active_window', 'window_list', 'find_files'].includes(action.type)) return { ok: false, error: 'halted' };
     const verdict = decide(action, deps.getSettings());
     if (!verdict.allowed) return { ok: false, error: verdict.reason };
+    // yellow: shown for three seconds, the teacher can cancel
+    if (deps.softConfirm && deps.getSettings().yellowCountdown !== false && colorOf(action, deps.getSettings()) === 'yellow') {
+      if (!(await deps.softConfirm(action))) return { ok: false, error: 'cancelled' };
+    }
+    const res = await perform(action);
+    if (res?.ok) { const u = undoFor(action); if (u) lastUndo = { action: u, from: action.type, at: Date.now() }; }
+    return res;
+  }
+
+  /** «تراجع»: takes back the last action that can be (within five minutes). */
+  async function undo() {
+    if (!lastUndo || Date.now() - lastUndo.at > 5 * 60 * 1000) return { ok: false, error: 'nothing' };
+    const u = lastUndo; lastUndo = null;
+    if (u.action.type === 'key_combo') {
+      if (!deps.hands) return { ok: false, error: 'unsupported' };
+      const r = await deps.hands.call('keys', { keys: 'ctrl+z' });
+      return r?.ok ? { ok: true, data: { from: u.from } } : { ok: false, error: r?.error || 'failed' };
+    }
+    const r = await perform(u.action);
+    return r?.ok ? { ok: true, data: { from: u.from } } : r;
+  }
+
+  async function perform(action) {
     const p = action.params || {};
     try {
       switch (action.type) {
@@ -169,7 +196,7 @@ export function createExecutor(deps) {
         case 'type_text':
           if (p.here === true && deps.hands && platform.pasteHere) return await platform.pasteHere(p.text, () => hands('keys', { keys: 'ctrl+v' }));
           return await platform.typeText(p.text);
-        case 'mouse_click': return await hands('click', { x: p.x, y: p.y, button: p.button || 'left', double: p.clicks === 2, triple: p.clicks === 3, modifiers: p.modifiers || '' });
+        case 'mouse_click': await deps.beforeClick?.(p); return await hands('click', { x: p.x, y: p.y, button: p.button || 'left', double: p.clicks === 2, triple: p.clicks === 3, modifiers: p.modifiers || '' });
         case 'mouse_move': return await hands('move', { x: p.x, y: p.y });
         case 'mouse_drag': return await hands('drag', { x1: p.x1, y1: p.y1, x2: p.x2, y2: p.y2 });
         case 'mouse_scroll': return await hands('scroll', { x: p.x, y: p.y, direction: p.direction, amount: p.amount });
@@ -212,5 +239,5 @@ export function createExecutor(deps) {
     }
   }
 
-  return { run };
+  return { run, undo };
 }

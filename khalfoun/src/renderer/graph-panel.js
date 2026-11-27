@@ -42,6 +42,7 @@ export class GraphPanel {
     }
     if (!fns.length) return { ok: false, error: 'ما فيه دالة' };
     this.close();
+    this.spec = g; // kept for the lesson's saved state
     const rect = this.placeOf(g.place);
     const root = el('section', 'graph-panel');
     Object.assign(root.style, { left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.w}px`, height: `${rect.h}px` });
@@ -181,6 +182,7 @@ export class GraphPanel {
   }
 
   close() {
+    this.spec = null;
     cancelAnimationFrame(this.raf);
     this.root?.remove();
     this.root = null;

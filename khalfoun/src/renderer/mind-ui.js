@@ -99,6 +99,8 @@ export class MindClient {
     }
     this.busy = true;
     this.spoken = '';
+    this.askedAt = Date.now(); this.firstNoted = false;
+    this.d.setStatus?.('thinking');
     this.feel('thinking');
     const thinking = setTimeout(() => { if (this.busy && !this.spoken) this.d.showBubble('…', 'focused'); }, 900);
     const m = this.d.brain.memory.data;
@@ -110,6 +112,8 @@ export class MindClient {
     }, opts.image || null);
     clearTimeout(thinking);
     this.busy = false;
+    this.d.setStatus?.(res?.ok ? 'idle' : 'confused');
+    if (res?.ok && !this.firstNoted) { this.firstNoted = true; this.d.metric?.('claude_first', Date.now() - this.askedAt); }
     this.lastAct = Date.now();
     if (res?.ok) {
       const finalText = String(res.say || '').trim();
@@ -122,7 +126,12 @@ export class MindClient {
     this.d.note?.(`claude failed: ${res?.error}`);
     if (res?.error === 'stopped') return true;
     if (res?.error === 'auth') { this.info.loggedIn = false; this.feel('sorry'); this.say('اشتراك Claude مو مربوط. افتح الإعدادات واضغط «اربط اشتراكي».'); return true; }
-    if (res?.error === 'limit') { this.feel('tired'); this.say('خلص رصيد Claude لهالفترة. برد عليك بمخي العادي لين يرجع.'); return false; }
+    if (res?.error === 'limit') {
+      // said once, quietly; after that the local layer just carries on
+      if (this.limitSaidAt && Date.now() - this.limitSaidAt < 30 * 60 * 1000) return false;
+      this.limitSaidAt = Date.now();
+      this.feel('tired'); this.say('خلص رصيد Claude لهالفترة. الأدوات السريعة (المؤقت والطالب العشوائي والقلم) شغّالة عادي.'); return false;
+    }
     if (res?.error === 'no_program') { this.feel('sorry'); this.say('برنامج Claude مو منزّل. من الإعدادات اضغط «نزّل مخ Claude».'); return true; }
     return false; // offline, busy, failed: the classic engine answers
   }
@@ -139,8 +148,12 @@ export class MindClient {
       const t = words.replace(/\[[a-z]+\]\s*/gi, '').trim();
       if (!t) return;
       this.spoken += `${t}\n`;
+      if (!this.firstNoted && this.askedAt) { this.firstNoted = true; this.d.metric?.('claude_first', Date.now() - this.askedAt); }
+      this.d.setStatus?.('speaking');
       this.say(t);
     } else if (e.type === 'tool') {
+      if (!this.firstNoted && this.askedAt) { this.firstNoted = true; this.d.metric?.('claude_first', Date.now() - this.askedAt); }
+      this.d.setStatus?.('acting');
       this.d.onTool?.(e.name, e.input);
       if (['click', 'type_text', 'press_keys', 'drag', 'scroll'].includes(e.name)) this.d.animator.play('point');
       if (e.name === 'look_screen' || e.name === 'find_text') this.d.animator.play('look_around');
@@ -175,6 +188,7 @@ export class MindClient {
   /** A playful effect: on a piece of the screen, or a celebration over all of it. */
   fx(p) {
     if (p.op === 'celebrate') { this.d.effects?.play(p.name); this.d.animator.play('celebrate'); return { ok: true }; }
+    if (this.d.brain.memory.data.fxEnabled === false && p.op === 'region') return { ok: false, error: 'المؤثرات موقوفة الحين (المعلم وقّفها أثناء الشرح).' };
     if (p.op === 'region' && this.d.screenFx) {
       this.d.screenFx.play(p).catch(() => {});
       this.d.animator.play(['crumple', 'pop', 'shatter'].includes(p.effect) ? 'laugh' : 'point');
