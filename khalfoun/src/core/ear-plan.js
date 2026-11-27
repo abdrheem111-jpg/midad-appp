@@ -63,3 +63,16 @@ export const EAR_KINDS = ['call', 'other', 'room', 'tts-call', 'tts-other'];
 export function goodCall(ms, spoke, withCommand) {
   return Boolean(spoke) && ms >= 350 && ms <= (withCommand ? 6000 : 3500);
 }
+
+/**
+ * Khalfoun 3: his own ear listens for «يا خلفون» by default once it is good enough (measured on
+ * held-out recordings: hears at least 9 calls in 10, at most one false wake an hour); until then
+ * it only shadows the cloud. The teacher can still force a mode in ear.json.
+ */
+export function earModeFor(config = {}) {
+  if (config.mode === 'on' || config.mode === 'shadow' && config.forced) return config.mode;
+  const m = config.measured || {};
+  const recall = Number(m.recall_held_out_calls); const fph = Number(m.false_wakes_per_hour);
+  return Number.isFinite(recall) && recall >= 0.9 && (!Number.isFinite(fph) || fph <= 1) && (m.held_out_calls ?? 0) >= 5 ? 'on' : 'shadow';
+}
+

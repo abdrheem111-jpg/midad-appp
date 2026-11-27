@@ -35,6 +35,12 @@ contextBridge.exposeInMainWorld('khalfoun', {
     note: (kind, ms) => ipcRenderer.send('metrics:note', { kind: String(kind || ''), ms: Number(ms) }),
     report: () => ipcRenderer.invoke('metrics:report'),
   },
+  stt: {
+    streamStart: () => ipcRenderer.invoke('stt:stream-start'),
+    streamPush: (samples) => { if (samples instanceof Float32Array) ipcRenderer.send('stt:stream-push', samples); },
+    streamEnd: () => ipcRenderer.invoke('stt:stream-end'),
+    streamCancel: () => ipcRenderer.send('stt:stream-cancel'),
+  },
   math: {
     solve: (task, expr, opts) => ipcRenderer.invoke('math:solve', { task: String(task || ''), expr: String(expr || '').slice(0, 300), opts: opts && typeof opts === 'object' ? opts : {} }),
   },

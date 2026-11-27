@@ -33,6 +33,7 @@ import { findOnScreen, layoutHint } from '../core/screen-find.js';
 import { createClaudeMind } from './brain/index.js';
 import { LatencyMeter } from '../core/latency.js';
 import { createMathEngine } from './math/engine.js';
+import { createStreamSession } from './stream-stt.js';
 import { describeAction } from '../core/permissions.js';
 import { migrateFromV2, sharedDirs, v2Dir } from './migrate.js';
 import { claudeExePath } from './brain/claude-setup.js';
@@ -40,7 +41,7 @@ import { parseWindows } from './brain/tools.js';
 import { sensitiveRects } from '../core/privacy.js';
 import { FG_SCRIPT } from './foreground-script.js';
 import { REMOTE_ACCEL } from '../core/remote-keys.js';
-import { EAR_KINDS, EAR_VOICES, earTtsPlan } from '../core/ear-plan.js';
+import { EAR_KINDS, EAR_VOICES, earTtsPlan, earModeFor } from '../core/ear-plan.js';
 import { createPhoneMic } from './phone-mic.js';
 import { VOICE_IDS } from '../core/speech-text.js';
 // The voice he chose first, then the others as fallbacks (a region may not offer one).
@@ -167,7 +168,8 @@ let secrets = { status: () => ({}), data: { use: {} }, azure: null, allowWake: (
 let agent = null;
 let saveUsageTimer = null;
 // Hearing in the cloud: Azure when its key is set, else Gemini with the same free key as the brain.
-const cloudHears = () => Boolean(secrets.data.use?.hear && (secrets.azure || secrets.data.gemini));
+// Khalfoun 3: Azure only (Gemini was a second model; one mind, and speech is a speech service)
+const cloudHears = () => Boolean(secrets.data.use?.hear && secrets.azure);
 let geminiEars = null;
 function cloudTranscribe(bytes, isWake) {
   if (secrets.azure) return transcribeAzure(secrets.azure, bytes, { timeoutMs: isWake ? 6000 : 8000 }).then((r) => ({ ...r, service: 'azure' }));
@@ -696,7 +698,7 @@ function sanitizeSettingsPatch(patch) {
   if ('digits' in patch && ['arabic', 'latin'].includes(patch.digits)) out.digits = patch.digits;
   if ('voiceName' in patch && VOICE_IDS.includes(patch.voiceName)) out.voiceName = patch.voiceName;
   if ('provider' in patch) out.provider = patch.provider === 'apikey' ? 'apikey' : 'subscription';
-  for (const k of ['privacyMask', 'maskPhotos', 'fxEnabled', 'suggestions', 'bargeIn', 'yellowCountdown']) if (k in patch) out[k] = !!patch[k];
+  for (const k of ['privacyMask', 'maskPhotos', 'fxEnabled', 'suggestions', 'bargeIn', 'yellowCountdown', 'streamStt']) if (k in patch) out[k] = !!patch[k];
   if ('suggestEvery' in patch) out.suggestEvery = Math.min(60, Math.max(5, Math.round(Number(patch.suggestEvery)) || 10));
   return out; // remoteKey is set through remote:set (checked and registered there)
 }
@@ -824,6 +826,34 @@ function setupIpc(stores, executor) {
     if (meter.note(m.kind, m.ms)) { diag.write('latency', m.kind, `${Math.round(m.ms)} ms`); metricsDirty = true; }
   });
   ipcMain.handle('metrics:report', (event) => (fromApp(event) ? { report: meter.report(), lines: meter.lines() } : null));
+  // ----- hearing while he talks (Azure streaming): the words are ready when he stops
+  let streamSdk = null; let stream = null; let streamSamples = 0;
+  ipcMain.handle('stt:stream-start', async (event) => {
+    if (!fromApp(event)) return { ok: false };
+    if (!cloudHears() || settings.streamStt === false) return { ok: false, error: 'off' };
+    try {
+      streamSdk ??= (await import('microsoft-cognitiveservices-speech-sdk')).default;
+      stream?.cancel();
+      streamSamples = 0;
+      stream = createStreamSession({ ...secrets.azure, sdk: streamSdk, onPartial: (text) => send('stt-partial', { text }), log: (...a) => diag.write(...a) });
+      return { ok: true };
+    } catch (err) { diag.write('stream stt could not start', String(err?.message || err)); stream = null; return { ok: false, error: 'failed' }; }
+  });
+  ipcMain.on('stt:stream-push', (event, samples) => {
+    if (!fromApp(event) || !stream || !(samples instanceof Float32Array) || samples.length > 48000) return;
+    streamSamples += samples.length;
+    stream.push(samples);
+  });
+  ipcMain.handle('stt:stream-end', async (event) => {
+    if (!fromApp(event) || !stream) return { ok: false, error: 'none' };
+    const s = stream; stream = null;
+    const r = await s.end(1500);
+    const seconds = streamSamples / 16000;
+    if (seconds > 0) { secrets.count(seconds, false); clearTimeout(saveUsageTimer); saveUsageTimer = setTimeout(() => secrets.save().catch(() => {}), 5000); }
+    diag.write(`voice (streamed, ${seconds.toFixed(1)} s) →`, r.ok ? `«${r.text}» ready ${r.ms} ms after start` : `failed: ${r.error}`);
+    return r;
+  });
+  ipcMain.on('stt:stream-cancel', (event) => { if (fromApp(event)) { stream?.cancel(); stream = null; } });
   ipcMain.handle('math:solve', async (event, q) => {
     if (!fromApp(event) || !q || typeof q !== 'object') return { ok: false, error: 'forbidden' };
     return mathEngine.solve(String(q.task || ''), String(q.expr || '').slice(0, 300));
@@ -889,7 +919,7 @@ function setupIpc(stores, executor) {
     const [mel, emb] = await Promise.all([readFile(join(ROOT, 'assets', 'ear', 'melspectrogram.onnx')), readFile(join(ROOT, 'assets', 'ear', 'embedding_model.onnx'))]);
     const out = {
       mel: new Uint8Array(mel), emb: new Uint8Array(emb), cls: new Uint8Array(cls),
-      config: { mode: config.mode === 'on' ? 'on' : 'shadow', threshold: num(config.threshold, 0.5, 0.05, 0.99), high: num(config.high, 0.85, 0.1, 1), version: String(config.version || '').slice(0, 40) },
+      config: { mode: earModeFor(config), threshold: num(config.threshold, 0.5, 0.05, 0.99), high: num(config.high, 0.85, 0.1, 1), version: String(config.version || '').slice(0, 40) },
     };
     diag.write('ear model', out.config);
     return out;

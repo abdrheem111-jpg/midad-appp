@@ -25,6 +25,10 @@ export class WakeListener {
   constructor(opts) {
     this.onSentence = opts.onSentence;
     this.onAudio = opts.onAudio || null;
+    // streaming: the sound of a sentence as it is said (with a little from just before it started)
+    this.onSpeechStart = opts.onSpeechStart || null;
+    this.onSpeechFrame = opts.onSpeechFrame || null;
+    this.ring = []; this.speaking = false;
     this.batch = [];
     this.batchLen = 0;
     this.onError = opts.onError || (() => {});
@@ -53,10 +57,14 @@ export class WakeListener {
             let off = 0;
             for (const c of this.batch) { all.set(c, off); off += c.length; }
             this.batch = []; this.batchLen = 0;
-            this.onAudio(downsample(all, this.ctx.sampleRate, TARGET_RATE));
+            const s16 = downsample(all, this.ctx.sampleRate, TARGET_RATE);
+            this.onAudio(s16);
+            this.stream16(s16);
           }
         }
         for (const ev of this.vad.push(e.data)) {
+          if (ev.type === 'start') this.speechStart();
+          if (ev.type === 'segment') this.speaking = false;
           if (ev.type === 'segment' && ev.ms >= MIN_SENTENCE_MS) this.sentence(downsample(ev.samples, this.ctx.sampleRate, TARGET_RATE), ev.ms);
         }
       };
@@ -65,6 +73,23 @@ export class WakeListener {
       this.stop();
       this.onError(err);
     }
+  }
+
+  /** Keeps the last ~0.7 s, and streams while he is talking. */
+  stream16(s16) {
+    if (this.speaking) this.onSpeechFrame?.(s16);
+    this.ring.push(s16);
+    if (this.ring.length > 8) this.ring.shift();
+  }
+
+  speechStart() {
+    this.speaking = true;
+    if (!this.onSpeechStart) return;
+    const len = this.ring.reduce((n, r) => n + r.length, 0);
+    const pre = new Float32Array(len);
+    let off = 0;
+    for (const r of this.ring) { pre.set(r, off); off += r.length; }
+    this.onSpeechStart(pre);
   }
 
   sentence(pcm, ms) {
@@ -89,7 +114,10 @@ export class WakeListener {
   feed(samples16k) {
     if (!this.external || this.paused) return;
     this.onAudio?.(samples16k);
+    this.stream16(samples16k);
     for (const ev of this.extVad.push(samples16k)) {
+      if (ev.type === 'start') this.speechStart();
+      if (ev.type === 'segment') this.speaking = false;
       if (ev.type === 'segment' && ev.ms >= MIN_SENTENCE_MS) this.sentence(ev.samples, ev.ms);
     }
   }

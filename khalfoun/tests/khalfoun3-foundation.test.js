@@ -139,3 +139,40 @@ test('executor: the emergency stop blocks everything, yellow waits for the teach
   assert.deepEqual(keys.at(-1), ['win_do', { hwnd: '12', op: 'restore' }]);
   assert.deepEqual(await ex.undo(), { ok: false, error: 'nothing' }); // once
 });
+
+test('streamed hearing: the sound goes as he speaks, partial words show, the final text is ready at the end', async () => {
+  const { createStreamSession } = await import('../src/main/stream-stt.js');
+  const written = []; let rec = null;
+  const sdk = {
+    AudioStreamFormat: { getWaveFormatPCM: () => ({}) },
+    AudioInputStream: { createPushStream: () => ({ write: (b) => written.push(b.byteLength), close: () => { setTimeout(() => { rec.recognized(null, { result: { reason: 1, text: 'اختار طالب عشوائي' } }); rec.sessionStopped(); }, 5); } }) },
+    SpeechConfig: { fromSubscription: (k, r) => ({ k, r, setProperty() {} }) },
+    PropertyId: { Speech_SegmentationSilenceTimeoutMs: 1 },
+    AudioConfig: { fromStreamInput: () => ({}) },
+    ResultReason: { RecognizedSpeech: 1 },
+    SpeechRecognizer: class { constructor() { rec = this; } startContinuousRecognitionAsync(ok) { ok(); } stopContinuousRecognitionAsync(ok) { ok(); } close() {} },
+  };
+  const partial = [];
+  const s = createStreamSession({ key: 'k', region: 'uaenorth', sdk, onPartial: (t) => partial.push(t) });
+  s.push(new Float32Array(1600).fill(0.5));
+  rec.recognizing(null, { result: { text: 'اختار' } });
+  const r = await s.end(500);
+  assert.deepEqual(written, [3200]); // 16-bit PCM
+  assert.deepEqual(partial, ['اختار']);
+  assert.equal(r.ok, true);
+  assert.equal(r.text, 'اختار طالب عشوائي');
+  // a failure is reported, and the sentence is read the old way
+  const s2 = createStreamSession({ key: 'k', region: 'r', sdk: { ...sdk, AudioInputStream: { createPushStream: () => ({ write() {}, close() {} }) } } });
+  rec.canceled(null, { errorDetails: '401' });
+  assert.equal((await s2.end(50)).ok, false);
+});
+
+test('his own ear listens by default once it is measured good enough', async () => {
+  const { earModeFor } = await import('../src/core/ear-plan.js');
+  assert.equal(earModeFor({ mode: 'shadow', measured: { recall_held_out_calls: 0.95, false_wakes_per_hour: 0.5, held_out_calls: 12 } }), 'on');
+  assert.equal(earModeFor({ mode: 'shadow', measured: { recall_held_out_calls: 0.8, false_wakes_per_hour: 0.5, held_out_calls: 12 } }), 'shadow');
+  assert.equal(earModeFor({ mode: 'shadow', measured: { recall_held_out_calls: 1, false_wakes_per_hour: 3, held_out_calls: 12 } }), 'shadow');
+  assert.equal(earModeFor({ mode: 'shadow', forced: true, measured: { recall_held_out_calls: 1, held_out_calls: 12 } }), 'shadow');
+  assert.equal(earModeFor({ mode: 'on' }), 'on');
+  assert.equal(earModeFor({}), 'shadow');
+});

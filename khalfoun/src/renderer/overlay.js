@@ -1216,8 +1216,22 @@ document.querySelectorAll('input[name="md-model"]').forEach((r) => r.addEventLis
 // ------------------------------------------------------- «يا خلفون» wake word
 
 let wakeBusy = false;
+// Hearing while he talks (Azure streaming, in a voice session): the words show live and are ready when he stops.
+let streaming = null;
 const wake = new WakeListener({
   onSentence: (wav, ms, head) => { onWakeSentence(wav, head, ms); },
+  onSpeechStart: (pre) => {
+    if (!inSession() || haltedUi || voiceOut.speaking || brain.memory.data.streamStt === false || !cloudHearsNow() || !bridge.stt) return;
+    const st = { at: Date.now(), buf: [pre], live: false };
+    streaming = st;
+    bridge.stt.streamStart().then((r) => {
+      if (streaming !== st) { if (r?.ok) bridge.stt.streamCancel(); return; }
+      if (!r?.ok) { streaming = null; return; }
+      for (const f of st.buf) bridge.stt.streamPush(f);
+      st.buf = null; st.live = true;
+    }).catch(() => { if (streaming === st) streaming = null; });
+  },
+  onSpeechFrame: (f) => { const st = streaming; if (!st) return; if (st.live) bridge.stt.streamPush(f); else st.buf?.push(f); },
   onAudio: (samples) => onEarAudio(samples),
   onError: (err) => {
     // The microphone can be busy for a moment (a call, another app): try again instead of
@@ -1276,7 +1290,14 @@ function onEarAudio(samples) {
     if (ear.trigger.feed(score)) {
       ear.hitAt = Date.now();
       bridge.note?.(`ear: heard his name (${score.toFixed(2)})`);
-      if (ear.mode === 'on') { els.ear.classList.add('heard'); setTimeout(() => els.ear.classList.remove('heard'), 900); }
+      if (ear.mode === 'on') {
+        els.ear.classList.add('heard'); setTimeout(() => els.ear.classList.remove('heard'), 900);
+        // he shows he heard at once (well under the 300 ms target): the frame (80 ms) plus the model's time
+        if (!voiceOut.speaking) setStatus('listening');
+        noteMetric('wake', 80 + (performance.now() - t0));
+        // the teacher calling him while he talks: he stops to listen (barge-in)
+        if (voiceOut.speaking && brain.memory.data.bargeIn !== false) { voiceOut.stop(); bridge.note?.('barge-in: his name heard while talking'); }
+      }
     }
     if (ear.steps % 3750 === 0) bridge.note?.(`ear: ${(ear.ms / ear.steps).toFixed(1)} ms per batch over ${ear.steps} batches`); // every ~5 min
   }).catch(() => {});
@@ -1388,7 +1409,15 @@ async function readWakeSentence(wav, head = wav, meta = {}) {
     }
   }
   // Outside a session only the first seconds are checked for «يا خلفون» (a fraction of the cost).
-  let res = await bridge.transcribe(session ? wav : head, session ? 'command' : 'wake');
+  // a sentence streamed while he said it: its words are (almost) ready now
+  let res = null;
+  if (session && streaming) {
+    const st = streaming; streaming = null;
+    const r = st.live ? await bridge.stt.streamEnd() : null;
+    if (!st.live) bridge.stt?.streamCancel?.();
+    if (r?.ok && r.text) res = r;
+  }
+  res ||= await bridge.transcribe(session ? wav : head, session ? 'command' : 'wake');
   if (res?.ok && meta.t0) noteMetric(session ? 'stt' : 'wake', Date.now() - meta.t0);
   // The call is the first way; when hearing keeps failing (no internet, the service slow), he
   // is reminded of the fallback: the remote's button (or the keyboard shortcut), once an hour.
@@ -2235,6 +2264,7 @@ async function start() {
       case 'phone-photo': onPhonePhoto(ev.purpose, ev.photo); break;
       case 'steps-key': if (ev.dir === 'back') stepsDeck.back(); else stepsDeck.next(); break;
       case 'soft-confirm': safety.soft(ev); break;
+      case 'stt-partial': if (streaming && ev.text) showHeard(String(ev.text)); break;
       case 'click-marker': safety.marker(ev.x, ev.y); break;
       case 'emergency': setHalted(Boolean(ev.on)); break;
       case 'wake-limit':
