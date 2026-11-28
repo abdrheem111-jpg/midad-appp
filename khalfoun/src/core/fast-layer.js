@@ -9,6 +9,7 @@ export const FAST_INTENTS = Object.freeze([
   // the screen
   'screen_pen', 'screen_clear', 'open_tool', 'close_tool',
   // the class
+  'effect', 'effect_stop', 'celebrate',
   'timer', 'timer_stop', 'pick_student', 'award', 'points_board', 'groups', 'random_number', 'students_count',
   // the day
   'time', 'date', 'schedule_today', 'schedule_next', 'schedule_show',

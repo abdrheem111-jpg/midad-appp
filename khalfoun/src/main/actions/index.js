@@ -129,7 +129,7 @@ export function createExecutor(deps) {
     const verdict = decide(action, deps.getSettings());
     if (!verdict.allowed) return { ok: false, error: verdict.reason };
     // yellow: shown for three seconds, the teacher can cancel
-    if (deps.softConfirm && deps.getSettings().yellowCountdown !== false && colorOf(action, deps.getSettings()) === 'yellow') {
+    if (deps.softConfirm && deps.getSettings().yellowCountdown === true && colorOf(action, deps.getSettings()) === 'yellow') {
       if (!(await deps.softConfirm(action))) return { ok: false, error: 'cancelled' };
     }
     const res = await perform(action);

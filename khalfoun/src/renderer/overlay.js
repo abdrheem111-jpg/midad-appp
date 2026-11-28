@@ -27,8 +27,14 @@ import { DocView } from './doc-view.js';
 import { GraphPanel } from './graph-panel.js';
 import { SafetyUi } from './safety-ui.js';
 import { QuizBoard } from './quiz-board.js';
+import { QuestionBoard } from './question-board.js';
+import { Signs, SIGNS, signFromWords } from './signs.js';
+import { MORE_ANIMATIONS } from './animations-more.js';
+import { ANIMATIONS } from './animations.js';
 import { MemoryPanel } from './memory-panel.js';
 import { PersonaState } from '../core/persona-state.js';
+import { LessonMemory, asksWhereWeStopped } from '../core/lesson-memory.js';
+import { currentClass } from '../core/schedule.js';
 import { Suggester, LessonWatch, momentFromWords, routineCommand, routinePattern, dictionaryCommand, applyDictionary } from '../core/proactive.js';
 import { fastPlan, isFast } from '../core/fast-layer.js';
 import { mathCommand } from '../core/spoken-math.js';
@@ -46,7 +52,7 @@ import { VOICE_CHOICES, VOICE_IDS, stripTashkeel } from '../core/speech-text.js'
 const CHAR_W = 170;
 const CHAR_H = 209;
 const PREVIEW_TASKBAR = 44;
-const IDLE_ANIMS = ['look_around', 'whistle', 'stretch', 'adjust', 'peek', 'sneeze', 'flex', 'yawn', 'scratch', 'spin', 'coffee', 'cheeky', 'think', 'read', 'sway', 'tiptoe', 'bounce', 'fan', 'shrug', 'idea'];
+const IDLE_ANIMS = ['look_around', 'whistle', 'stretch', 'adjust', 'peek', 'sneeze', 'flex', 'yawn', 'scratch', 'spin', 'coffee', 'cheeky', 'think', 'read', 'sway', 'tiptoe', 'bounce', 'fan', 'shrug', 'idea', 'read_glasses', 'wink', 'stargaze', 'look_up', 'wiggle', 'hiccup', 'calculate'];
 
 const $ = (id) => document.getElementById(id);
 const bridge = getBridge();
@@ -149,7 +155,8 @@ let lastPickAt = 0;
 let conceptTimer = null;
 function handle(reply) {
   if (!reply) return;
-  if (['pick_result', 'pick_new_round', 'wheel_result'].includes(reply.situation)) lastPickAt = Date.now();
+  if (['pick_result', 'pick_new_round', 'wheel_result'].includes(reply.situation)) { lastPickAt = Date.now(); const who = brain.room().picked.at(-1); if (who) remember('student', who); }
+  if (reply.situation === 'award_ok') { const e = brain.room().log.at(-1); if (e?.k === 'star') remember('student', e.n); }
   if (reply.situation === 'celebrate' || reply.effect === 'fireworks') setStatus('celebrating');
   // The wheel spins first; the name is said when it stops.
   if (reply.wheel) {
@@ -381,6 +388,35 @@ const quizBoard = new QuizBoard(document.body, {
   onOpen: () => { closeCommand(); setInteractive(true); },
   onClose: () => { if (!panelsOpen()) setInteractive(false); },
 });
+// the big library: signs and stamps, marks on the screen, and Khalfoun's many moves
+const signs = new Signs(document.body, { sound: (n) => { if (!phoneMuted) sounds.now(n); } });
+/** «سو حركة الصقر» / «حركة روبوت»: a move found by its Arabic words or its name. */
+function moveFromWords(words) {
+  const w = normalize(words);
+  for (const [name, a] of Object.entries(MORE_ANIMATIONS)) { const ar = normalize(a.ar.replace(/[^\u0600-\u06FF\s]/g, '')); if (ar && (ar.includes(w) || w.includes(ar))) return name; }
+  return ANIMATIONS[words] ? words : null;
+}
+// the question board: a question alone on a white page, big and clear, for explaining
+const questionBoard = new QuestionBoard(document.body, {
+  grab: (r) => (bridge.screen?.region ? bridge.screen.region(r) : Promise.resolve({ ok: false })),
+  write: (t) => (brain.memory.data.digits === 'latin' ? t : mathText(t, { digits: 'arabic' }).replace(/[\uE000-\uE003]/g, '')),
+  pen: (on) => { ink.setPen(on); if (on) setInteractive(true); else if (!panelsOpen()) setInteractive(false); },
+  retype: (image) => {
+    const m = /^data:(image\/(?:png|jpeg));base64,(.+)$/.exec(image || '');
+    if (!m || !mind?.on) { showBubble('أحتاج مخ Claude عشان أكتبه نظيف.', 'sorry'); return; }
+    showBubble('أكتبه لك بخط واضح… ✍️', 'focused');
+    mind.ask('[صورة سؤال على سبورة الأسئلة] اكتب نص السؤال بالضبط مثل ما هو (بدون حل) بأداة question_board مع text فقط. الرياضيات بالشكل العادي (x و y و ^ للأسس).', { via: 'typed', silent: true, image: { data: m[2], mime: m[1] } });
+  },
+  onOpen: () => { closeCommand(); setInteractive(true); },
+  onClose: () => { if (!panelsOpen() && !ink.pen) setInteractive(false); },
+  note: (t) => bridge.note?.(t),
+});
+async function pickQuestion() {
+  showBubble('ارسم مربع حول السؤال بالماوس ✍️', 'happy');
+  const ok = await questionBoard.pick();
+  if (ok) { showBubble('هذا السؤال على السبورة. القلم جاهز للشرح ✎', 'happy'); questionBoard.d.pen(true); }
+  else if (!questionBoard.open) setInteractive(false);
+}
 /** The teacher's private inbox on his phone (suggestions, gradings to approve, a quiz to show). */
 async function toInbox(it) { const r = await bridge.inbox?.add?.(it); return r?.id || null; }
 function onInboxAct(ev) {
@@ -513,6 +549,7 @@ async function localMath(mc, said, opts = {}) {
     say: st.say ? mathText(st.say, { digits }).replace(/[\uE000-\uE003]/g, '') : '',
   }));
   stepsDeck.start({ title: '', color: 'blue', steps });
+  remember('topic', `${{ solve: 'حل', factor: 'تحليل', simplify: 'تبسيط', derivative: 'اشتقاق', integral: 'تكامل', evaluate: 'حساب' }[mc.task] || 'حل'} ${said.replace(/^(?:يا خلفون\s+)?(?:اشرح لي\s+)?(?:حل|حلل|بسط|احسب|اشتق|كامل)\s+/, '')}`);
   noteLatency('local', opts);
 }
 /** The times the teacher's PC really takes (settings → القياسات). */
@@ -520,6 +557,15 @@ function noteMetric(kind, ms) { if (Number.isFinite(ms) && ms >= 0) bridge.metri
 function noteLatency(kind, opts) { if (opts?.t0) noteMetric(kind, Date.now() - opts.t0); }
 /** Khalfoun's state, shown as a small dot on him (يسمع، يفكر، ينفذ، يتكلم، يحتفل، محتار، نايم). */
 const persona = new PersonaState();
+// ----- Khalfoun 3.1: he remembers the lessons (what was taught, who took part, where we stopped)
+let lessons = null;
+const periodNow = () => { try { return currentClass(brain.memory.data.schedule || [], Date.now()); } catch { return ''; } };
+function lessonMem() { lessons ??= new LessonMemory(brain.memory.data.lessons || {}); return lessons; }
+function remember(kind, text) {
+  const lm = lessonMem();
+  lm.note(kind, text, periodNow());
+  brain.memory.set({ lessons: lm.toJSON() });
+}
 let statusNow = 'idle';
 function setStatus(st) {
   const r = persona.set(st);
@@ -529,7 +575,7 @@ function setStatus(st) {
   // the state's look (not over a celebration or a walk already playing)
   if (r.changed && r.anim && !['speaking', 'idle'].includes(statusNow)) { try { animator.play(r.anim); } catch { /* unknown move */ } }
 }
-setInterval(() => { const r = persona.tick(); if (r.changed) setStatus('sleeping'); }, 60000);
+setInterval(() => { const r = persona.tick(); if (r.changed) setStatus('sleeping'); if (lessons) { const before = lessons.open; lessons.tick(); if (before && !lessons.open) brain.memory.set({ lessons: lessons.toJSON() }); } }, 60000);
 // The lesson's state is saved every few seconds; after a crash (or a restart) it comes back.
 function lessonSnapshot() {
   const own = stepsDeck.ownItems();
@@ -1007,6 +1053,27 @@ function hear(text, opts = {}) {
     if (m) setTimeout(() => offerSuggestion(m), m === 'lesson_start' ? 20000 : 4000);
     rememberCommand(t);
   }
+  // «وين وقفنا؟»: answered from his memory of the lessons, at once
+  if (asksWhereWeStopped(nt)) {
+    const w = lessonMem().whereWeStopped(periodNow());
+    showBubble(w || 'هذي أول حصة أتذكرها معك. من اليوم أتذكر وين نوقف 👍', 'calm', true);
+    if (w && voiceOut.enabled) voiceOut.speak(w);
+    return;
+  }
+  // the library by voice: «حط إشارة ممتاز»، «هدوء»، «انتبهوا»، «خلص الوقت»، «عد للثلاثه»، «طبله»، «سو حركة الصقر»
+  {
+    const sg = /^(?:يا خلفون )?(?:حط|اعرض|طلع|سو|ابي) (?:لي )?(?:اشاره|ختم|علامه|لوحه) (.{2,30})$/.exec(nt);
+    const quick = { 'هدوء': 'quiet', 'هدوء لو سمحتوا': 'quiet', 'انتبهوا': 'attention', 'انتبهوا معي': 'attention', 'خلص الوقت': 'time_up', 'انتهى الوقت': 'time_up', 'استراحه': 'break_time', 'طبله': 'drumroll', 'والفائز هو': 'drumroll', 'ارفعوا ايديكم': 'hands_up', 'عمل جماعي': 'group_work', 'ركزوا هنا': 'eyes' }[nt];
+    const name = sg ? (signFromWords(sg[1]) || (SIGNS[sg[1]] ? sg[1] : null)) : quick;
+    if (name) { signs.show(name); const mv = { quiet: 'silence', attention: 'attention', time_up: 'alarm', drumroll: 'drumroll', hands_up: 'point_up', eyes: 'teacher_point' }[name]; if (mv) animator.play(mv); return; }
+    if (/^(?:يا خلفون )?(?:عد|عدها) (?:للثلاثه|لثلاثه|ثلاثه اثنين واحد|٣ ٢ ١)$/.test(nt)) { signs.show('countdown'); return; }
+    const mv = /^(?:يا خلفون )?(?:سو|سوي|اعمل|ورني) (?:لي )?حركه (.{2,30})$/.exec(nt);
+    if (mv) { const n = moveFromWords(mv[1]); if (n) { animator.play(n); return; } }
+  }
+  // the question board: «شل السؤال» / «اكتبه نظيف» / «سكر السبورة»
+  if (/^(يا خلفون )?(شل|خذ|حط|طلع|انقل|كبر) (هذا |لي )?(ال)?سوال( (على|الى|في|لل)? ?(السبوره|سبوره|الصفحه|صفحه بيضا|صفحه بيضاء|البيضا))?$|^سبوره (ال)?سوال$|^(افتح )?سبوره الاسيله$/.test(nt)) { pickQuestion(); return; }
+  if (questionBoard.open && /^(اكتبه|اكتبها|اكتب السوال) (نظيف|واضح|بخط واضح)$/.test(nt)) { if (questionBoard.image) questionBoard.d.retype(questionBoard.image); return; }
+  if (questionBoard.open && /^(سكر|اقفل|شيل|خلاص) (ال)?سبوره$/.test(nt)) { questionBoard.close(); return; }
   // a quiz on the screen: «كمل / ارجع / الجواب»
   if (quizBoard.open) {
     if (/^(الجواب|اظهر الجواب|وش الجواب|شو الجواب|ايش الجواب)( يا خلفون)?$/.test(nt)) { quizBoard.reveal(); return; }
@@ -1323,7 +1390,8 @@ function renderK3() {
   $('k3-provider').value = d.provider === 'apikey' ? 'apikey' : 'subscription';
   $('k3-privacy').checked = d.privacyMask !== false;
   $('k3-photos').checked = !!d.maskPhotos;
-  $('k3-yellow').checked = d.yellowCountdown !== false;
+  $('k3-yellow').checked = d.yellowCountdown === true;
+  $('k3-ask').checked = d.askFirst === true;
   $('k3-barge').checked = d.bargeIn !== false;
   $('k3-fx').checked = d.fxEnabled !== false;
   $('k3-suggest').checked = d.suggestions !== false;
@@ -1339,7 +1407,7 @@ async function setK3(patch) {
   if ('provider' in patch) { await mind?.refresh(); renderMind(); }
   pushPhoneState();
 }
-for (const [id, key] of [['k3-privacy', 'privacyMask'], ['k3-photos', 'maskPhotos'], ['k3-yellow', 'yellowCountdown'], ['k3-barge', 'bargeIn'], ['k3-fx', 'fxEnabled'], ['k3-suggest', 'suggestions']]) {
+for (const [id, key] of [['k3-ask', 'askFirst'], ['k3-privacy', 'privacyMask'], ['k3-photos', 'maskPhotos'], ['k3-yellow', 'yellowCountdown'], ['k3-barge', 'bargeIn'], ['k3-fx', 'fxEnabled'], ['k3-suggest', 'suggestions']]) {
   $(id)?.addEventListener('change', () => setK3({ [key]: $(id).checked }));
 }
 $('k3-memory')?.addEventListener('click', () => { closeSettings(); memoryPanel.show('memory'); });
@@ -1709,7 +1777,7 @@ function setInteractive(on) {
   bridge.setInteractive(on);
 }
 
-const panelsOpen = () => !els.onboarding.hidden || !els.settings.hidden || !$('guide').hidden || cameraPanel.open || voiceTest.open || earTrainer.open || cameraPick.open || quizBoard.open || memoryPanel.open || safety.counting;
+const panelsOpen = () => !els.onboarding.hidden || !els.settings.hidden || !$('guide').hidden || cameraPanel.open || voiceTest.open || earTrainer.open || cameraPick.open || quizBoard.open || memoryPanel.open || safety.counting || questionBoard.picking;
 
 let lastMouseX = null;
 document.addEventListener('mousemove', (e) => {
@@ -1776,6 +1844,8 @@ document.addEventListener('keydown', (e) => {
     else if (earTrainer.open) earTrainer.close();
     else if (cameraPick.open) cameraPick.close();
     else if (safety.counting) safety.cancel();
+    else if (questionBoard.picking) questionBoard.cancelPick();
+    else if (questionBoard.open) questionBoard.close();
     else if (quizBoard.open) quizBoard.close();
     else if (memoryPanel.open) memoryPanel.close();
     else if (!$('guide').hidden) hideGuide();
@@ -2409,7 +2479,7 @@ async function start() {
 
   voiceOut.setEnabled(!!brain.memory.data.speak);
   mind = new MindClient({
-    bridge, brain, ink, character, animator, sounds, voiceOut, showBubble, screenFx, effects, pickWithCamera, stepsDeck, docView, graphPanel, setStatus: (st) => setStatus(st), metric: (k, ms) => noteMetric(k, ms), toInbox: (it) => toInbox(it), exportWeeklyReport: () => exportWeeklyReport(),
+    bridge, brain, ink, character, animator, sounds, voiceOut, showBubble, screenFx, effects, pickWithCamera, stepsDeck, docView, graphPanel, setStatus: (st) => setStatus(st), metric: (k, ms) => noteMetric(k, ms), toInbox: (it) => toInbox(it), exportWeeklyReport: () => exportWeeklyReport(), questionBoard, signs, playMove: (n) => animator.play(n),
     recorderActive: () => recorder.active,
     localHear: (cmd, o = {}) => {
       // Claude's «classroom» tool is for the games and class tools only: opening a program or a
@@ -2428,8 +2498,17 @@ async function start() {
     colorHex: (c) => (COLORS[c] ? `#${COLORS[c].hex}` : null),
     showChoices, hideChoices,
     onSetup: (e) => renderMind(e),
-    onTool: (name) => {
+    periodNow,
+    lessonText: () => lessonMem().forClaude(periodNow()),
+    onTool: (name, input) => {
       mind.lastAct = Date.now();
+      // what Claude did in the lesson is remembered too
+      if (name === 'math' && input?.expr) remember('topic', `${{ solve: 'حل', factor: 'تحليل', simplify: 'تبسيط', inequality: 'متباينة', system: 'نظام', derivative: 'اشتقاق', integral: 'تكامل', check: 'تحقق', evaluate: 'حساب' }[input.task] || 'حل'} ${input.expr}`);
+      else if (name === 'graph' && input?.functions?.length) remember('topic', `رسم ${input.functions.map((f) => f.expr).join(' و ')}`);
+      else if (name === 'steps' && input?.title) remember('topic', input.title);
+      else if (name === 'geometry') remember('topic', `هندسة: ${{ triangle: 'مثلث', circle: 'دائرة', rectangle: 'مستطيل' }[input?.shape] || 'شكل'}`);
+      else if (name === 'quiz_make' && input?.title) remember('topic', `مسابقة: ${input.title}`);
+      else if (name === 'lesson_prep' && input?.title) remember('topic', `تحضير: ${input.title}`);
       if (['click', 'drag', 'scroll', 'move_mouse'].includes(name) && !ink.pen) setInteractive(false);
     },
   });
@@ -2521,9 +2600,20 @@ async function start() {
   // Khalfoun 3: the status dot on him, and the lesson brought back after a crash or a restart
   if (els.stage && !els.stage.querySelector('.status-dot')) { const dot = document.createElement('i'); dot.className = 'status-dot'; dot.dataset.s = 'idle'; els.stage.append(dot); }
   restoreLesson().catch(() => {});
+  // like a person who remembers: «هلا! آخر مرة وقفنا عند…» (a quiet bubble, once at start)
+  setTimeout(() => {
+    try {
+      const lm = lessonMem(); lm.tick();
+      const last = lm.last();
+      if (last && brain.memory.data.onboarded !== false && new Date(last.start).toDateString() !== new Date().toDateString()) {
+        const name = brain.memory.data.name ? ` ${brain.memory.data.name}` : '';
+        showBubble(`هلا${name}! ${lm.whereWeStopped(periodNow())} تبي نكمل من هناك؟`, 'happy', true);
+      }
+    } catch { /* never in the way */ }
+  }, 7000);
 
   // Hooks for automated UI tests and debugging.
-  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, ink, startSession, endSession, onWakeSentence, get inSession() { return inSession(); }, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut, get mind() { return mind; }, renderMind, screenFx, cameraPick, pickWithCamera, stepsDeck, docView, graphPanel, showBubble, voiceOut, onPhoneCommand, onPhonePhoto, get phoneMuted() { return phoneMuted; }, get bubbleHidden() { return bubbleHidden; }, get ear() { return ear; }, get earError() { return earError; }, onPhoneStatus, onPhoneAudio, onPhoneSay, get phoneLive() { return phoneLive(); }, loadEar, onEarAudio, earTrainer, endFollow: () => { followUntil = 0; }, safety, setHalted, get haltedUi() { return haltedUi; }, setFx, smartUndo, lessonSnapshot, restoreLesson, setStatus, get statusNow() { return statusNow; } };
+  window.__khalfoun = { brain, motion, animator, character, hear, handle, bridge, showBubble, sounds, wake, updateWake, updateWindowWatch, effects, ink, startSession, endSession, onWakeSentence, get inSession() { return inSession(); }, wheel, raceBoard, noise, cameraPanel, voiceTest, get classMode() { return classMode; }, get preview() { return preview; }, get lastReply() { return lastReply; }, recentSituations, get game() { return game; }, noticeWindows, desktop, voiceOut, get mind() { return mind; }, renderMind, screenFx, cameraPick, pickWithCamera, stepsDeck, docView, graphPanel, showBubble, voiceOut, onPhoneCommand, onPhonePhoto, get phoneMuted() { return phoneMuted; }, get bubbleHidden() { return bubbleHidden; }, get ear() { return ear; }, get earError() { return earError; }, onPhoneStatus, onPhoneAudio, onPhoneSay, get phoneLive() { return phoneLive(); }, loadEar, onEarAudio, earTrainer, endFollow: () => { followUntil = 0; }, safety, questionBoard, pickQuestion, signs, moveFromWords, effects, setHalted, get haltedUi() { return haltedUi; }, setFx, smartUndo, lessonSnapshot, restoreLesson, setStatus, get statusNow() { return statusNow; } };
   document.documentElement.dataset.ready = '1';
 }
 

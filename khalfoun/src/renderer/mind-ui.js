@@ -102,13 +102,20 @@ export class MindClient {
     this.askedAt = Date.now(); this.firstNoted = false;
     this.d.setStatus?.('thinking');
     this.feel('thinking');
-    const thinking = setTimeout(() => { if (this.busy && !this.spoken) this.d.showBubble('…', 'focused'); }, 900);
+    // like a person: an answer at once («أبشر»، «لحظة…»), and a spoken word if the thinking takes a while
+    const FILLERS = ['أبشر 👍', 'لحظة…', 'تم، ثواني', 'همم… خلني أشوف', 'على طول', 'من عيوني'];
+    const filler = FILLERS[Math.floor(Math.random() * FILLERS.length)];
+    if (!opts.silent) this.d.showBubble(filler, 'focused');
+    const thinking = setTimeout(() => {
+      if (!this.busy || this.spoken || opts.silent) return;
+      if (this.d.voiceOut?.enabled && opts.via !== 'typed') this.d.voiceOut.speak(['لحظة', 'ثواني بس', 'خلني أشوف'][Math.floor(Math.random() * 3)]);
+    }, 1800);
     const m = this.d.brain.memory.data;
     // a whispered command (typed on his phone): the answer is shown, not spoken
     this.silent = Boolean(opts.silent);
     const res = await this.d.bridge.mind.ask(text, {
       via: opts.via || 'voice', session: Boolean(opts.session), voice: Boolean(this.d.voiceOut?.enabled) && !this.silent, name: m.name || '', students: m.classroom?.students || [], notes: m.claudeNotes || [],
-      period: this.d.periodNow?.() || '',
+      period: this.d.periodNow?.() || '', lesson: this.d.lessonText?.() || '',
     }, opts.image || null);
     clearTimeout(thinking);
     this.busy = false;
@@ -178,6 +185,10 @@ export class MindClient {
         case 'grade': return reply({ ok: Boolean(await this.d.toInbox?.({ kind: 'grade', title: `تصحيح${p.student ? `: ${p.student}` : ''} — ${p.score} من ${p.total}`, body: (p.mistakes || []).join('\n') || 'بدون أخطاء 👏', actions: [{ id: 'approve', label: 'اعتمد ✅', main: true }, { id: 'reject', label: 'لا' }], data: { student: p.student || '', score: p.score, total: p.total } })) });
         case 'quiz': return reply({ ok: Boolean(await this.d.toInbox?.({ kind: 'quiz', title: `مسابقة جاهزة: ${p.title || 'من الدرس'} (${(p.questions || []).length} أسئلة)`, body: (p.questions || []).map((q, i) => `${i + 1}. ${q.q}`).join('\n'), actions: [{ id: 'show', label: 'اعرضها للصف', main: true }, { id: 'dismiss', label: 'لا' }], data: p })) });
         case 'report': return reply(await this.d.exportWeeklyReport?.() || { ok: false });
+        case 'sign': return reply({ ok: Boolean(this.d.signs?.show(p.name, p)) });
+        case 'mark': return reply({ ok: Boolean(this.d.signs?.mark(p.kind, p.rect, p)) });
+        case 'move': { if (!this.d.playMove) return reply({ ok: false }); this.d.playMove(p.name); return reply({ ok: true }); }
+        case 'qboard': return reply({ ok: Boolean(this.d.questionBoard?.show(p)) });
         case 'steps': return reply({ ok: Boolean(this.d.stepsDeck?.start(p)) });
         case 'graph': return reply(this.d.graphPanel ? this.d.graphPanel.show(p) : { ok: false });
         default: return reply({ ok: false });

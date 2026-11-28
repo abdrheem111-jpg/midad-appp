@@ -160,7 +160,7 @@ test('brain: compose → the cloud writes → a checked office_put through permi
   const done = b.composed(r.compose, { ok: true, plan: { kind: 'text', title: 'النخلة', blocks: [{ type: 'paragraph', text: 'شجرة.' }] } });
   assert.equal(done.action.type, 'office_put');
   assert.equal(validateAction(done.action), null);
-  assert.equal(decide(done.action, { level: 2 }).confirm, true); // writing into a document asks at level 2
+  assert.equal(decide(done.action, { level: 2, askFirst: true }).confirm, true); // writing into a document asks at level 2
   assert.equal(decide(done.action, { level: 3 }).allowed, true);
   assert.equal(decide(done.action, { level: 3, kidsMode: true }).allowed, false);
   const file = b.actionResult(done.action.id, { ok: true, data: { mode: 'file', app: 'word' } });

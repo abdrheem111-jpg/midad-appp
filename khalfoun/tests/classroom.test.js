@@ -64,7 +64,7 @@ test('points: names matched loosely, never below zero, sorted board', () => {
 test('brain: the whole classroom flow, saved in memory', () => {
   let saved = null;
   let now = new Date(2026, 10, 18, 9).getTime();
-  const brain = new Brain({ memoryData: { ...defaultMemory(now), onboarded: true, level: 2 }, clock: () => now, rng: seeded(7), onMemoryChange: (d) => { saved = d; } });
+  const brain = new Brain({ memoryData: { ...defaultMemory(now), onboarded: true, level: 2, askFirst: true }, clock: () => now, rng: seeded(7), onMemoryChange: (d) => { saved = d; } });
   assert.equal(brain.hear('اختار طالب').situation, 'pick_need_names');
   assert.equal(brain.hear('أسماء الطلاب: أحمد، سعيد، مريم، فاطمة، خالد، عائشة').situation, 'students_saved');
   const pick = brain.hear('منو يجاوب');

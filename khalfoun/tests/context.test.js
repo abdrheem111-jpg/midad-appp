@@ -48,10 +48,10 @@ test('closing by name, a closed app, and a website that lives in a tab', () => {
 });
 
 test('closing asks first at the assistant level, runs directly at full trust', () => {
-  assert.deepEqual(decide({ type: 'close_app', params: { app: 'word' } }, { level: 2 }), { allowed: true, confirm: true, reason: 'modify_needs_yes' });
+  assert.deepEqual(decide({ type: 'close_app', params: { app: 'word' } }, { level: 2, askFirst: true }), { allowed: true, confirm: true, reason: 'modify_needs_yes' });
   assert.equal(decide({ type: 'close_app', params: { app: 'word' } }, { level: 3 }).confirm, false);
-  assert.equal(decide({ type: 'close_app', params: { app: 'word' } }, { level: 2, kidsMode: true }).allowed, false);
-  const { brain } = makeBrain({ level: 2 });
+  assert.equal(decide({ type: 'close_app', params: { app: 'word' } }, { level: 2, askFirst: true, kidsMode: true }).allowed, false);
+  const { brain } = makeBrain({ level: 2, askFirst: true });
   const ask = brain.hear('سكر الوورد');
   assert.equal(ask.awaitingConfirm, true);
   assert.equal(brain.hear('ايوه').action.type, 'close_app');

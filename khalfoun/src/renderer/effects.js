@@ -11,6 +11,8 @@ const pick = (list) => list[Math.floor(Math.random() * list.length)];
 /** How long each effect lasts (seconds) unless stopped. */
 export const EFFECT_SECONDS = {
   confetti: 7, fireworks: 9, national: 16, rain: 30, snow: 30, lanterns: 26, balloons: 13, stars: 7, hearts: 7, bubbles: 14,
+  // Khalfoun 3.1
+  numbers: 9, emoji: 7, gold: 7, claps: 6, thumbs: 6, hundred: 4, oman: 12, shooting_stars: 10, ripple: 4, rainbow: 7, sparkle_burst: 6, party: 12,
 };
 
 export class Effects {
@@ -113,7 +115,61 @@ export class Effects {
       case 'bubbles':
         this.every(4, () => this.parts.push({ kind: 'bubble', x: rnd(0, w), y: h + 30, vy: -rnd(50, 110), r: rnd(14, 38), phase: rnd(0, TAU), popAt: rnd(h * 0.05, h * 0.7), life: 20 }));
         break;
+      // ---- Khalfoun 3.1: more full-screen effects
+      case 'numbers': // a rain of digits and signs
+        this.every(26, () => this.glyph(rnd(0, w), -30, pick(['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩', '+', '−', '×', '÷', '=', 'س', 'ص', '√', 'π', '%']), rnd(22, 44), { vy: rnd(120, 260), color: pick(PARTY) }));
+        break;
+      case 'emoji':
+        this.every(10, () => this.glyph(rnd(0, w), -40, pick(['🎉', '⭐', '👏', '💯', '🔥', '😍', '🥳', '✨']), rnd(30, 56), { vy: rnd(140, 260) }));
+        break;
+      case 'gold':
+        this.every(22, () => this.glyph(rnd(0, w), -30, pick(['🪙', '⭐', '✨', '🌟']), rnd(26, 44), { vy: rnd(160, 320), spin: rnd(-3, 3) }));
+        break;
+      case 'claps':
+        this.every(8, () => this.glyph(rnd(0, w), h + 40, '👏', rnd(34, 60), { vy: -rnd(160, 260) }));
+        break;
+      case 'thumbs':
+        this.every(8, () => this.glyph(rnd(0, w), h + 40, pick(['👍', '👍🏽', '👌']), rnd(34, 60), { vy: -rnd(160, 260) }));
+        break;
+      case 'hundred':
+        for (let i = 0; i < 6; i += 1) setTimeout(() => this.burstGlyph(rnd(w * 0.15, w * 0.85), rnd(h * 0.2, h * 0.6), '💯'), i * 350);
+        break;
+      case 'oman': // palms, camels, falcons, the frankincense smoke of a celebration
+        this.every(8, () => this.glyph(rnd(0, w), -40, pick(['🌴', '🐪', '🦅', '🏰', '🇴🇲', '☕']), rnd(30, 52), { vy: rnd(110, 200), spin: rnd(-1, 1) }));
+        break;
+      case 'shooting_stars':
+        this.tint = 'rgba(10, 20, 50, 0.18)';
+        this.every(3, () => this.parts.push({ kind: 'streak', x: rnd(w * 0.2, w * 1.1), y: rnd(-20, h * 0.4), vx: -rnd(700, 1000), vy: rnd(250, 420), life: 1.6 }));
+        break;
+      case 'ripple':
+        for (let i = 0; i < 6; i += 1) setTimeout(() => this.parts.push({ kind: 'ring', x: w / 2, y: h / 2, r: 10, vr: rnd(380, 520), color: pick(PARTY), life: 2 }), i * 220);
+        break;
+      case 'rainbow':
+        this.parts.push({ kind: 'arc', x: w / 2, y: h * 1.05, r: Math.min(w, h * 1.6) * 0.62, life: 5, t: 0 });
+        this.every(6, () => this.confetti(rnd(0, w), -10, ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#3498db', '#9b59b6']));
+        break;
+      case 'sparkle_burst':
+        for (let i = 0; i < 3; i += 1) setTimeout(() => this.burst(w * (0.3 + i * 0.2), h * 0.4, ['#ffd166', '#fff3b0', '#ffffff', '#06d6a0']), i * 300);
+        this.every(12, () => this.parts.push({ kind: 'star', x: rnd(0, w), y: rnd(-30, h * 0.2), vy: rnd(60, 140), r: rnd(6, 13), spin: rnd(-2, 2), a: rnd(0, TAU), color: pick(['#ffd166', '#fff3b0', '#ffe066', '#ffffff']), life: 6 }));
+        break;
+      case 'party': // everything at once, for the biggest moments
+        for (let i = 0; i < 120; i += 1) this.confetti(rnd(0, w), rnd(-h * 0.6, -10), PARTY);
+        this.every(12, () => this.confetti(rnd(0, w), -10, PARTY));
+        for (let i = 0; i < 8; i += 1) this.balloon(rnd(0, w), rnd(h * 0.7, h + 300));
+        this.every(1.4, () => this.rocket(PARTY));
+        break;
       default: break;
+    }
+  }
+
+  glyph(x, y, char, size, o = {}) {
+    this.parts.push({ kind: 'glyph', x, y, char, size, vx: o.vx ?? rnd(-30, 30), vy: o.vy ?? 150, a: rnd(-0.3, 0.3), spin: o.spin ?? rnd(-1, 1), color: o.color || '#333', life: o.life ?? 9 });
+  }
+
+  burstGlyph(x, y, char) {
+    for (let i = 0; i < 14; i += 1) {
+      const a = (i / 14) * TAU;
+      this.parts.push({ kind: 'glyph', x, y, char, size: rnd(26, 46), vx: Math.cos(a) * rnd(160, 300), vy: Math.sin(a) * rnd(160, 300), a: 0, spin: rnd(-3, 3), color: '#c0392b', life: 1.6, drag: true });
     }
   }
 
@@ -160,7 +216,7 @@ export class Effects {
     if (this.parts.length > 1400) this.parts.splice(0, this.parts.length - 1400);
     const { ctx } = this;
     ctx.clearRect(0, 0, this.w, this.h);
-    if (this.running === 'rain' && !ending) { ctx.fillStyle = this.tint; ctx.fillRect(0, 0, this.w, this.h); }
+    if ((this.running === 'rain' || this.running === 'shooting_stars') && !ending) { ctx.fillStyle = this.tint; ctx.fillRect(0, 0, this.w, this.h); }
     const keep = [];
     for (const p of this.parts) {
       p.life -= dt;
@@ -179,6 +235,38 @@ export class Effects {
     const { ctx } = this;
     const fade = Math.min(1, p.life / 1.2);
     switch (p.kind) {
+      case 'glyph': {
+        if (p.drag) { p.vx *= 0.96; p.vy = p.vy * 0.96 + 260 * dt; }
+        p.x += p.vx * dt; p.y += p.vy * dt; p.a += p.spin * dt;
+        if (p.y > this.h + 80 || p.y < -120) return false;
+        ctx.save(); ctx.globalAlpha = fade; ctx.translate(p.x, p.y); ctx.rotate(p.a);
+        ctx.font = `700 ${p.size}px Tajawal, "Segoe UI Emoji", Tahoma, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = p.color; ctx.fillText(p.char, 0, 0);
+        ctx.restore();
+        return true;
+      }
+      case 'streak': {
+        p.x += p.vx * dt; p.y += p.vy * dt;
+        const g = ctx.createLinearGradient(p.x, p.y, p.x - p.vx * 0.18, p.y - p.vy * 0.18);
+        g.addColorStop(0, `rgba(255,255,255,${fade})`); g.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.strokeStyle = g; ctx.lineWidth = 3; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - p.vx * 0.18, p.y - p.vy * 0.18); ctx.stroke();
+        return p.x > -200;
+      }
+      case 'ring': {
+        p.r += p.vr * dt;
+        ctx.strokeStyle = p.color; ctx.globalAlpha = Math.max(0, fade * 0.8); ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.stroke(); ctx.globalAlpha = 1;
+        return true;
+      }
+      case 'arc': {
+        p.t = Math.min(1, p.t + dt / 1.2);
+        const cols = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#3498db', '#9b59b6'];
+        ctx.globalAlpha = Math.min(1, p.life / 1.2) * 0.75; ctx.lineWidth = Math.max(10, p.r * 0.035);
+        cols.forEach((c, i) => { ctx.strokeStyle = c; ctx.beginPath(); ctx.arc(p.x, p.y, p.r - i * ctx.lineWidth, Math.PI, Math.PI + Math.PI * p.t); ctx.stroke(); });
+        ctx.globalAlpha = 1;
+        return true;
+      }
       case 'confetti': {
         p.vy = Math.min(p.vy + 40 * dt, 260);
         p.x += (p.vx + Math.sin(p.a * 2) * 30) * dt;

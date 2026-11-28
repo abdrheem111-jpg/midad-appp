@@ -550,8 +550,8 @@ await check('eyes: «سو أسئلة من هذا» reads the selection, the mode
   await cpage.screenshot({ path: `${outDir}/14-eyes-questions.png` });
   await cpage.evaluate(() => window.__khalfoun.hear('اكتبها'));
   await cpage.waitForTimeout(300);
-  assert(await cpage.evaluate(() => window.__khalfoun.lastReply?.awaitingConfirm), 'assistant level asks before typing');
-  await cpage.evaluate(() => window.__khalfoun.hear('ايوه'));
+  // Khalfoun 3.1: typed at once (no «تبي أكتبها؟»)
+  assert(!(await cpage.evaluate(() => window.__khalfoun.lastReply?.awaitingConfirm)), 'asked before typing');
   await cpage.waitForTimeout(700);
   const last = await cpage.evaluate(() => window.__khalfoun.bridge._actions.at(-1));
   assert(last.type === 'type_text' && last.params.text.startsWith('١. عند كم درجة'), JSON.stringify(last));
@@ -1362,6 +1362,58 @@ await check('K3: maths solved on the PC (steps on screen), quiz board, memory sc
   await K(() => window.__khalfoun.setStatus('thinking'));
   assert(await K(() => document.querySelector('.status-dot')?.dataset.s) === 'thinking', 'status dot');
   await K(() => window.__khalfoun.setStatus('idle'));
+});
+
+await check('K3.1: question board, big signs, marks, the library by voice, «وين وقفنا», direct execution', async () => {
+  const K = (f) => opage.evaluate(f);
+  // «شل السؤال»: draw a rectangle round it → alone on a white page, big
+  await K(() => window.__khalfoun.hear('شل السؤال'));
+  await opage.waitForTimeout(300);
+  assert(await opage.locator('.qb-pick').count() === 1, 'no picking layer');
+  await opage.mouse.move(300, 200); await opage.mouse.down(); await opage.mouse.move(700, 300, { steps: 6 }); await opage.mouse.up();
+  await opage.waitForTimeout(500);
+  assert(await opage.locator('.qboard .qboard-img').count() === 1, 'question not on the board');
+  const asked = await K(() => window.__regionAsked);
+  assert(asked && Math.abs(asked.w - 400) < 4 && Math.abs(asked.h - 100) < 4, JSON.stringify(asked));
+  await opage.screenshot({ path: `${outDir}/k31-question-board.png` });
+  // Claude's clean typing replaces the picture
+  await K(() => window.__khalfoun.questionBoard.show({ text: 'حل المعادلة: 2x + 3 = 11\nثم تحقق من الحل', title: 'سؤال ٣' }));
+  assert(/٢س/.test(await opage.locator('.qboard-text').textContent()), 'not in Arabic notation');
+  await opage.screenshot({ path: `${outDir}/k31-question-typed.png` });
+  await K(() => window.__khalfoun.hear('سكر السبورة'));
+  assert(await opage.locator('.qboard').count() === 0, 'board stayed');
+  // big signs and the countdown
+  await K(() => window.__khalfoun.hear('حط اشارة ممتاز'));
+  await opage.waitForTimeout(350);
+  assert(await opage.locator('.sign .sign-words').textContent() === 'ممتاز!', 'no sign');
+  await opage.screenshot({ path: `${outDir}/k31-sign.png` });
+  await K(() => window.__khalfoun.hear('عد للثلاثه'));
+  await opage.waitForTimeout(300);
+  assert(/٣/.test(await opage.locator('.sign-count').textContent()), 'no countdown');
+  // a mark on the screen and a move by its Arabic words
+  await K(() => window.__khalfoun.signs.mark('circle', { x: 400, y: 300, w: 300, h: 90 }));
+  assert(await opage.locator('.mark-circle').count() === 1, 'no circle');
+  assert(await K(() => window.__khalfoun.moveFromWords('الصقر')) === 'falcon', 'move not found');
+  await K(() => window.__khalfoun.hear('سو حركة روبوت'));
+  // a new full-screen effect, at once (no Claude)
+  await K(() => window.__khalfoun.hear('مطر ارقام'));
+  await opage.waitForTimeout(900);
+  await opage.screenshot({ path: `${outDir}/k31-numbers.png` });
+  await K(() => window.__khalfoun.hear('وقف الاحتفال'));
+  // he remembers the lesson: «وين وقفنا؟»
+  await K(() => window.__khalfoun.bridge.math.solve = async () => ({ ok: true, task: 'solve', answer: 'x = 4', steps: [{ expr: '2x + 3 = 11', why: 'المسألة' }, { expr: 'x = 4', why: 'الحل' }] }));
+  await K(() => window.__khalfoun.hear('حل ٢س + ٣ = ١١'));
+  await opage.waitForTimeout(400);
+  await K(() => window.__khalfoun.onPhoneCommand('clear'));
+  await K(() => window.__khalfoun.hear('وين وقفنا'));
+  await opage.waitForTimeout(200);
+  const b = await opage.locator('#bubble').textContent();
+  assert(/أول حصة|شرحنا/.test(b), b.slice(0, 120));
+  // praise that remembers: the second star today
+  await K(() => { window.__khalfoun.hear('نجمة لأحمد'); window.__khalfoun.hear('نجمة لأحمد'); });
+  await opage.waitForTimeout(300);
+  const said = await K(() => window.__khalfoun.lastReply?.say || '');
+  assert(/ثاني نجمة لك اليوم/.test(said), said);
 });
 
 await browser.close();

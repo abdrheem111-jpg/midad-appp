@@ -19,7 +19,7 @@ function makeBrain(overrides = {}, start = Date.UTC(2026, 10, 17, 6, 0, 0)) {
   let now = start;
   const clock = () => now;
   const advance = (ms) => { now += ms; };
-  const memoryData = { ...defaultMemory(start), onboarded: true, level: 2, name: 'عبدالرحيم', ...overrides };
+  const memoryData = { ...defaultMemory(start), onboarded: true, level: 2, askFirst: true, name: 'عبدالرحيم', ...overrides };
   const brain = new Brain({ memoryData, clock, rng: seeded(7) });
   return { brain, advance, clock };
 }
@@ -69,7 +69,8 @@ test('permission levels gate actions', () => {
   const del = { type: 'delete_files', params: {} };
   assert.equal(decide(open, { level: LEVELS.ACQUAINT }).allowed, false);
   assert.deepEqual(decide(open, { level: LEVELS.ASSISTANT }), { allowed: true, confirm: false, reason: 'ok' });
-  assert.equal(decide(type, { level: LEVELS.ASSISTANT }).confirm, true);
+  assert.equal(decide(type, { level: LEVELS.ASSISTANT, askFirst: true }).confirm, true); // «اسأل قبل» on
+  assert.equal(decide(type, { level: LEVELS.ASSISTANT }).confirm, false); // Khalfoun 3.1: done at once by default
   assert.equal(decide(type, { level: LEVELS.TRUSTED }).confirm, false);
   assert.equal(decide(del, { level: LEVELS.TRUSTED }).confirm, true);
   assert.equal(decide({ type: 'reminder' }, { level: 0 }).allowed, true);
@@ -330,7 +331,7 @@ test('start greets returning users and waits during onboarding', () => {
   const fresh = new Brain({ memoryData: defaultMemory(0), clock: () => 0 });
   assert.equal(fresh.start(), null);
   const day = 24 * 60 * 60 * 1000;
-  const back = new Brain({ memoryData: { ...defaultMemory(0), onboarded: true, level: 2, lastSeen: 0 }, clock: () => 5 * day, rng: seeded(2) });
+  const back = new Brain({ memoryData: { ...defaultMemory(0), onboarded: true, level: 2, askFirst: true, lastSeen: 0 }, clock: () => 5 * day, rng: seeded(2) });
   const r = back.start();
   assert.equal(r.situation, 'return_long');
   assert.equal(back.emotions.current.emotion, 'longing');
@@ -342,7 +343,7 @@ test('onboarding stores choices and clamps them', () => {
   assert.equal(r.situation, 'onboard_done');
   assert.match(r.say, /مريم/);
   assert.deepEqual([b.memory.data.level, b.memory.data.kidsMode, b.memory.data.name], [3, true, 'مريم']);
-  const lv = b.updateSettings({ level: 2 });
+  const lv = b.updateSettings({ level: 2, askFirst: true });
   assert.match(lv.say, /المساعد/);
 });
 
@@ -359,7 +360,7 @@ test('idle ticks bring boredom, remarks, then sleep', () => {
 
 test('memory changes are reported for saving', () => {
   let saved = 0;
-  const b = new Brain({ memoryData: { ...defaultMemory(0), onboarded: true, level: 2 }, onMemoryChange: () => { saved += 1; }, clock: () => 0 });
+  const b = new Brain({ memoryData: { ...defaultMemory(0), onboarded: true, level: 2, askFirst: true }, onMemoryChange: () => { saved += 1; }, clock: () => 0 });
   b.hear('شكرا');
   assert.ok(saved > 0);
 });

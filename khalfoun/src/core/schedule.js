@@ -101,3 +101,11 @@ export function classTime(c) {
   const part = c.hour < 12 ? 'الصبح' : c.hour < 15 ? 'الظهر' : 'العصر';
   return `${toArabicDigits(h12)}:${toArabicDigits(String(c.minute).padStart(2, '0'))} ${part}`;
 }
+
+/** The class going on now (started up to `len` minutes ago), as a short label — or ''. */
+export function currentClass(schedule, now, len = 45) {
+  const d = new Date(now);
+  const nowMin = minutesOfDay(d);
+  const c = classesOn(schedule, d).filter((x) => x.hour * 60 + x.minute <= nowMin && nowMin < x.hour * 60 + x.minute + len).pop();
+  return c ? `${c.subject} ${classTime(c)}` : '';
+}

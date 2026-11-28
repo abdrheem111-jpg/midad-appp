@@ -912,6 +912,13 @@ export class Brain {
         const n = Math.abs(s.delta);
         const stars = n === 1 ? 'نجمة' : n === 2 ? 'نجمتين' : n <= 10 ? `${toArabicDigits(n)} نجوم` : `${toArabicDigits(n)} نجمة`;
         const rep = this.reply(s.delta > 0 ? 'award_ok' : 'award_minus', { vars: { student: res.name, points: toArabicDigits(res.points), stars }, behavior: s.delta > 0 ? 'star' : null });
+        // Khalfoun 3.1: he remembers — «ثالث نجمة لك اليوم يا أحمد!»
+        if (s.delta > 0 && res.level === 1) {
+          const today = new Date(now).toDateString();
+          const n = room.log.filter((e) => e.n === res.name && e.k === 'star' && new Date(e.at).toDateString() === today).length;
+          const ORD = ['', '', 'ثاني', 'ثالث', 'رابع', 'خامس', 'سادس', 'سابع', 'ثامن', 'تاسع', 'عاشر'];
+          if (n >= 2) return { ...rep, say: `${rep.say}\n${n <= 10 ? `${ORD[n]} نجمة لك اليوم` : `${toArabicDigits(n)} نجوم اليوم`} يا ${res.name}! 🔥` };
+        }
         // Khalfoun 3: celebrations grow with the achievement (5th star: confetti, 10th: fireworks and a dance)
         if (res.level === 3) return { ...rep, effect: 'fireworks', behavior: 'dance', say: `${rep.say}\n🎆 ${toArabicDigits(res.points)} نجمة! إنجاز كبير يا ${res.name}!` };
         if (res.level === 2) return { ...rep, effect: 'confetti', say: `${rep.say}\n🎉 وصل ${toArabicDigits(res.points)} نجوم!` };

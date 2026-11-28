@@ -633,3 +633,58 @@ html.preview body {
 .mp-row.bad { background: #fdecea; }
 .mp-row button { border: none; background: transparent; cursor: pointer; font-size: 16px; }
 .mp-empty { color: #888; }
+
+/* the question board: the question alone on a white page */
+.qboard { position: fixed; inset: 0; z-index: 2; background: #fff; display: flex; flex-direction: column; align-items: center; direction: rtl; pointer-events: none;
+  background-image: linear-gradient(#eef3f8 1px, transparent 1px); background-size: 100% 46px; background-position: 0 40vh; }
+.qboard-bar { position: absolute; top: 10px; inset-inline-start: 12px; display: flex; gap: 6px; pointer-events: auto; z-index: 8; }
+.qboard-bar button { border: none; border-radius: 999px; padding: 6px 12px; background: #eef3f8; font: 600 15px Tajawal, Tahoma, sans-serif; cursor: pointer; }
+.qboard-bar .qboard-x { background: #fdecea; }
+.qboard-q { margin-top: 104px; padding: 18px 26px; max-width: 92vw; background: #fff; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,.08); border: 2px solid #e3e8ef; }
+.qboard-title { font: 700 20px Tajawal, Tahoma, sans-serif; color: #1D70B8; margin-bottom: 8px; }
+.qboard-text { font-family: Tajawal, Tahoma, sans-serif; font-weight: 700; color: #1a1a1a; line-height: 1.6; max-width: 86vw; }
+.qboard-text p { margin: 0 0 6px; }
+.qboard-img { display: block; object-fit: contain; image-rendering: auto; }
+.qboard-space { flex: 1; }
+.qb-pick { position: fixed; inset: 0; z-index: 40; cursor: crosshair; background: rgba(10, 20, 40, .18); pointer-events: auto; }
+.qb-pick-hint { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); background: #1D70B8; color: #fff; padding: 8px 16px; border-radius: 999px; font: 600 16px Tajawal, Tahoma, sans-serif; direction: rtl; pointer-events: none; }
+.qb-pick-box { position: absolute; display: none; border: 3px dashed #f2b705; background: rgba(255,255,255,.12); box-shadow: 0 0 0 9999px rgba(10,20,40,.25); pointer-events: none; }
+
+/* Khalfoun 3.1: big signs and stamps */
+.sign { position: fixed; left: 50%; top: 44%; z-index: 28; transform: translate(-50%, -50%); text-align: center; pointer-events: none; font-family: Tajawal, Tahoma, sans-serif; direction: rtl; filter: drop-shadow(0 8px 18px rgba(0,0,0,.28)); }
+.sign.at { transform: translate(-50%, -50%) scale(.6); }
+.sign-sym { font-size: 150px; line-height: 1; color: var(--c); font-weight: 900; }
+.sign-words { font-size: 54px; font-weight: 900; color: #fff; background: var(--c); border-radius: 999px; padding: 6px 30px; margin-top: 8px; display: inline-block; box-shadow: inset 0 -4px 0 rgba(0,0,0,.15); }
+.sign-pop { animation: sign-pop .5s cubic-bezier(.2,1.6,.4,1) both; }
+.sign-stamp { animation: sign-stamp .35s ease-in both; }
+.sign-stamp .sign-sym { border: 10px solid var(--c); border-radius: 26px; padding: 0 22px; transform: rotate(-12deg); display: inline-block; background: rgba(255,255,255,.85); }
+.sign-rise { animation: sign-rise .7s cubic-bezier(.2,1.3,.4,1) both; }
+.sign-shake { animation: sign-pop .4s ease both, sign-shake .5s .4s ease 2; }
+.sign-slide { animation: sign-slide .5s ease both; }
+.sign-count .sign-sym { font-size: 220px; color: #c0392b; }
+.sign-count .sign-sym.beat { animation: sign-beat .9s ease both; }
+.sign-count.go .sign-sym { color: #27ae60; font-size: 160px; }
+.sign.out { animation: sign-out .45s ease forwards; }
+@keyframes sign-pop { from { transform: translate(-50%, -50%) scale(.2); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+@keyframes sign-stamp { from { transform: translate(-50%, -50%) scale(3); opacity: 0; } 80% { transform: translate(-50%, -50%) scale(.92); opacity: 1; } to { transform: translate(-50%, -50%) scale(1); } }
+@keyframes sign-rise { from { transform: translate(-50%, 40vh) scale(.6); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+@keyframes sign-shake { 25% { margin-left: -14px; } 75% { margin-left: 14px; } }
+@keyframes sign-slide { from { transform: translate(40vw, -50%); opacity: 0; } to { transform: translate(-50%, -50%); opacity: 1; } }
+@keyframes sign-beat { from { transform: scale(1.8); opacity: 0; } 30% { transform: scale(1); opacity: 1; } to { transform: scale(.85); opacity: .2; } }
+@keyframes sign-out { to { opacity: 0; transform: translate(-50%, -60%) scale(.8); } }
+.mark { position: fixed; z-index: 27; pointer-events: none; }
+.mark.out { animation: sign-fade .45s ease forwards; }
+@keyframes sign-fade { to { opacity: 0; } }
+.mark-glow { border-radius: 12px; box-shadow: 0 0 0 4px var(--c), 0 0 28px 8px var(--c); animation: mark-glow 1s ease-in-out infinite alternate; }
+@keyframes mark-glow { from { box-shadow: 0 0 0 3px var(--c), 0 0 10px 2px var(--c); } to { box-shadow: 0 0 0 5px var(--c), 0 0 34px 12px var(--c); } }
+.mark-box { border: 5px solid var(--c); border-radius: 10px; animation: sign-pop .35s ease both; }
+.mark-underline::after { content: ''; position: absolute; left: 0; right: 0; bottom: -8px; height: 12px; border-radius: 8px; background: var(--c); opacity: .75; transform-origin: right; animation: mark-sweep .6s ease both; }
+@keyframes mark-sweep { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.mark-circle svg { position: absolute; inset: -14%; width: 128%; height: 128%; overflow: visible; }
+.mark-circle path { fill: none; stroke: #e74c3c; stroke-width: 3.2; stroke-linecap: round; vector-effect: non-scaling-stroke; stroke-dasharray: 400; stroke-dashoffset: 400; animation: mark-draw .8s ease forwards; }
+.mark-circle path { stroke-width: 5px; }
+@keyframes mark-draw { to { stroke-dashoffset: 0; } }
+.mark-arrow { display: flex; align-items: center; justify-content: flex-start; font-size: 70px; transform: translateX(105%); animation: mark-arrow .7s ease-in-out infinite alternate; }
+@keyframes mark-arrow { from { margin-left: 18px; } to { margin-left: 0; } }
+.mark-stamp_correct, .mark-stamp_wrong { display: flex; align-items: center; justify-content: center; font-size: 90px; font-weight: 900; color: var(--c); animation: sign-stamp-in .35s ease-in both; }
+@keyframes sign-stamp-in { from { transform: scale(3) rotate(-20deg); opacity: 0; } to { transform: scale(1) rotate(-10deg); opacity: .92; } }

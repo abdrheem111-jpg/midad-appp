@@ -16,6 +16,8 @@ import { parse as parseExpr } from '../../core/math-expr.js';
 import { MATH_TASKS } from '../../core/math-input.js';
 import { mathDeck } from '../../core/math-deck.js';
 import { geometryFigure } from '../../core/geometry.js';
+import { MOVE_NAMES } from '../../renderer/animations.js';
+import { SIGN_NAMES } from '../../core/sign-names.js';
 
 /** «hwnd\tprocess\tstate\tx,y,w,h\ttitle» lines from the hands process. */
 export function parseWindows(data) {
@@ -145,11 +147,12 @@ export function khalfounTools(ctx) {
     },
     {
       name: 'press_keys',
-      description: 'Press a key or shortcut like "enter", "ctrl+s", "ctrl+z", "alt+tab", "win", "f5", "ctrl+shift+n". times repeats it. Shortcuts that close or delete ask the teacher first.',
+      description: 'Press a key or shortcut like "enter", "ctrl+s", "ctrl+z", "alt+tab", "win", "f5", "ctrl+shift+n". times repeats it. The teacher wants things done at once: no asking («تراجع» takes it back).',
       schema: { keys: z.string().min(1).max(40), times: z.number().int().min(1).max(50).optional() },
       handler: async ({ keys, times }) => {
         const k = keys.toLowerCase().replace(/\s+/g, '').replace(/control/g, 'ctrl').replace(/escape/g, 'esc');
-        if (keysNeedConsent(k) && !(await ask(`أضغط ${keys}؟ ممكن يسكّر أو يحذف شي.`))) return text('المعلم ما وافق، ما ضغطت.');
+        // Khalfoun 3.1: done at once (the teacher asked for no confirmations); only in «اسأل قبل» mode it asks
+        if (ctx.askFirst?.() && keysNeedConsent(k) && !(await ask(`أضغط ${keys}؟ ممكن يسكّر أو يحذف شي.`))) return text('المعلم ما وافق، ما ضغطت.');
         return act({ type: 'key_combo', params: { keys: k, ...(times ? { times } : {}) } }, `ضغطت ${keys}.`);
       },
     },
@@ -201,7 +204,7 @@ export function khalfounTools(ctx) {
         if (action === 'close') {
           const res = await ctx.run({ type: 'window_list', params: {} });
           const w = res.ok ? parseWindows(res.data).find((x) => x.id === id) : null;
-          if (w && /\*|غير محفوظ|unsaved/i.test(w.title) && !(await ask(`أسكّر «${w.title}»؟ يمكن فيه شغل مو محفوظ.`))) return text('المعلم ما وافق، ما سكرت.');
+          if (ctx.askFirst?.() && w && /\*|غير محفوظ|unsaved/i.test(w.title) && !(await ask(`أسكّر «${w.title}»؟ يمكن فيه شغل مو محفوظ.`))) return text('المعلم ما وافق، ما سكرت.');
         }
         const res = await ctx.run({ type: 'window_op', params: { hwnd: id, op: action } });
         const done = { focus: 'جبتها قدام.', minimize: 'صغّرتها.', maximize: 'كبّرتها.', restore: 'رجعتها.', close: 'سكرتها.' }[action];
@@ -256,9 +259,9 @@ Any item may have color (${COLOR_IDS.join(', ')}) and width. Write maths the Oma
       description: `A playful effect to change the mood of the lesson, on ANY piece of the screen (a question in the PDF, a slide, a picture, a word…) or over all of it. The real window is never changed: Khalfoun animates a picture of that piece.
 Region effects (x,y,w,h = the piece in picture pixels, from the screenshot): crumple (crumpled into a paper ball and thrown in a bin), shatter (breaks like glass), burn (burns away), plane (folds into a paper plane and flies off), flip (a card that flips to show text: put the answer in "text"), zoom (a magnifying lens), spotlight (everything dark except it), shake (shakes to draw attention), pop (blows up like a balloon and bursts), melt (melts down).
 The piece looks gone for a few seconds (hold, 1-60) then the screen shows again; keep:true keeps it hidden until screen_clear.
-Over the whole screen (no x,y,w,h): confetti, fireworks, balloons, stars, hearts, bubbles, snow, rain, lanterns, national (Omani flag).`,
+Over the whole screen (no x,y,w,h): confetti, fireworks, balloons, stars, hearts, bubbles, snow, rain, lanterns, national (Omani flag), numbers (a rain of digits and maths signs), emoji, gold, claps, thumbs, hundred (💯 bursts), oman (palms, camels, falcons), shooting_stars, ripple, rainbow, sparkle_burst, party (everything at once, for the biggest moments).`,
       schema: {
-        effect: z.enum(['crumple', 'shatter', 'burn', 'plane', 'flip', 'zoom', 'spotlight', 'shake', 'pop', 'melt', 'confetti', 'fireworks', 'balloons', 'stars', 'hearts', 'bubbles', 'snow', 'rain', 'lanterns', 'national']),
+        effect: z.enum(['crumple', 'shatter', 'burn', 'plane', 'flip', 'zoom', 'spotlight', 'shake', 'pop', 'melt', 'confetti', 'fireworks', 'balloons', 'stars', 'hearts', 'bubbles', 'snow', 'rain', 'lanterns', 'national', 'numbers', 'emoji', 'gold', 'claps', 'thumbs', 'hundred', 'oman', 'shooting_stars', 'ripple', 'rainbow', 'sparkle_burst', 'party']),
         x: z.number().optional(), y: z.number().optional(), w: z.number().optional(), h: z.number().optional(),
         text: z.string().max(80).optional(), hold: z.number().min(1).max(60).optional(), keep: z.boolean().optional(),
         color: z.enum(COLOR_IDS).optional(),
@@ -357,6 +360,44 @@ Over the whole screen (no x,y,w,h): confetti, fireworks, balloons, stars, hearts
         const r = await ctx.ui('ink', { op: 'sketch', shapes, color: 'blue' });
         const m = Object.entries(f.measures).filter(([k]) => k !== 'ok').map(([k, v]) => `${k}=${v}`).join('، ');
         return r?.ok === false ? fail('حسبت القياسات بس ما قدرت أرسم.') : text(`رسمت الشكل بالقياس. القياسات (محسوبة بدقة): ${m}`);
+      },
+    },
+    {
+      name: 'move',
+      description: `Make Khalfoun's body do a move — he is a living cartoon, so move while you talk and react (one move at a time). Teaching: point_up point_down point_left point_right present teacher_point explain_hands count_fingers measure typing read_glasses write_fast calculate lightbulb. Yes/no/attention: yes_yes no_no attention silence listen_hard wink nod head_shake shush. Praise: thumbs_up victory fist_pump high_five clap clap_fast standing_ovation bow_deep salute hip_hip cheer celebrate proud. Fun: happy_dance robot_dance dance twirl wiggle drum drumroll magic falcon camel_ride cane_dance omani_greet jog hop3 spin bounce peekaboo. Reactions: surprised scared tired arms_crossed hands_on_hips mock_angry sneaky look_up look_down lean_curious hiccup stargaze meditate strong sweep facepalm shrug laugh shy confused think idea amazed sad sleep yawn stretch wave.`,
+      schema: { name: z.enum(MOVE_NAMES) },
+      handler: async ({ name }) => { ctx.ui('move', { name }, 2000).catch(() => {}); return text('ok'); },
+    },
+    {
+      name: 'sign',
+      description: 'A big sign or stamp on the screen with its own sound, for the class: correct (✔ صح) wrong (✘ خطأ) excellent great well_done genius hundred (💯) fire star trophy medal crown level_up try_again almost oops think idea question quiet (🤫) attention eyes (👀 ركّزوا) stop time_up go next homework break_time group_work pairs hands_up wow welcome bye heart drumroll countdown (٣ ٢ ١ يلا!). text replaces the words (e.g. a student\'s name: «أحسنت يا أحمد»).',
+      schema: { name: z.enum(SIGN_NAMES), text: z.string().max(40).optional(), seconds: z.number().min(1).max(8).optional(), from: z.number().int().min(1).max(10).optional() },
+      handler: async (p) => { const r = await ctx.ui('sign', p); return r?.ok ? text('طلعت الإشارة.') : fail('ما طلعت.'); },
+    },
+    {
+      name: 'mark',
+      description: 'Mark a piece of the screen (x,y,w,h in look_screen picture pixels): glow (a glowing frame), underline (a marker sweep under it), circle (a hand-drawn red circle round it), arrow (a big arrow pointing at it), box, stamp_correct / stamp_wrong (a ✔ or ✘ stamped on a student\'s answer).',
+      schema: { kind: z.enum(['glow', 'underline', 'circle', 'arrow', 'stamp_correct', 'stamp_wrong', 'box']), x: z.number(), y: z.number(), w: z.number().positive(), h: z.number().positive(), seconds: z.number().min(1).max(30).optional() },
+      handler: async ({ kind, x, y, w, h, seconds }) => {
+        const a = ctx.screen.toOverlay(x, y); const b = ctx.screen.toOverlay(x + w, y + h);
+        const r = await ctx.ui('mark', { kind, rect: { x: a.x, y: a.y, w: Math.max(4, b.x - a.x), h: Math.max(4, b.y - a.y) }, seconds });
+        return r?.ok ? text('علّمتها.') : fail('ما زبط.');
+      },
+    },
+    {
+      name: 'question_board',
+      description: 'Put a question alone on a clean white page, big and easy to read, so the teacher can explain and solve it (the pen, steps and graphs work on it). region: the question\'s box in look_screen picture pixels (it is taken sharp from the screen). text: the question typed cleanly (exactly as written, no solution; maths as 2x^2 - 3 = 0) — use it when the teacher asks «اكتبه نظيف» or when the picture is hard to read. Both may be given. «شل السؤال الثاني»: look_screen first, find it, then call this.',
+      schema: { region: z.object({ x: z.number(), y: z.number(), w: z.number().positive(), h: z.number().positive() }).optional(), text: z.string().max(1500).optional(), title: z.string().max(60).optional() },
+      handler: async ({ region, text: t, title }) => {
+        if (!region && !t) return fail('أعطني مكان السؤال أو نصه.');
+        let image;
+        if (region) {
+          const r = await ctx.snap(region, { max: 2600 });
+          if (!r?.ok) return fail('ما قدرت آخذ السؤال من الشاشة.');
+          image = r.image;
+        }
+        const u = await ctx.ui('qboard', { ...(image ? { image } : {}), ...(t ? { text: t } : {}), ...(title ? { title } : {}) });
+        return u?.ok ? text('السؤال على السبورة البيضاء.') : fail('ما قدرت أعرضه.');
       },
     },
     {

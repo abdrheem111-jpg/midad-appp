@@ -115,7 +115,7 @@ test('main validates PDF actions', () => {
 
 test('brain: writing asks first at level 2, signing needs a name and uses today', () => {
   const now = new Date(2026, 10, 10, 9).getTime();
-  const b = new Brain({ memoryData: { ...defaultMemory(now), onboarded: true, level: 2, name: '' }, clock: () => now });
+  const b = new Brain({ memoryData: { ...defaultMemory(now), onboarded: true, level: 2, askFirst: true, name: '' }, clock: () => now });
   const ask = b.hear('اكتب موافق في ملف البي دي اف');
   assert.equal(ask.awaitingConfirm, true);
   assert.match(ask.say, /نسخة جديدة/);

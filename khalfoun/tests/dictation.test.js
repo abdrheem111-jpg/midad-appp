@@ -43,7 +43,7 @@ test('dictation into the active window: each sentence typed, «امسح آخر �
 });
 
 test('dictation asks once at the assistant level, is refused in kids mode and at the first level', () => {
-  const { brain } = makeBrain({ level: 2 });
+  const { brain } = makeBrain({ level: 2, askFirst: true });
   const ask = brain.hear('خلني املي عليك');
   assert.equal(ask.awaitingConfirm, true);
   assert.equal(brain.hear('ايوه').situation, 'dictation_start');
@@ -95,9 +95,9 @@ test('keyboard by voice: phrases, risk and validation', () => {
   for (const [text, key] of cases) assert.deepEqual([recognize(text).intent, recognize(text).slots.key], ['key', key], text);
   assert.equal(recognize('تراجع عن الترتيب').intent, 'undo_organize');
   assert.equal(recognize('قصة جميلة').intent !== 'key', true);
-  assert.equal(decide({ type: 'press_key', params: { key: 'copy' } }, { level: 2 }).confirm, false);
-  assert.equal(decide({ type: 'press_key', params: { key: 'paste' } }, { level: 2 }).confirm, true);
-  assert.equal(decide({ type: 'press_key', params: { key: 'paste' } }, { level: 2, kidsMode: true }).allowed, false);
+  assert.equal(decide({ type: 'press_key', params: { key: 'copy' } }, { level: 2, askFirst: true }).confirm, false);
+  assert.equal(decide({ type: 'press_key', params: { key: 'paste' } }, { level: 2, askFirst: true }).confirm, true);
+  assert.equal(decide({ type: 'press_key', params: { key: 'paste' } }, { level: 2, askFirst: true, kidsMode: true }).allowed, false);
   assert.equal(validateAction({ type: 'press_key', params: { key: 'copy' } }), null);
   assert.equal(validateAction({ type: 'press_key', params: { key: '^%{DEL}' } }), 'bad_key');
   const { brain } = makeBrain();

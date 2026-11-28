@@ -11,7 +11,7 @@ import {
 
 const RIDDLE_TTL = 4 * 60000;
 const COMMAND_START = /^(?:يا خلفون |خلفون )?(?:افتح|فج|سكر|اقفل|شغل|دور|ابحث|اكتب|ذكرني|ارفع|وطي|اكتم|وقف|صور|اختار|اختر|لف|ابدا|قسم|اعط|عط|سجل|صدر|نجمه|احتفل|غايب|كم|شو|متى|وين|قول|تعال|روح|نام|ارقص|حل)(?:\s|$)/u;
-const EFFECT_NAMES = new Set(['confetti', 'fireworks', 'national', 'rain', 'snow', 'lanterns', 'balloons', 'stars', 'hearts', 'bubbles']);
+const EFFECT_NAMES = new Set(['confetti', 'fireworks', 'national', 'rain', 'snow', 'lanterns', 'balloons', 'stars', 'hearts', 'bubbles', 'numbers', 'emoji', 'gold', 'claps', 'thumbs', 'hundred', 'oman', 'shooting_stars', 'ripple', 'rainbow', 'sparkle_burst', 'party']);
 
 /** «أحمد ومريم وسالم» for a list of names. */
 export function joinNames(list) {

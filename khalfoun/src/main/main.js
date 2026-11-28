@@ -81,6 +81,8 @@ const MIME = {
 // The ear's WebAssembly runtime: exactly these three files of onnxruntime-web, nothing else of node_modules.
 const ORT_FILES = new Set(['ort.wasm.min.mjs', 'ort-wasm-simd-threaded.mjs', 'ort-wasm-simd-threaded.wasm'].map((f) => join('node_modules', 'onnxruntime-web', 'dist', f)));
 const DEFAULT_SETTINGS = { onboarded: false, level: 0, kidsMode: false };
+// Khalfoun 3.1: the teacher asked for commands to be done at once (full level, no confirmations)
+const DIRECT_VERSION = 1;
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -704,7 +706,7 @@ function sanitizeSettingsPatch(patch) {
   if ('digits' in patch && ['arabic', 'latin'].includes(patch.digits)) out.digits = patch.digits;
   if ('voiceName' in patch && VOICE_IDS.includes(patch.voiceName)) out.voiceName = patch.voiceName;
   if ('provider' in patch) out.provider = patch.provider === 'apikey' ? 'apikey' : 'subscription';
-  for (const k of ['privacyMask', 'maskPhotos', 'fxEnabled', 'suggestions', 'bargeIn', 'yellowCountdown', 'streamStt']) if (k in patch) out[k] = !!patch[k];
+  for (const k of ['privacyMask', 'maskPhotos', 'fxEnabled', 'suggestions', 'bargeIn', 'yellowCountdown', 'streamStt', 'askFirst']) if (k in patch) out[k] = !!patch[k];
   if ('suggestEvery' in patch) out.suggestEvery = Math.min(60, Math.max(5, Math.round(Number(patch.suggestEvery)) || 10));
   return out; // remoteKey is set through remote:set (checked and registered there)
 }
@@ -861,6 +863,14 @@ function setupIpc(stores, executor) {
   });
   ipcMain.on('stt:stream-cancel', (event) => { if (fromApp(event)) { stream?.cancel(); stream = null; } });
   // ----- the weekly participation report (Excel, in Documents\خلفون)
+  // the question board: the rectangle the teacher drew, taken sharp from the screen (Khalfoun hidden, cameras covered)
+  ipcMain.handle('screen:region', async (event, r) => {
+    if (!fromApp(event) || !r || ![r.x, r.y, r.w, r.h].every(Number.isFinite) || r.w < 8 || r.h < 8) return { ok: false, error: 'bad' };
+    if (!mind) return { ok: false, error: 'no_eyes' };
+    const res = await mind.snap({ x: r.x, y: r.y, w: r.w, h: r.h }, { overlay: true, max: 2600 });
+    diag.write('question board: took', `${Math.round(r.w)}×${Math.round(r.h)}`, res.ok ? 'ok' : res.error);
+    return res;
+  });
   ipcMain.handle('actions:recent', (event) => (fromApp(event) ? actionLog.slice(-100).reverse() : []));
   ipcMain.handle('inbox:add', (event, it) => {
     if (!fromApp(event)) return null;
@@ -1107,6 +1117,7 @@ function setupIpc(stores, executor) {
       name: String(c.name || '').slice(0, 60), via: c.via === 'typed' ? 'typed' : 'voice', session: c.session === true, voice: c.voice === true,
       students: Array.isArray(c.students) ? c.students.map((x) => String(x).slice(0, 40)).slice(0, 40) : [],
       notes: Array.isArray(c.notes) ? c.notes.map((x) => String(x).slice(0, 200)).slice(-12) : [],
+      lesson: String(c.lesson || '').slice(0, 600),
       period: String(c.period || '').slice(0, 80),
       window: fg?.ok ? fg.data.title : '', app: fg?.ok ? fg.data.process : '',
     }, image);
@@ -1764,6 +1775,11 @@ async function start() {
   };
   secrets = await new CloudSecrets(stores.cloud, safeStorage).load();
   settings = { ...DEFAULT_SETTINGS, ...(await stores.settings.read()) };
+  // Khalfoun 3.1, once: the teacher asked for his commands to be done directly → full level, no countdown
+  if ((settings.direct || 0) < DIRECT_VERSION && !SMOKE) {
+    settings = { ...settings, direct: DIRECT_VERSION, yellowCountdown: false, askFirst: false, level: settings.onboarded && !settings.kidsMode ? Math.max(3, Number(settings.level) || 0) : settings.level };
+    await stores.settings.write(settings);
+  }
   voiceDirs = [...sharedDirs(userData, 'voice'), join(ROOT, 'voice')]; // Khalfoun 2's whisper is used, not copied
   diag.write('khalfoun 3 first-run copy from khalfoun 2:', migration);
   const metricsFile = join(userData, 'metrics.json');

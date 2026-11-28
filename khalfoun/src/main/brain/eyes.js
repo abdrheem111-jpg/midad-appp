@@ -41,6 +41,7 @@ export function screenMap(display, max = PICTURE_MAX) {
       return { x: p.x, y: p.y, w: Math.max(1, Math.round((b.w * s) / sf)), h: Math.max(1, Math.round((b.h * s) / sf)) };
     },
     fromPhysical: (x, y) => ({ x: Math.round((x - ox) / s), y: Math.round((y - oy) / s) }),
+    fromOverlay: (x, y) => ({ x: ((x + offX) * sf) / s, y: ((y + offY) * sf) / s }),
     size: () => map.picture,
   };
   return map;
@@ -111,16 +112,20 @@ export function createEyes(deps) {
    * A piece of the screen as a picture, for a playful effect on it (a question crumpled into a
    * ball...): the region in picture pixels → a PNG at the overlay's size and where it sits there.
    */
-  async function snap(region) {
+  async function snap(region, { max = 1800, overlay = false } = {}) {
     const c = await capture();
     if (!c) return { ok: false, error: 'no_screen' };
     const { shot, map } = c;
+    if (overlay) { // a rectangle the teacher drew on the overlay (overlay pixels) → picture pixels
+      const a = map.fromOverlay(region.x, region.y); const b = map.fromOverlay(region.x + region.w, region.y + region.h);
+      region = { x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y };
+    }
     const p1 = map.toPhysical(region.x, region.y); const p2 = map.toPhysical(region.x + region.w, region.y + region.h);
     const size = shot.getSize();
     const x = Math.max(0, Math.min(size.width - 8, p1.x)); const y = Math.max(0, Math.min(size.height - 8, p1.y));
     const rect = { x, y, width: Math.max(8, Math.min(size.width - x, p2.x - p1.x)), height: Math.max(8, Math.min(size.height - y, p2.y - p1.y)) };
     let img = shot.crop(rect);
-    if (rect.width > 1800) img = img.resize({ width: 1800, quality: 'good' }); // plenty for an animation
+    if (rect.width > max) img = img.resize({ width: max, quality: 'best' }); // plenty for an animation; the board keeps more
     const o1 = map.toOverlay(region.x, region.y); const o2 = map.toOverlay(region.x + region.w, region.y + region.h);
     return { ok: true, image: `data:image/png;base64,${img.toPNG().toString('base64')}`, rect: { x: o1.x, y: o1.y, w: Math.max(4, o2.x - o1.x), h: Math.max(4, o2.y - o1.y) } };
   }

@@ -2,6 +2,8 @@
 // character rig understands (angles in degrees, offsets in SVG units).
 // Pure: no DOM, so they are unit-tested in Node.
 
+import { MORE_ANIMATIONS } from './animations-more.js';
+
 const S = Math.sin;
 const PI2 = Math.PI * 2;
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
@@ -81,6 +83,12 @@ export const ANIMATIONS = {
 };
 
 /** The animation that shows an emotion when the brain gives no explicit hint. */
+// Khalfoun 3.1: the big library of extra moves joins the core ones (a core move keeps its name).
+for (const [name, a] of Object.entries(MORE_ANIMATIONS)) if (!ANIMATIONS[name]) ANIMATIONS[name] = a;
+
+/** Every move with a few Arabic words about it (for Claude's tool description and the teacher). */
+export const MOVE_NAMES = Object.keys(ANIMATIONS);
+
 export const EMOTION_ANIMATION = {
   calm: null, happy: 'happy', proud: 'proud', excited: 'excited', amazed: 'amazed', curious: 'think',
   focused: 'cast', confused: 'confused', shy: 'shy', grateful: 'nod', longing: 'celebrate', sad: 'sad',

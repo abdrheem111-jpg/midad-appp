@@ -89,6 +89,8 @@ export function decide(action, settings) {
 
   if (level <= LEVELS.ACQUAINT) return { allowed: false, confirm: false, reason: 'level_too_low' };
   if (risk === 'destructive') return { allowed: true, confirm: true, reason: 'destructive' };
+  // Khalfoun 3.1: the teacher wants his commands done at once — no «تبي أسوي؟» unless he turns on «اسأل قبل»
+  if (settings?.askFirst !== true) return { allowed: true, confirm: false, reason: 'ok' };
   if (level === LEVELS.ASSISTANT) {
     if (risk === 'modify') return { allowed: true, confirm: true, reason: 'modify_needs_yes' };
     return { allowed: true, confirm: false, reason: 'ok' };
@@ -114,6 +116,7 @@ export function isKidsSafeUrl(url) {
 export const YELLOW = new Set(['close_app', 'office_pdf', 'save_sheet', 'organize_downloads', 'undo_organize', 'pdf_write']);
 export function colorOf(action, settings) {
   const v = decide(action, settings);
+  // direct mode: nothing waits (the yellow countdown only when the teacher turned it on)
   if (ACTION_RISK[action?.type] === 'destructive' || v.confirm) return 'red';
   if (YELLOW.has(action?.type) || (action?.type === 'window_op' && action.params?.op === 'close')) return 'yellow';
   return 'green';

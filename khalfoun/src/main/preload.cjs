@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('khalfoun', {
     streamEnd: () => ipcRenderer.invoke('stt:stream-end'),
     streamCancel: () => ipcRenderer.send('stt:stream-cancel'),
   },
+  screen: { region: (r) => ipcRenderer.invoke('screen:region', r && typeof r === 'object' ? { x: Number(r.x), y: Number(r.y), w: Number(r.w), h: Number(r.h) } : {}) },
   actions: { recent: () => ipcRenderer.invoke('actions:recent') },
   inbox: { add: (it) => ipcRenderer.invoke('inbox:add', it && typeof it === 'object' ? it : {}) },
   report: { weekly: (data) => ipcRenderer.invoke('report:weekly', data && typeof data === 'object' ? data : {}) },

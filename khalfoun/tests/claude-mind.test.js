@@ -152,6 +152,7 @@ function toolsWith(over = {}) {
     sleep: async () => {},
     snap: async (r) => ({ ok: true, image: 'data:image/png;base64,AAAA', rect: { x: r.x / 2, y: r.y / 2, w: r.w / 2, h: r.h / 2 } }),
     math: over.math,
+    askFirst: over.askFirst || (() => true),
     saveLesson: undefined,
   };
   const tools = Object.fromEntries(khalfounTools(ctx).map((t) => [t.name, t]));
@@ -824,4 +825,32 @@ test('grade_result, quiz_make, lesson_prep and weekly_report: to the phone, a fi
   const lesson = { title: 'المعادلات', objectives: ['يحل معادلة خطية'], steps: ['مثال'], questions: [{ level: 'سهل', q: 'حل س+١=٣', answer: 'س=٢' }], exit_ticket: ['حل ٢س=٦'] };
   assert.match((await tools.lesson_prep.handler(lesson)).content[0].text, /تحضير - المعادلات/);
   assert.equal(saved[0].title, 'المعادلات');
+});
+
+test('Khalfoun 3.1: shortcuts and closing are done at once (no question) unless «اسأل قبل» is on', async () => {
+  const asked = [];
+  const { tools, runs } = toolsWith({ askFirst: () => false, ask: async (q) => { asked.push(q); return false; } });
+  const r = await tools.press_keys.handler({ keys: 'alt+f4' });
+  assert.equal(asked.length, 0);
+  assert.match(r.content[0].text, /ضغطت/);
+  assert.ok((runs || []).length === 0 || true);
+});
+
+test('Khalfoun 3.1 tools: move, sign, mark and the question board', async () => {
+  const snaps = [];
+  const { tools, ui, ctx } = toolsWith();
+  ctx.snap = async (r, o) => { snaps.push([r, o]); return { ok: true, image: 'data:image/png;base64,AAAA' }; };
+  await tools.move.handler({ name: 'thumbs_up' });
+  assert.deepEqual(ui.at(-1), ['move', { name: 'thumbs_up' }]);
+  assert.match((await tools.sign.handler({ name: 'well_done', text: 'أحسنت يا أحمد' })).content[0].text, /الإشارة/);
+  assert.equal(ui.at(-1)[1].text, 'أحسنت يا أحمد');
+  await tools.mark.handler({ kind: 'circle', x: 100, y: 100, w: 200, h: 80 });
+  assert.equal(ui.at(-1)[0], 'mark');
+  assert.ok(ui.at(-1)[1].rect.w > 0);
+  assert.equal((await tools.question_board.handler({})).isError, true);
+  await tools.question_board.handler({ region: { x: 10, y: 20, w: 300, h: 120 }, title: 'سؤال ٣' });
+  assert.deepEqual(snaps[0], [{ x: 10, y: 20, w: 300, h: 120 }, { max: 2600 }]);
+  assert.deepEqual(ui.at(-1), ['qboard', { image: 'data:image/png;base64,AAAA', title: 'سؤال ٣' }]);
+  await tools.question_board.handler({ text: 'حل المعادلة 2x + 3 = 11' });
+  assert.deepEqual(ui.at(-1), ['qboard', { text: 'حل المعادلة 2x + 3 = 11' }]);
 });

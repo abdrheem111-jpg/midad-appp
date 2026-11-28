@@ -124,6 +124,18 @@ function createPreviewBridge() {
       async report() { return { report: [], lines: ['• ما انقاس بعد'] }; },
     },
     math: { async solve() { return { ok: false, error: 'preview' }; } },
+    screen: {
+      async region(r) { // a made-up question, the size of the rectangle
+        const c = document.createElement('canvas'); c.width = Math.max(40, r.w * 2); c.height = Math.max(30, r.h * 2);
+        const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.fillStyle = '#111'; x.font = `${Math.round(c.height / 3)}px Tahoma`; x.textAlign = 'center'; x.direction = 'rtl';
+        x.fillText('س٣: حل المعادلة ٢س + ٣ = ١١', c.width / 2, c.height / 1.7);
+        window.__regionAsked = r;
+        return { ok: true, image: c.toDataURL('image/png') };
+      },
+    },
+    actions: { async recent() { return [{ at: Date.now(), type: 'open_app', what: 'word', ok: true, error: '' }]; } },
+    inbox: { async add(it) { (window.__inbox ||= []).push(it); return { id: `i${window.__inbox.length}` }; } },
+    report: { async weekly() { return { ok: true, file: 'x.xlsx', summary: 'تجربة' }; } },
     phone: {
       state(st) { window.__phoneState = st; },
       async start() { window.__phoneOn = true; return this.info(); },

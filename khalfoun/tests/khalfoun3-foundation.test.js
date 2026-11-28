@@ -120,7 +120,7 @@ test('executor: the emergency stop blocks everything, yellow waits for the teach
   let halted = false; let answer = true; const asked = [];
   const hands = { call: async (op, a) => { keys.push([op, a]); return { ok: true, data: '' }; } };
   const ex = createExecutor({
-    platform: p, getSettings: () => ({ level: 3 }), downloadsDir: '/d', journal: { read: async () => ({}), write: async () => {} }, scheduleReminder: () => {},
+    platform: p, getSettings: () => ({ level: 3, yellowCountdown: true }), downloadsDir: '/d', journal: { read: async () => ({}), write: async () => {} }, scheduleReminder: () => {},
     hands, isHalted: () => halted, softConfirm: async (a) => { asked.push(a.type); return answer; }, beforeClick: async (pt) => keys.push(['marker', pt.x]),
   });
   halted = true;
