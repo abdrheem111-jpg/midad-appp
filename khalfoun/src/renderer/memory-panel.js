@@ -59,6 +59,13 @@ export class MemoryPanel {
     this.section('الروتينات (قلها باسمها وتتنفذ)', routines.map(([k, r]) => this.row(`«${r.name || k}»: ${(r.steps || []).join(' ← ')}`, () => {
       const all = { ...(this.d.getData().routines || {}) }; delete all[k]; this.d.setData({ routines: all });
     })), 'ما فيه روتينات. قل «سجل روتين ابدأ الحصة» وبعدها الخطوات، وفي الأخير «خلاص الروتين».');
+    const pron = Object.entries(data.pronounce || {});
+    this.section('نطق الكلمات (صوته)', pron.map(([w, say]) => this.row(`«${w}» ينقال: ${say}`, () => {
+      const all = { ...(this.d.getData().pronounce || {}) }; delete all[w]; this.d.setData({ pronounce: all });
+    }, () => {
+      const v = prompt(`كيف ينقال «${w}»؟ (اكتبه بالتشكيل)`, say);
+      if (v && v.trim()) { this.d.setData({ pronounce: { ...(this.d.getData().pronounce || {}), [w]: v.trim().slice(0, 40) } }); this.show('memory'); }
+    })), 'فاضي. إذا نطق كلمة غلط قول: «انطق الكلمة كذا: …».');
     const dict = Object.entries(data.dictionary || {});
     this.section('قاموس لهجتك', dict.map(([from, to]) => this.row(`«${from}» يعني «${to}»`, () => {
       const all = { ...(this.d.getData().dictionary || {}) }; delete all[from]; this.d.setData({ dictionary: all });

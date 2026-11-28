@@ -35,7 +35,8 @@ test('speech: a long reply becomes whole sentences (no pause after every word)',
 test('speech: Claude is asked for tashkeel only when the voice is on', () => {
   assert.match(turnContext({ voice: true }), /صوتك شغال/);
   assert.doesNotMatch(turnContext({}), /صوتك شغال/);
-  assert.match(personaPrompt({}), /مشكّل تشكيل كامل/);
+  assert.match(personaPrompt({}), /شكّل بس الكلمات اللي ممكن تنقرأ غلط/); // Khalfoun 3.1: light tashkeel, no case endings
+  assert.match(personaPrompt({}), /بدون إعراب/);
 });
 
 test('speech: the chosen voice is asked first, a natural pace, little pitch shift', async () => {
@@ -45,5 +46,5 @@ test('speech: the chosen voice is asked first, a natural pace, little pitch shif
   const fetchFn = async (url, init) => { body = init.body; return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(4) }; };
   const r = await speakAzure({ key: 'k', region: 'uaenorth' }, 'هَلَا', { fetchFn, voices: ['ar-OM-AbdullahNeural'] });
   assert.equal(r.voice, 'ar-OM-AbdullahNeural');
-  assert.match(body, /<prosody rate="\+0%" pitch="\+4%">هَلَا<\/prosody>/);
+  assert.match(body, /<prosody rate="-5%" pitch="\+2%">هَلَا<\/prosody>/); // a calm, clear pace, the voice's own pitch
 });

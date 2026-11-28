@@ -1,7 +1,7 @@
 {
   "name": "khalfoun3",
   "productName": "خلفون ٣",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "خلفون ٣: مساعد كرتوني عُماني يعيش على سطح المكتب، يسمع الأوامر الصوتية وينفذها ويتفاعل بالمشاعر.",
   "type": "module",
   "main": "src/main/main.js",

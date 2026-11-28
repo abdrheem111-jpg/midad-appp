@@ -33,6 +33,7 @@ import { MORE_ANIMATIONS } from './animations-more.js';
 import { ANIMATIONS } from './animations.js';
 import { MemoryPanel } from './memory-panel.js';
 import { PersonaState } from '../core/persona-state.js';
+import { pronounceCommand, howDoYouSay, wordKey } from '../core/pronounce.js';
 import { LessonMemory, asksWhereWeStopped } from '../core/lesson-memory.js';
 import { currentClass } from '../core/schedule.js';
 import { Suggester, LessonWatch, momentFromWords, routineCommand, routinePattern, dictionaryCommand, applyDictionary } from '../core/proactive.js';
@@ -260,7 +261,8 @@ function handle(reply) {
 
 // ------------------------------------------------------- speaking voice
 
-const voiceOut = new VoiceOut();
+// his pronunciation: the built-in dictionary plus the teacher's own corrections (core/pronounce.js)
+const voiceOut = new VoiceOut({ lexicon: () => brain?.memory?.data?.pronounce || {} });
 // Playful effects on any piece of the screen (a question crumpled into a ball…).
 const screenFx = new ScreenFx(document.body, { celebrate: (kind) => { if (kind === 'pop') sounds.now('pop'); }, enabled: () => brain?.memory?.data?.fxEnabled !== false });
 // While he speaks, the always-on listener pauses so he does not hear himself.
@@ -1052,6 +1054,21 @@ function hear(text, opts = {}) {
     const m = momentFromWords(t) || lessonWatch.command();
     if (m) setTimeout(() => offerSuggestion(m), m === 'lesson_start' ? 20000 : 4000);
     rememberCommand(t);
+  }
+  // his pronunciation, taught by the teacher: «انطق الطابعة كذا: الطّابِعَة» / «كيف تنطق المعادلة؟»
+  const pc = pronounceCommand(t);
+  if (pc) {
+    brain.memory.set({ pronounce: { ...(brain.memory.data.pronounce || {}), [wordKey(pc.word)]: pc.say } });
+    bridge.note?.(`pronounce: «${pc.word}» → «${pc.say}»`);
+    showBubble(`تمام، من الحين أقول «${pc.word}» كذا: ${pc.say} 👍`, 'happy', true);
+    if (voiceOut.enabled) voiceOut.speak(`تمام. ${pc.word}`);
+    return;
+  }
+  const hs = howDoYouSay(t);
+  if (hs) {
+    showBubble(`أقولها: «${hs}». إذا غلط قول: «انطق ${hs} كذا: …» واكتبها بالتشكيل.`, 'calm', true);
+    if (voiceOut.enabled) voiceOut.speak(hs); else showBubble('شغّل صوتي من الإعدادات عشان تسمعني.', 'calm');
+    return;
   }
   // «وين وقفنا؟»: answered from his memory of the lessons, at once
   if (asksWhereWeStopped(nt)) {
@@ -2209,7 +2226,20 @@ function renderVoiceChoice() {
   if (!sel.options.length) sel.replaceChildren(...VOICE_CHOICES.map((v) => new Option(v.label, v.id)));
   sel.value = VOICE_IDS.includes(sysVoice) ? sysVoice : VOICE_IDS[0];
   $('voice-row').hidden = !(cloudInfo?.azure && cloudInfo.use?.voice !== false);
+  $('voice-rate').value = String(brain.memory.data.voiceRate ?? -5);
+  $('pron-row').hidden = !brain.memory.data.speak;
 }
+$('voice-rate')?.addEventListener('change', async () => {
+  const v = Number($('voice-rate').value);
+  await bridge.updateSettings?.({ voiceRate: v });
+  brain.memory.set({ voiceRate: v });
+  voiceOut.speak('هلا! هذي سرعتي الجديدة.');
+});
+$('pron-say')?.addEventListener('click', () => {
+  const t = $('pron-text').value.trim();
+  if (!t) return;
+  if (!voiceOut.speak(t)) showBubble('شغّل صوتي أول.', 'calm');
+});
 let sysVoice = null;
 $('voice-choice').addEventListener('change', async () => {
   sysVoice = $('voice-choice').value;

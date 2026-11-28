@@ -41,7 +41,7 @@ test('speaking: only when enabled, with the Arabic voice, replacing the previous
   assert.equal(v.speak('هلا'), false, 'off by default');
   v.setEnabled(true);
   assert.equal(v.speak('هلا والله'), true);
-  assert.equal(synth.spoken[0].text, 'هلا والله');
+  assert.equal(synth.spoken[0].text, 'هَلَا والله'); // the pronunciation dictionary gives «هلا» its vowels
   assert.equal(synth.spoken[0].voice.name, 'Hoda');
   assert.ok(synth.spoken[0].pitch > 1);
   assert.equal(started, 1);
@@ -78,7 +78,8 @@ test('the cloud voice reads a reply in whole sentences without gaps: the next is
   assert.equal(v.queue(long), true);
   await new Promise((r) => setTimeout(r, 0));
   assert.ok(fetched.length >= 2, 'the second sentence is fetched before the first finishes');
-  assert.ok(fetched.some((f) => /سين تربيع زائد 3 يساوي 12/.test(f)), fetched.join(' | '));
+  const plain = (f) => f.replace(/[\u064B-\u0652\u0670]/g, '');
+  assert.ok(fetched.some((f) => /سين تربيع زائد 3 يساوي 12/.test(plain(f))), fetched.join(' | '));
   assert.ok(fetched.every((f) => f.length <= 240));
   const total = fetched.length;
   // sentences play one after another as each ends

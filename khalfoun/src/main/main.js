@@ -707,6 +707,7 @@ function sanitizeSettingsPatch(patch) {
   if ('voiceName' in patch && VOICE_IDS.includes(patch.voiceName)) out.voiceName = patch.voiceName;
   if ('provider' in patch) out.provider = patch.provider === 'apikey' ? 'apikey' : 'subscription';
   for (const k of ['privacyMask', 'maskPhotos', 'fxEnabled', 'suggestions', 'bargeIn', 'yellowCountdown', 'streamStt', 'askFirst']) if (k in patch) out[k] = !!patch[k];
+  if ('voiceRate' in patch) out.voiceRate = Math.max(-25, Math.min(15, Math.round(Number(patch.voiceRate)) || 0));
   if ('suggestEvery' in patch) out.suggestEvery = Math.min(60, Math.max(5, Math.round(Number(patch.suggestEvery)) || 10));
   return out; // remoteKey is set through remote:set (checked and registered there)
 }
@@ -790,7 +791,7 @@ function setupIpc(stores, executor) {
   ipcMain.handle('voice:speak', async (event, text) => {
     if (!fromApp(event)) return { ok: false, error: 'forbidden' };
     if (!secrets.data.use.voice || !secrets.azure) return { ok: false, error: 'not_configured' };
-    const res = await speakAzure(secrets.azure, String(text || ''), { voices: voiceOrder(settings.voiceName) });
+    const res = await speakAzure(secrets.azure, String(text || ''), { voices: voiceOrder(settings.voiceName), rate: settings.voiceRate ?? -5 });
     if (!res.ok) diag.write('cloud voice failed', res.error);
     return res;
   });

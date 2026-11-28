@@ -61,7 +61,7 @@ const escapeXml = (s) => String(s).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>
  * Azure text to speech: an Omani voice, a little lively. Returns MP3 bytes.
  * @returns {Promise<{ok: true, audio: Uint8Array, voice: string} | {ok: false, error: string}>}
  */
-export async function speakAzure(cfg, text, { fetchFn = fetch, timeoutMs = 8000, voices = AZURE_VOICES } = {}) {
+export async function speakAzure(cfg, text, { fetchFn = fetch, timeoutMs = 8000, voices = AZURE_VOICES, rate = -5, pitch = 2 } = {}) {
   if (!cfg?.key || !AZURE_REGION_RE.test(cfg.region || '')) return { ok: false, error: 'not_configured' };
   const line = String(text || '').slice(0, 600).trim();
   if (!line) return { ok: false, error: 'empty' };
@@ -69,7 +69,9 @@ export async function speakAzure(cfg, text, { fetchFn = fetch, timeoutMs = 8000,
   for (const voice of voices) {
     const lang = voice.slice(0, 5);
     // A natural pace and only a little higher than the voice's own pitch (a big shift sounds robotic).
-    const ssml = `<speak version="1.0" xml:lang="${lang}"><voice name="${voice}"><prosody rate="+0%" pitch="+4%">${escapeXml(line)}</prosody></voice></speak>`;
+    // A calm, clear teacher's pace (a touch slower than the voice's own) and its own natural pitch.
+    const r = Math.max(-25, Math.min(15, Math.round(Number(rate) || 0))); const p = Math.max(-10, Math.min(10, Math.round(Number(pitch) || 0)));
+    const ssml = `<speak version="1.0" xml:lang="${lang}"><voice name="${voice}"><prosody rate="${r >= 0 ? '+' : ''}${r}%" pitch="${p >= 0 ? '+' : ''}${p}%">${escapeXml(line)}</prosody></voice></speak>`;
     try {
       const res = await withTimeout(fetchFn, `https://${cfg.region}.tts.speech.microsoft.com/cognitiveservices/v1`, {
         method: 'POST',

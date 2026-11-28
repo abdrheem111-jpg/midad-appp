@@ -113,6 +113,12 @@
     <div id="voice-row" class="setup-controls" hidden>
       <label class="fine">صوته: <select id="voice-choice"></select></label>
       <button id="voice-try" type="button" class="ghost">🔊 جرّب</button>
+      <label class="fine">سرعته: <select id="voice-rate"><option value="-14">أبطأ (أوضح)</option><option value="-5">هادئ ★</option><option value="0">عادي</option><option value="6">أسرع</option></select></label>
+    </div>
+    <div id="pron-row" class="setup-controls" hidden>
+      <input id="pron-text" type="text" placeholder="اكتب كلمة أو جملة وخلّه ينطقها" dir="rtl">
+      <button id="pron-say" type="button" class="ghost">🗣️ انطق</button>
+      <p class="fine">إذا نطق كلمة غلط، قول له: «انطق الكلمة كذا: …» واكتبها بالتشكيل (مثل: انطق الفلج كذا: الفَلَج). يتذكرها على طول.</p>
     </div>
     <label class="check"><input id="st-sounds" type="checkbox"> أصوات خلفون (همهمات ومؤثرات بدون كلام)</label>
     <label class="check"><input id="st-windows" type="checkbox"> يمشي فوق النوافذ المفتوحة</label>

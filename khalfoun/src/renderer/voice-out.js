@@ -3,10 +3,15 @@
 // the browser speech API. Off by default.
 
 import { spokenMath, sentenceChunks } from '../core/speech-text.js';
+import { forVoice } from '../core/pronounce.js';
 
-/** Text as it should be spoken: no emoji, no «(قول ...)» hints, maths read as words. */
-export function speakableText(text) {
-  return spokenMath(String(text || '')
+/**
+ * Text as it should be spoken: no emoji, no «(قول ...)» hints, maths read as words, then the
+ * pronunciation dictionary and the natural stop at the end of each sentence (core/pronounce.js).
+ * @param {Record<string, string>} [lexicon] the teacher's own corrections
+ */
+export function speakableText(text, lexicon) {
+  return forVoice(spokenMath(String(text || '')
     .replace(/\[[a-z]+\]\s*/gi, ' ')
     .replace(/\((?:قول|اكتب|مثلاً|مثلا)[^)]*\)/g, ' '))
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, ' ')
@@ -14,7 +19,7 @@ export function speakableText(text) {
     .replace(/[⏱⭐🥁]/gu, ' ')
     .replace(/\s*\n+\s*/g, '. ')
     .replace(/\s{2,}/g, ' ')
-    .trim();
+    .trim(), lexicon);
 }
 
 /** The best Arabic voice in a list (Omani or Gulf first), or null. */
@@ -39,6 +44,8 @@ export class VoiceOut {
     this.onEnd = null;
     /** @type {null | ((line: string) => Promise<{ok: boolean, audio?: Uint8Array}>)} cloud voice */
     this.remote = null;
+    /** @type {() => Record<string, string>} the teacher's pronunciation corrections */
+    this.lexicon = deps.lexicon || (() => ({}));
     this.AudioCtor = deps.Audio ?? (typeof Audio !== 'undefined' ? Audio : null);
     this.seq = 0;
     this.audio = null;
@@ -66,7 +73,7 @@ export class VoiceOut {
   /** Speaks a line (replacing whatever he was saying). Returns false when it could not. */
   speak(text) {
     if (!this.enabled || !this.available) return false;
-    const line = speakableText(text);
+    const line = speakableText(text, this.lexicon());
     if (!line) return false;
     this.stop();
     if (this.remote && this.AudioCtor) return this.queue(text);
@@ -79,7 +86,7 @@ export class VoiceOut {
    */
   queue(text) {
     if (!this.enabled || !this.available) return false;
-    const chunks = sentenceChunks(speakableText(text)).filter(Boolean);
+    const chunks = sentenceChunks(speakableText(text, this.lexicon())).filter(Boolean);
     if (!chunks.length) return false;
     if (!(this.remote && this.AudioCtor)) { for (const c of chunks) this.lines.push(c); this.pumpLocal(); return true; }
     const token = this.seq;
